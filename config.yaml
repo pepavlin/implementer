@@ -1,0 +1,20 @@
+server:
+  port: 3000
+  workspaceDir: ./workspace
+
+repositories:
+  - name: my-project
+    url: git@github.com:user/my-project.git
+    defaultBranch: main
+    allowedTools:
+      - Bash
+      - Read
+      - Write
+      - Edit
+      - Glob
+      - Grep
+
+claudeCode:
+  command: claude
+  maxTurns: 50
+  model: sonnet
