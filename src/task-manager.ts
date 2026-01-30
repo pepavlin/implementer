@@ -102,7 +102,7 @@ export class TaskManager {
       // Step 3: Run Claude Code
       console.log(`[${task.taskId}] Running Claude Code...`);
       const repoDir = this.gitManager.getRepoDir(repo.name);
-      const result = await this.executor!.run(task.prompt, repoDir, repo.allowedTools);
+      const result = await this.executor!.run(task.prompt, repoDir);
 
       task.output = result.output;
 

@@ -6,13 +6,6 @@ repositories:
   - name: demo-webapp
     url: https://github.com/pepavlin/demo-webapp.git
     defaultBranch: main
-    allowedTools:
-      - Bash
-      - Read
-      - Write
-      - Edit
-      - Glob
-      - Grep
 
 claudeCode:
   command: claude

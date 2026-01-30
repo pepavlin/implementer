@@ -23,17 +23,11 @@ repositories:
   - name: my-project
     url: git@github.com:user/my-project.git
     defaultBranch: main
-    allowedTools:
-      - Bash
-      - Read
-      - Write
-      - Edit
-      - Glob
-      - Grep
 
 claudeCode:
   command: claude                   # path to claude CLI binary
   model: sonnet                    # optional model override
+  dockerImage: implementer-sandbox  # Docker image for sandboxed execution
 ```
 
 You can define multiple repositories in the `repositories` array. Each task targets one repository by name.

@@ -7,7 +7,6 @@ export interface RepositoryConfig {
   name: string;
   url: string;
   defaultBranch: string;
-  allowedTools: string[];
 }
 
 export interface ClaudeCodeConfig {

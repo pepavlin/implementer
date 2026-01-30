@@ -48,7 +48,7 @@ export class Executor {
   /**
    * Run Claude Code CLI inside a Docker container with only the workspace mounted.
    */
-  run(prompt: string, cwd: string, allowedTools: string[]): Promise<ExecutorResult> {
+  run(prompt: string, cwd: string): Promise<ExecutorResult> {
     this.output = "";
 
     const oauthToken = getClaudeCredentials();
@@ -56,8 +56,6 @@ export class Executor {
     const claudeArgs = [
       "-p",
       prompt,
-      "--allowedTools",
-      allowedTools.join(","),
       "--dangerously-skip-permissions",
       "--output-format",
       "json",
