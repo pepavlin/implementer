@@ -12,8 +12,8 @@ export interface RepositoryConfig {
 
 export interface ClaudeCodeConfig {
   command: string;
-  maxTurns: number;
   model?: string;
+  dockerImage: string;
 }
 
 export interface Config {

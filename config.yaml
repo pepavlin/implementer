@@ -3,8 +3,8 @@ server:
   workspaceDir: ./workspace
 
 repositories:
-  - name: my-project
-    url: git@github.com:user/my-project.git
+  - name: demo-webapp
+    url: https://github.com/pepavlin/demo-webapp.git
     defaultBranch: main
     allowedTools:
       - Bash
@@ -16,5 +16,5 @@ repositories:
 
 claudeCode:
   command: claude
-  maxTurns: 50
   model: sonnet
+  dockerImage: implementer-sandbox

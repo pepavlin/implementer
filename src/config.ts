@@ -18,8 +18,8 @@ const RepositorySchema = z.object({
 
 const ClaudeCodeSchema = z.object({
   command: z.string().default("claude"),
-  maxTurns: z.number().int().positive().default(50),
   model: z.string().optional(),
+  dockerImage: z.string().default("implementer-sandbox"),
 });
 
 const ConfigSchema = z.object({

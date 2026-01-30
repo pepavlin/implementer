@@ -33,7 +33,6 @@ repositories:
 
 claudeCode:
   command: claude                   # path to claude CLI binary
-  maxTurns: 50                     # max agentic turns per task
   model: sonnet                    # optional model override
 ```
 
