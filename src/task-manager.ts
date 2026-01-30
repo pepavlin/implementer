@@ -107,8 +107,12 @@ export class TaskManager {
       task.output = result.output;
 
       if (result.exitCode === 0) {
+        // Step 4: Push branch to origin
+        console.log(`[${task.taskId}] Pushing branch ${task.branch}...`);
+        await this.gitManager.pushBranch(repo.name, task.branch);
+
         task.status = "completed";
-        console.log(`[${task.taskId}] Completed successfully.`);
+        console.log(`[${task.taskId}] Completed and pushed successfully.`);
       } else {
         task.status = "failed";
         task.error = `Claude Code exited with code ${result.exitCode}`;

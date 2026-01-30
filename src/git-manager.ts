@@ -87,4 +87,12 @@ export class GitManager {
       // Branch may not exist on remote yet, that's fine
     }
   }
+
+  /**
+   * Push the current branch to origin.
+   */
+  async pushBranch(repoName: string, branchName: string): Promise<void> {
+    const repoDir = this.getRepoDir(repoName);
+    await git(["push", "origin", branchName], repoDir);
+  }
 }
