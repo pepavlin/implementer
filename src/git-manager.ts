@@ -25,71 +25,90 @@ export class GitManager {
     }
   }
 
-  getRepoDir(repoName: string): string {
+  getWorkspaceDir(): string {
+    return this.workspaceDir;
+  }
+
+  private getRepoDir(repoName: string): string {
     return join(this.workspaceDir, repoName);
   }
 
   /**
-   * Ensure the repo is cloned. If already cloned, fetch latest.
+   * Ensure all repos are cloned and up to date.
    */
-  async ensureRepo(repo: RepositoryConfig): Promise<string> {
-    const repoDir = this.getRepoDir(repo.name);
+  async ensureAllRepos(repos: RepositoryConfig[]): Promise<void> {
+    for (const repo of repos) {
+      const repoDir = this.getRepoDir(repo.name);
 
-    if (existsSync(join(repoDir, ".git"))) {
+      if (existsSync(join(repoDir, ".git"))) {
+        await git(["fetch", "origin"], repoDir);
+      } else {
+        mkdirSync(repoDir, { recursive: true });
+        await git(["clone", repo.url, repoDir], this.workspaceDir);
+      }
+    }
+  }
+
+  /**
+   * Create a new branch from the default branch in all repos.
+   */
+  async prepareNewBranchAll(repos: RepositoryConfig[], branchName: string): Promise<void> {
+    for (const repo of repos) {
+      const repoDir = this.getRepoDir(repo.name);
+      await git(["checkout", repo.defaultBranch], repoDir);
+      await git(["pull", "origin", repo.defaultBranch], repoDir);
+      await git(["checkout", "-b", branchName], repoDir);
+    }
+  }
+
+  /**
+   * Checkout an existing branch in all repos.
+   */
+  async checkoutBranchAll(repos: RepositoryConfig[], branchName: string): Promise<void> {
+    for (const repo of repos) {
+      const repoDir = this.getRepoDir(repo.name);
       await git(["fetch", "origin"], repoDir);
-    } else {
-      mkdirSync(repoDir, { recursive: true });
-      await git(
-        ["clone", repo.url, repoDir],
-        this.workspaceDir
-      );
-    }
 
-    return repoDir;
-  }
+      try {
+        await git(["checkout", branchName], repoDir);
+      } catch {
+        try {
+          await git(["checkout", "-b", branchName, `origin/${branchName}`], repoDir);
+        } catch {
+          // Branch doesn't exist in this repo - stay on current branch
+          continue;
+        }
+      }
 
-  /**
-   * Prepare a new branch from the default branch.
-   * Checks out defaultBranch, pulls, then creates the given branch.
-   */
-  async prepareNewBranch(repo: RepositoryConfig, branchName: string): Promise<void> {
-    const repoDir = this.getRepoDir(repo.name);
-
-    await git(["checkout", repo.defaultBranch], repoDir);
-    await git(["pull", "origin", repo.defaultBranch], repoDir);
-    await git(["checkout", "-b", branchName], repoDir);
-  }
-
-  /**
-   * Checkout an existing branch for continuation.
-   * Fetches and pulls if the branch exists on remote.
-   */
-  async checkoutBranch(repo: RepositoryConfig, branchName: string): Promise<void> {
-    const repoDir = this.getRepoDir(repo.name);
-
-    await git(["fetch", "origin"], repoDir);
-
-    // Try to check out the branch - it may be local or remote
-    try {
-      await git(["checkout", branchName], repoDir);
-    } catch {
-      // Branch might only exist on remote
-      await git(["checkout", "-b", branchName, `origin/${branchName}`], repoDir);
-    }
-
-    // Try to pull latest (may fail if no upstream tracking)
-    try {
-      await git(["pull", "origin", branchName], repoDir);
-    } catch {
-      // Branch may not exist on remote yet, that's fine
+      try {
+        await git(["pull", "origin", branchName], repoDir);
+      } catch {
+        // Branch may not exist on remote yet
+      }
     }
   }
 
   /**
-   * Push the current branch to origin.
+   * Push the branch in all repos that have it checked out.
    */
-  async pushBranch(repoName: string, branchName: string): Promise<void> {
-    const repoDir = this.getRepoDir(repoName);
-    await git(["push", "origin", branchName], repoDir);
+  async pushBranchAll(repos: RepositoryConfig[], branchName: string): Promise<void> {
+    for (const repo of repos) {
+      const repoDir = this.getRepoDir(repo.name);
+
+      // Check if this repo is on the branch
+      try {
+        const currentBranch = await git(["rev-parse", "--abbrev-ref", "HEAD"], repoDir);
+        if (currentBranch !== branchName) continue;
+      } catch {
+        continue;
+      }
+
+      // Check if there are commits to push (branch exists with commits ahead of default)
+      try {
+        await git(["push", "origin", branchName], repoDir);
+      } catch {
+        // May fail if nothing to push or no remote tracking
+      }
+    }
   }
 }

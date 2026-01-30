@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import type { Config, RepositoryConfig, Task, TaskCreateRequest } from "./types.js";
+import type { Config, Task, TaskCreateRequest } from "./types.js";
 import { GitManager } from "./git-manager.js";
 import { Executor } from "./executor.js";
 
@@ -42,21 +42,12 @@ export class TaskManager {
     return this.currentTask?.taskId ?? null;
   }
 
-  findRepository(name: string): RepositoryConfig | undefined {
-    return this.config.repositories.find((r) => r.name === name);
-  }
-
   /**
    * Start a new task. Rejects if a task is already running.
    */
   async startTask(request: TaskCreateRequest): Promise<Task> {
     if (this.isRunning()) {
       throw new TaskBusyError(this.currentTask!);
-    }
-
-    const repo = this.findRepository(request.repository);
-    if (!repo) {
-      throw new Error(`Repository "${request.repository}" not found in config`);
     }
 
     const taskId = nanoid(8);
@@ -75,7 +66,6 @@ export class TaskManager {
 
     const task: Task = {
       taskId,
-      repository: request.repository,
       branch,
       prompt: request.prompt,
       status: "running",
@@ -88,44 +78,42 @@ export class TaskManager {
     this.executor = executor;
 
     // Run async - don't await, let it run in background
-    this.executeTask(repo, task, request.fromBranch).catch((err) => {
+    this.executeTask(task, request.fromBranch).catch((err) => {
       console.error(`Task ${taskId} failed unexpectedly:`, err);
     });
 
     return task;
   }
 
-  private async executeTask(
-    repo: RepositoryConfig,
-    task: Task,
-    fromBranch?: string
-  ): Promise<void> {
-    try {
-      // Step 1: Ensure repo is cloned/fetched
-      console.log(`[${task.taskId}] Ensuring repo "${repo.name}" is ready...`);
-      await this.gitManager.ensureRepo(repo);
+  private async executeTask(task: Task, fromBranch?: string): Promise<void> {
+    const repos = this.config.repositories;
 
-      // Step 2: Prepare branch
+    try {
+      // Step 1: Ensure all repos are cloned/fetched
+      console.log(`[${task.taskId}] Ensuring all repos are ready...`);
+      await this.gitManager.ensureAllRepos(repos);
+
+      // Step 2: Prepare branch in all repos
       if (fromBranch) {
         console.log(`[${task.taskId}] Checking out continuation branch: ${fromBranch}`);
-        await this.gitManager.checkoutBranch(repo, fromBranch);
+        await this.gitManager.checkoutBranchAll(repos, fromBranch);
       } else {
         console.log(`[${task.taskId}] Creating new branch: ${task.branch}`);
-        await this.gitManager.prepareNewBranch(repo, task.branch);
+        await this.gitManager.prepareNewBranchAll(repos, task.branch);
       }
 
-      // Step 3: Run Claude Code
+      // Step 3: Run Claude Code in workspace root
       console.log(`[${task.taskId}] Running Claude Code...`);
-      const repoDir = this.gitManager.getRepoDir(repo.name);
+      const workspaceDir = this.gitManager.getWorkspaceDir();
       const fullPrompt = task.prompt + COMMIT_INSTRUCTIONS;
-      const result = await this.executor!.run(fullPrompt, repoDir);
+      const result = await this.executor!.run(fullPrompt, workspaceDir);
 
       task.output = result.output;
 
       if (result.exitCode === 0) {
-        // Step 4: Push branch to origin
-        console.log(`[${task.taskId}] Pushing branch ${task.branch}...`);
-        await this.gitManager.pushBranch(repo.name, task.branch);
+        // Step 4: Push branch in all repos
+        console.log(`[${task.taskId}] Pushing branches...`);
+        await this.gitManager.pushBranchAll(repos, task.branch);
 
         task.status = "completed";
         console.log(`[${task.taskId}] Completed and pushed successfully.`);

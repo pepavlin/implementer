@@ -34,7 +34,7 @@ function main() {
   ensureDockerImage(config.claudeCode.dockerImage, configPath);
 
   const taskManager = new TaskManager(config);
-  const app = createServer(config, taskManager);
+  const app = createServer(taskManager);
 
   app.listen(config.server.port, () => {
     console.log(`Implementer service running on port ${config.server.port}`);
