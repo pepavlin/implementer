@@ -1,6 +1,28 @@
+import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
 import { loadConfig } from "./config.js";
 import { TaskManager } from "./task-manager.js";
 import { createServer } from "./server.js";
+
+function ensureDockerImage(imageName: string, configPath: string | undefined) {
+  // Check if the image already exists
+  try {
+    execFileSync("docker", ["image", "inspect", imageName], { stdio: "ignore" });
+    console.log(`Docker image "${imageName}" found.`);
+    return;
+  } catch {
+    // Image doesn't exist, need to build
+  }
+
+  const dockerfilePath = resolve(configPath ?? "config.yaml", "..", "Dockerfile.sandbox");
+  const contextDir = resolve(dockerfilePath, "..");
+
+  console.log(`Docker image "${imageName}" not found. Building from ${dockerfilePath}...`);
+  execFileSync("docker", ["build", "-f", dockerfilePath, "-t", imageName, contextDir], {
+    stdio: "inherit",
+  });
+  console.log(`Docker image "${imageName}" built successfully.`);
+}
 
 function main() {
   const configPath = process.argv[2] || undefined;
@@ -9,13 +31,15 @@ function main() {
   const config = loadConfig(configPath);
   console.log(`Config loaded. ${config.repositories.length} repository(ies) configured.`);
 
+  ensureDockerImage(config.claudeCode.dockerImage, configPath);
+
   const taskManager = new TaskManager(config);
   const app = createServer(config, taskManager);
 
   app.listen(config.server.port, () => {
     console.log(`Implementer service running on port ${config.server.port}`);
     console.log(`Workspace directory: ${config.server.workspaceDir}`);
-    console.log(`Claude Code command: ${config.claudeCode.command}`);
+    console.log(`Docker image: ${config.claudeCode.dockerImage}`);
     console.log(`Repositories: ${config.repositories.map((r) => r.name).join(", ")}`);
   });
 }
