@@ -3,6 +3,10 @@ import type { Config, RepositoryConfig, Task, TaskCreateRequest } from "./types.
 import { GitManager } from "./git-manager.js";
 import { Executor } from "./executor.js";
 
+const COMMIT_INSTRUCTIONS = `
+
+IMPORTANT: When committing changes, write clear and descriptive commit messages using conventional commits format (e.g. "feat: add animated hero section with cat image", "fix: resolve navigation hover styles"). Each commit should be a logical unit of work with a message that explains what was done and why.`;
+
 export class TaskManager {
   private config: Config;
   private gitManager: GitManager;
@@ -56,7 +60,18 @@ export class TaskManager {
     }
 
     const taskId = nanoid(8);
-    const branch = request.fromBranch ?? `impl/${taskId}`;
+    const executor = new Executor(this.config.claudeCode);
+
+    // Generate branch name before returning response
+    let branch: string;
+    if (request.fromBranch) {
+      branch = request.fromBranch;
+    } else {
+      console.log(`[${taskId}] Generating branch name...`);
+      const slug = await executor.generateBranchSlug(request.prompt);
+      branch = `impl/${slug}-${taskId}`;
+      console.log(`[${taskId}] Branch: ${branch}`);
+    }
 
     const task: Task = {
       taskId,
@@ -70,7 +85,7 @@ export class TaskManager {
     };
 
     this.currentTask = task;
-    this.executor = new Executor(this.config.claudeCode);
+    this.executor = executor;
 
     // Run async - don't await, let it run in background
     this.executeTask(repo, task, request.fromBranch).catch((err) => {
@@ -96,13 +111,14 @@ export class TaskManager {
         await this.gitManager.checkoutBranch(repo, fromBranch);
       } else {
         console.log(`[${task.taskId}] Creating new branch: ${task.branch}`);
-        task.branch = await this.gitManager.prepareNewBranch(repo, task.taskId);
+        await this.gitManager.prepareNewBranch(repo, task.branch);
       }
 
       // Step 3: Run Claude Code
       console.log(`[${task.taskId}] Running Claude Code...`);
       const repoDir = this.gitManager.getRepoDir(repo.name);
-      const result = await this.executor!.run(task.prompt, repoDir);
+      const fullPrompt = task.prompt + COMMIT_INSTRUCTIONS;
+      const result = await this.executor!.run(fullPrompt, repoDir);
 
       task.output = result.output;
 

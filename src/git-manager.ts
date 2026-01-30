@@ -50,17 +50,14 @@ export class GitManager {
 
   /**
    * Prepare a new branch from the default branch.
-   * Checks out defaultBranch, pulls, then creates impl/{taskId}.
+   * Checks out defaultBranch, pulls, then creates the given branch.
    */
-  async prepareNewBranch(repo: RepositoryConfig, taskId: string): Promise<string> {
+  async prepareNewBranch(repo: RepositoryConfig, branchName: string): Promise<void> {
     const repoDir = this.getRepoDir(repo.name);
-    const branchName = `impl/${taskId}`;
 
     await git(["checkout", repo.defaultBranch], repoDir);
     await git(["pull", "origin", repo.defaultBranch], repoDir);
     await git(["checkout", "-b", branchName], repoDir);
-
-    return branchName;
   }
 
   /**

@@ -46,6 +46,58 @@ export class Executor {
   }
 
   /**
+   * Generate a short branch name slug from the task prompt.
+   * Runs a quick Claude call with no tools.
+   */
+  generateBranchSlug(prompt: string): Promise<string> {
+    const oauthToken = getClaudeCredentials();
+
+    const claudeArgs = [
+      "-p",
+      `Generate a short git branch name slug (lowercase, hyphens, max 40 chars, no prefix) that describes this task. Reply with ONLY the slug, nothing else.\n\nTask: ${prompt}`,
+      "--output-format",
+      "text",
+      "--model",
+      "haiku",
+      "--tools",
+      "",
+    ];
+
+    const dockerArgs = [
+      "run",
+      "--rm",
+      "-e", `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`,
+      this.config.dockerImage,
+      ...claudeArgs,
+    ];
+
+    return new Promise((resolve, reject) => {
+      let output = "";
+      const proc = spawn("docker", dockerArgs, {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      proc.stdout?.on("data", (data: Buffer) => { output += data.toString(); });
+      proc.stderr?.on("data", (data: Buffer) => { output += data.toString(); });
+
+      proc.on("error", () => resolve("task"));
+      proc.on("close", (code) => {
+        if (code !== 0) {
+          resolve("task");
+          return;
+        }
+        const slug = output
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 40);
+        resolve(slug || "task");
+      });
+    });
+  }
+
+  /**
    * Run Claude Code CLI inside a Docker container with only the workspace mounted.
    */
   run(prompt: string, cwd: string): Promise<ExecutorResult> {
