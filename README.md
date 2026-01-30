@@ -1,6 +1,6 @@
 # Implementer
 
-AI Code Task Execution Service — receives coding tasks via REST API, executes them using Claude Code CLI on configured git repositories, and provides status monitoring.
+AI Code Task Execution Service — receives coding tasks via REST API, executes them using Claude Code CLI in a Docker sandbox on configured git repositories, and provides status monitoring.
 
 Designed to be called from n8n or any HTTP client. Only one task runs at a time.
 
@@ -9,6 +9,11 @@ Designed to be called from n8n or any HTTP client. Only one task runs at a time.
 ```bash
 npm install
 ```
+
+### Prerequisites
+
+- **Docker** — must be running (Claude Code executes inside a sandboxed container)
+- **Claude Code auth** — either set `CLAUDE_CODE_OAUTH_TOKEN` env var, or have Claude Code credentials stored in macOS Keychain (from a previous `claude` login)
 
 ## Configuration
 
@@ -30,9 +35,9 @@ claudeCode:
   dockerImage: implementer-sandbox  # Docker image for sandboxed execution
 ```
 
-You can define multiple repositories in the `repositories` array. Each task targets one repository by name.
+You can define multiple repositories — Claude Code runs in the workspace root with access to all of them.
 
-Make sure `claude` CLI is installed and available in your PATH (or provide the full path in `claudeCode.command`).
+The Docker image is built automatically on first startup if it doesn't exist.
 
 ## Running
 
@@ -54,7 +59,6 @@ npx tsx src/index.ts /path/to/config.yaml
 curl -X POST http://localhost:3000/task \
   -H "Content-Type: application/json" \
   -d '{
-    "repository": "my-project",
     "prompt": "Implement a login page with email and password fields"
   }'
 ```
@@ -63,11 +67,12 @@ Response (`200`):
 ```json
 {
   "taskId": "a1b2c3d4",
-  "repository": "my-project",
-  "branch": "impl/a1b2c3d4",
+  "branch": "impl/login-page-email-password-a1b2c3d4",
   "status": "running"
 }
 ```
+
+The branch name is generated automatically by AI based on the prompt.
 
 If a task is already running, you get `409`:
 ```json
@@ -85,9 +90,8 @@ To send a follow-up task that continues from a previous branch:
 curl -X POST http://localhost:3000/task \
   -H "Content-Type: application/json" \
   -d '{
-    "repository": "my-project",
     "prompt": "Add form validation to the login page",
-    "fromBranch": "impl/a1b2c3d4"
+    "fromBranch": "impl/login-page-email-password-a1b2c3d4"
   }'
 ```
 
@@ -101,8 +105,7 @@ When a task is running:
 ```json
 {
   "taskId": "a1b2c3d4",
-  "repository": "my-project",
-  "branch": "impl/a1b2c3d4",
+  "branch": "impl/login-page-email-password-a1b2c3d4",
   "prompt": "Implement a login page",
   "status": "running",
   "startedAt": "2026-01-30T12:00:00.000Z",
@@ -139,21 +142,19 @@ Returns the Claude Code CLI output for the current or last task:
 
 When a new task starts (no `fromBranch`), the service:
 
-1. Clones the repo (or fetches if already cloned)
-2. Checks out and pulls the default branch
-3. Creates a new branch `impl/{taskId}`
-4. Runs Claude Code CLI in the repo directory
-5. Any commits Claude Code makes land on that branch
+1. Clones/fetches all configured repositories
+2. Checks out and pulls the default branch in each repo
+3. Creates a new branch `impl/{ai-generated-slug}-{taskId}` in all repos
+4. Runs Claude Code CLI in the workspace root (access to all repos)
+5. Pushes the branch to remote in all repos that have changes
 
-When continuing (`fromBranch` provided), the service checks out that branch and runs Claude Code on it.
-
-The service does **not** push branches — Claude Code itself may push if configured to, or you can handle pushing separately in your n8n workflow.
+When continuing (`fromBranch` provided), the service checks out that branch in all repos and runs Claude Code on it.
 
 ## n8n integration
 
 Typical n8n workflow:
 
-1. **HTTP Request node** — `POST /task` with repository name and prompt
+1. **HTTP Request node** — `POST /task` with a prompt
 2. **Wait node** — poll `GET /task/status` every 30s until status is `completed` or `failed`
 3. **HTTP Request node** — `GET /task/log` to retrieve the output
 4. Continue with PR creation, notifications, etc.
