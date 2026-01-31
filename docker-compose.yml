@@ -8,7 +8,6 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - workspace:/app/workspace
-      - ./config.yaml:/app/config.yaml:ro
     environment:
       - WORKSPACE_VOLUME=implementer_workspace
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}

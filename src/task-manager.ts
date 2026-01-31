@@ -2,7 +2,7 @@ import { nanoid } from "nanoid";
 import type { Config, Task, TaskCreateRequest } from "./types.js";
 import { GitManager } from "./git-manager.js";
 import { Executor } from "./executor.js";
-import { WorkspacePool } from "./workspace-pool.js";
+import { WorkspacePool, chownRecursive } from "./workspace-pool.js";
 
 function buildSystemInstructions(repos: { name: string }[]): string {
   const repoList = repos.map((r) => r.name).join(", ");
@@ -140,6 +140,9 @@ export class TaskManager {
         console.log(`[${task.taskId}] Creating new branch: ${branchName}`);
         await this.gitManager.prepareNewBranchAll(workspace.dir, repos, branchName);
       }
+
+      // Rechown after branch creation (new refs are owned by root)
+      await chownRecursive(workspace.dir);
 
       // Step 2: Save pre-run HEAD hashes to detect new commits later
       const preRunHeads = await this.gitManager.getHeadAll(workspace.dir, repos);
