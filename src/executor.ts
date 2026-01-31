@@ -36,6 +36,7 @@ export class Executor {
   private config: ClaudeCodeConfig;
   private process: ChildProcess | null = null;
   private output = "";
+  private runCounter = 0;
 
   constructor(config: ClaudeCodeConfig) {
     this.config = config;
@@ -49,7 +50,7 @@ export class Executor {
    * Generate a short branch name slug from the task prompt.
    * Runs a quick Claude call with no tools.
    */
-  generateBranchSlug(prompt: string): Promise<string> {
+  generateBranchSlug(prompt: string, taskId?: string): Promise<string> {
     const oauthToken = getClaudeCredentials();
 
     const claudeArgs = [
@@ -66,6 +67,7 @@ export class Executor {
     const dockerArgs = [
       "run",
       "--rm",
+      "--name", `implementer-slug-${taskId ?? Date.now()}`,
       "-e", `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`,
       this.config.dockerImage,
       ...claudeArgs,
@@ -104,7 +106,7 @@ export class Executor {
    * @param volumeMount - The -v argument (e.g. "/host/path:/workspace" or "vol_name:/workspace")
    * @param workdir - The -w argument (working directory inside the container, defaults to "/workspace")
    */
-  run(prompt: string, volumeMount: string, workdir = "/workspace"): Promise<ExecutorResult> {
+  run(prompt: string, volumeMount: string, workdir = "/workspace", taskId?: string): Promise<ExecutorResult> {
     this.output = "";
 
     const oauthToken = getClaudeCredentials();
@@ -114,16 +116,20 @@ export class Executor {
       prompt,
       "--dangerously-skip-permissions",
       "--output-format",
-      "json",
+      "stream-json",
+      "--verbose",
     ];
 
     if (this.config.model) {
       claudeArgs.push("--model", this.config.model);
     }
 
+    const containerName = `implementer-${taskId ?? Date.now()}-${this.runCounter++}`;
+
     const dockerArgs = [
       "run",
       "--rm",
+      "--name", containerName,
       "-v", volumeMount,
       "-w", workdir,
       "-e", `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`,

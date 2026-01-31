@@ -95,7 +95,7 @@ export class TaskManager {
       branch = request.fromBranch;
     } else {
       console.log(`[${taskId}] Generating branch name...`);
-      const slug = await executor.generateBranchSlug(request.prompt);
+      const slug = await executor.generateBranchSlug(request.prompt, taskId);
       branch = `impl/${slug}-${taskId}`;
       console.log(`[${taskId}] Branch: ${branch}`);
     }
@@ -153,7 +153,7 @@ export class TaskManager {
       console.log(`[${task.taskId}] Running Claude Code in workspace ${workspace.id}...`);
       const systemPrompt = this.config.claudeCode.systemPrompt ?? "";
       const fullPrompt = task.prompt + buildSystemInstructions(repos) + (systemPrompt ? `\n\n${systemPrompt}` : "");
-      const result = await entry.executor.run(fullPrompt, volumeMount, workdir);
+      const result = await entry.executor.run(fullPrompt, volumeMount, workdir, task.taskId);
 
       task.output = result.output;
 
@@ -163,7 +163,7 @@ export class TaskManager {
         if (hasUncommitted) {
           console.log(`[${task.taskId}] Uncommitted changes detected, asking Claude to commit...`);
           const commitPrompt = `You have uncommitted changes in the workspace. Stage all changes with "git add" and commit them with a clear conventional commit message. Do NOT push.`;
-          await entry.executor.run(commitPrompt, volumeMount, workdir);
+          await entry.executor.run(commitPrompt, volumeMount, workdir, task.taskId);
         }
 
         // Step 5: Ensure our branch points to HEAD (handles Claude switching branches)
