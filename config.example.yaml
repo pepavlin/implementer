@@ -1,0 +1,20 @@
+server:
+  port: 3000
+  workspaceDir: ./workspace
+
+repositories:
+  - name: my-app
+    url: https://github.com/your-org/your-repo.git
+    defaultBranch: main
+
+claudeCode:
+  command: claude
+  model: sonnet
+  dockerImage: implementer-sandbox
+  # systemPrompt: |
+  #   Custom instructions applied to every task.
+  #   e.g. "Always write tests. Follow existing code style."
+  mcpServers:
+    playwright:
+      command: npx
+      args: ["@playwright/mcp@latest", "--headless", "--browser", "chromium"]

@@ -3,4 +3,5 @@ dist/
 workspace/
 tmp/
 *.log
+config.yaml
 .env
