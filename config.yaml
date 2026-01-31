@@ -1,17 +1,23 @@
 server:
-  port: 3000
-  workspaceDir: ./workspace
+    port: 3000
+    workspaceDir: ./workspace
 
 repositories:
-  - name: demo-webapp
-    url: https://github.com/pepavlin/demo-webapp.git
-    defaultBranch: main
+    - name: demo-webapp
+      url: https://github.com/pepavlin/demo-webapp.git
+      defaultBranch: main
 
 claudeCode:
-  command: claude
-  model: sonnet
-  dockerImage: implementer-sandbox
-  mcpServers:
-    playwright:
-      command: npx
-      args: ["@playwright/mcp@latest", "--headless", "--browser", "chromium"]
+    command: claude
+    model: sonnet
+    dockerImage: implementer-sandbox
+    mcpServers:
+        playwright:
+            command: npx
+            args:
+                [
+                    "@playwright/mcp@latest",
+                    "--headless",
+                    "--browser",
+                    "chromium"
+                ]
