@@ -14,6 +14,19 @@ export function createServer(taskManager: TaskManager): express.Express {
   const app = express();
   app.use(express.json());
 
+  // API key authentication
+  const apiKey = process.env.API_KEY;
+  if (apiKey) {
+    app.use((req, res, next) => {
+      const header = req.headers.authorization;
+      if (header !== `Bearer ${apiKey}`) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+      next();
+    });
+  }
+
   // POST /task - Start a new task (always accepts, parallel execution)
   app.post("/task", async (req, res) => {
     const parsed = TaskCreateSchema.safeParse(req.body);

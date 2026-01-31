@@ -13,6 +13,7 @@ services:
       - WORKSPACE_VOLUME=implementer_workspace
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - API_KEY=${API_KEY}
 
   # Build-only: produces the implementer-sandbox image used by executor.
   # Not started by `docker compose up` — only built by `docker compose build`.
