@@ -36,8 +36,9 @@ function main() {
   const taskManager = new TaskManager(config);
   const app = createServer(taskManager);
 
-  app.listen(config.server.port, () => {
-    console.log(`Implementer service running on port ${config.server.port}`);
+  const port = Number(process.env.PORT) || 3000;
+  app.listen(port, () => {
+    console.log(`Implementer service running on port ${port}`);
     console.log(`Workspace directory: ${config.server.workspaceDir}`);
     console.log(`Docker image: ${config.claudeCode.dockerImage}`);
     console.log(`Repositories: ${config.repositories.map((r) => r.name).join(", ")}`);

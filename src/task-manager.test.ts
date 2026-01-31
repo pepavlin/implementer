@@ -6,7 +6,7 @@ import type { Config } from "./types.js";
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
-    server: { port: 3000, workspaceDir: "/tmp/workspace" },
+    server: { workspaceDir: "/tmp/workspace" },
     repositories: [
       { name: "my-repo", url: "https://github.com/test/repo.git", defaultBranch: "main" },
     ],

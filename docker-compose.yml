@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-3000}:${PORT:-3000}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - workspace:/app/workspace
@@ -12,6 +12,7 @@ services:
       - WORKSPACE_VOLUME=implementer_workspace
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - PORT=${PORT:-3000}
       - API_KEY=${API_KEY}
 
   # Build-only: produces the implementer-sandbox image used by executor.

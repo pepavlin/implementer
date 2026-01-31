@@ -21,7 +21,6 @@ Edit `config.yaml` to match your environment:
 
 ```yaml
 server:
-  port: 3000
   workspaceDir: ./workspace        # where workspace instances are stored
 
 repositories:
@@ -55,6 +54,7 @@ cp config.example.yaml config.yaml
 CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token
 GITHUB_TOKEN=your-github-token
 API_KEY=your-secret-api-key    # optional, protects the API
+PORT=3000                      # optional, defaults to 3000
 ```
 
 3. Build and start:

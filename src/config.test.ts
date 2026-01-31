@@ -32,7 +32,6 @@ repositories:
 
     const config = loadConfig(path);
 
-    expect(config.server.port).toBe(3000);
     expect(config.server.workspaceDir).toContain("tmp");
     expect(config.repositories).toHaveLength(1);
     expect(config.repositories[0].name).toBe("my-repo");
@@ -46,7 +45,6 @@ repositories:
       "config.yaml",
       `
 server:
-  port: 8080
   workspaceDir: ./workspaces
 
 repositories:
@@ -70,7 +68,6 @@ claudeCode:
 
     const config = loadConfig(path);
 
-    expect(config.server.port).toBe(8080);
     expect(config.repositories).toHaveLength(2);
     expect(config.repositories[0].defaultBranch).toBe("develop");
     expect(config.repositories[1].defaultBranch).toBe("main");

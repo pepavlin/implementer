@@ -5,7 +5,6 @@ import { z } from "zod";
 import type { Config } from "./types.js";
 
 const ServerSchema = z.object({
-  port: z.number().int().positive().default(3000),
   workspaceDir: z.string().default("./workspace"),
 });
 

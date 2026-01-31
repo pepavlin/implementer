@@ -1,5 +1,4 @@
 export interface ServerConfig {
-  port: number;
   workspaceDir: string;
 }
 
