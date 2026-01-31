@@ -15,10 +15,20 @@ const RepositorySchema = z.object({
   defaultBranch: z.string().default("main"),
 });
 
+const McpServerSchema = z.object({
+  type: z.string().optional(),
+  command: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string()).optional(),
+  url: z.string().optional(),
+  headers: z.record(z.string()).optional(),
+});
+
 const ClaudeCodeSchema = z.object({
   command: z.string().default("claude"),
   model: z.string().optional(),
   dockerImage: z.string().default("implementer-sandbox"),
+  mcpServers: z.record(McpServerSchema).optional(),
 });
 
 const ConfigSchema = z.object({

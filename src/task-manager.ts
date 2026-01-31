@@ -28,7 +28,7 @@ export class TaskManager {
   constructor(config: Config) {
     this.config = config;
     this.gitManager = new GitManager();
-    this.pool = new WorkspacePool(config.server.workspaceDir);
+    this.pool = new WorkspacePool(config.server.workspaceDir, config.claudeCode.mcpServers);
 
     if (process.env.WORKSPACE_VOLUME) {
       console.log(`Docker volume mode: sandbox containers mount volume "${process.env.WORKSPACE_VOLUME}"`);

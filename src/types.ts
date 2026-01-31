@@ -9,10 +9,20 @@ export interface RepositoryConfig {
   defaultBranch: string;
 }
 
+export interface McpServerConfig {
+  type?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+}
+
 export interface ClaudeCodeConfig {
   command: string;
   model?: string;
   dockerImage: string;
+  mcpServers?: Record<string, McpServerConfig>;
 }
 
 export interface Config {

@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
-import { rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { GitManager } from "./git-manager.js";
-import type { RepositoryConfig } from "./types.js";
+import type { McpServerConfig, RepositoryConfig } from "./types.js";
 
 const SANDBOX_UID = "1000";
 
@@ -34,10 +34,12 @@ export class WorkspacePool {
   private instances: Map<number, WorkspaceInstance> = new Map();
   private nextId = 0;
   private gitManager: GitManager;
+  private mcpServers?: Record<string, McpServerConfig>;
 
-  constructor(workspaceDir: string) {
+  constructor(workspaceDir: string, mcpServers?: Record<string, McpServerConfig>) {
     this.baseDir = join(workspaceDir, "instances");
     this.gitManager = new GitManager();
+    this.mcpServers = mcpServers;
   }
 
   /**
@@ -61,6 +63,28 @@ RULES:
   }
 
   /**
+   * Write .mcp.json and .claude/settings.json so Claude Code inside the
+   * container discovers the configured MCP servers automatically.
+   */
+  private writeMcpConfig(dir: string): void {
+    if (!this.mcpServers || Object.keys(this.mcpServers).length === 0) {
+      return;
+    }
+
+    writeFileSync(
+      join(dir, ".mcp.json"),
+      JSON.stringify({ mcpServers: this.mcpServers }, null, 2),
+    );
+
+    const claudeDir = join(dir, ".claude");
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(
+      join(claudeDir, "settings.json"),
+      JSON.stringify({ enableAllProjectMcpServers: true }, null, 2),
+    );
+  }
+
+  /**
    * Acquire a workspace instance. Reuses a free instance (reset to default branch)
    * or creates a new one by cloning all repos. Throws PoolExhaustedError if the
    * maximum number of concurrent tasks is reached.
@@ -75,6 +99,7 @@ RULES:
         rmSync(join(instance.dir, ".git"), { recursive: true, force: true });
         await this.gitManager.resetToDefaultAll(instance.dir, repos);
         this.writeClaude(instance.dir, repos);
+        this.writeMcpConfig(instance.dir);
         await chownRecursive(instance.dir);
         return { id, dir: instance.dir };
       }
@@ -94,6 +119,7 @@ RULES:
     this.instances.set(id, { dir, inUse: true });
     await this.gitManager.ensureAllRepos(dir, repos);
     this.writeClaude(dir, repos);
+    this.writeMcpConfig(dir);
     await chownRecursive(dir);
 
     return { id, dir };
