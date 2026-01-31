@@ -6,7 +6,7 @@ import { WorkspacePool } from "./workspace-pool.js";
 
 const COMMIT_INSTRUCTIONS = `
 
-IMPORTANT: When committing changes, write clear and descriptive commit messages using conventional commits format (e.g. "feat: add animated hero section with cat image", "fix: resolve navigation hover styles"). Each commit should be a logical unit of work with a message that explains what was done and why.`;
+IMPORTANT: After making all changes, you MUST commit them using git. Stage your changes with "git add" and commit with "git commit". Write clear and descriptive commit messages using conventional commits format (e.g. "feat: add animated hero section with cat image", "fix: resolve navigation hover styles"). Each commit should be a logical unit of work with a message that explains what was done and why. Do NOT push — only commit.`;
 
 interface TaskEntry {
   task: Task;

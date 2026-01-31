@@ -6,6 +6,12 @@ RUN npm install -g @anthropic-ai/claude-code
 # Create a non-root user for execution
 RUN useradd -m -s /bin/bash claude
 USER claude
+
+# Git identity and config for commits inside the container
+RUN git config --global user.name "Implementer" && \
+    git config --global user.email "implementer@noreply" && \
+    echo "._*" > ~/.gitignore_global && \
+    git config --global core.excludesFile ~/.gitignore_global
 WORKDIR /home/claude
 
 ENTRYPOINT ["claude"]
