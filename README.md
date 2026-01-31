@@ -41,6 +41,48 @@ The Docker image is built automatically on first startup if it doesn't exist.
 
 ## Running
 
+### With Docker (recommended)
+
+1. Copy the example config and edit it:
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+2. Create a `.env` file with your credentials:
+
+```bash
+CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token
+GITHUB_TOKEN=your-github-token
+API_KEY=your-secret-api-key    # optional, protects the API
+```
+
+3. Build and start:
+
+```bash
+docker compose up -d --build
+```
+
+This builds two images:
+- **implementer** — the main service
+- **implementer-sandbox** — the isolated environment where Claude Code runs
+
+The API is available at `http://localhost:3000`. Swagger docs at `http://localhost:3000/docs`.
+
+To rebuild after config changes:
+
+```bash
+docker compose up -d --build
+```
+
+To view logs:
+
+```bash
+docker compose logs -f
+```
+
+### Without Docker
+
 ```bash
 npx tsx src/index.ts
 ```
@@ -50,6 +92,8 @@ Or with a custom config path:
 ```bash
 npx tsx src/index.ts /path/to/config.yaml
 ```
+
+Docker must still be running — sandbox containers are launched via the Docker socket.
 
 ## API
 
