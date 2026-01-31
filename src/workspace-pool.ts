@@ -2,9 +2,18 @@ import { join } from "node:path";
 import { GitManager } from "./git-manager.js";
 import type { RepositoryConfig } from "./types.js";
 
+const MAX_CONCURRENT_TASKS = 5;
+
 interface WorkspaceInstance {
   dir: string;
   inUse: boolean;
+}
+
+export class PoolExhaustedError extends Error {
+  constructor() {
+    super(`Maximum concurrent tasks reached (${MAX_CONCURRENT_TASKS})`);
+    this.name = "PoolExhaustedError";
+  }
 }
 
 export class WorkspacePool {
@@ -20,7 +29,8 @@ export class WorkspacePool {
 
   /**
    * Acquire a workspace instance. Reuses a free instance (reset to default branch)
-   * or creates a new one by cloning all repos.
+   * or creates a new one by cloning all repos. Throws PoolExhaustedError if the
+   * maximum number of concurrent tasks is reached.
    */
   async acquire(repos: RepositoryConfig[]): Promise<{ id: number; dir: string }> {
     // Look for a free instance
@@ -31,6 +41,12 @@ export class WorkspacePool {
         await this.gitManager.resetToDefaultAll(instance.dir, repos);
         return { id, dir: instance.dir };
       }
+    }
+
+    // Check concurrency limit before creating a new instance
+    const inUseCount = Array.from(this.instances.values()).filter((i) => i.inUse).length;
+    if (inUseCount >= MAX_CONCURRENT_TASKS) {
+      throw new PoolExhaustedError();
     }
 
     // No free instance — create a new one

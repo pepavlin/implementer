@@ -1,6 +1,7 @@
 import express from "express";
 import { z } from "zod";
 import { TaskManager } from "./task-manager.js";
+import { PoolExhaustedError } from "./workspace-pool.js";
 
 const TaskCreateSchema = z.object({
   prompt: z.string().min(1),
@@ -32,6 +33,10 @@ export function createServer(taskManager: TaskManager): express.Express {
         status: task.status,
       });
     } catch (err) {
+      if (err instanceof PoolExhaustedError) {
+        res.status(429).json({ error: err.message });
+        return;
+      }
       res.status(500).json({
         error: err instanceof Error ? err.message : "Internal server error",
       });
