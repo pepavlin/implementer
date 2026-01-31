@@ -16,35 +16,26 @@ function git(args: string[], cwd: string): Promise<string> {
 }
 
 export class GitManager {
-  private workspaceDir: string;
-
-  constructor(workspaceDir: string) {
-    this.workspaceDir = workspaceDir;
-    if (!existsSync(workspaceDir)) {
-      mkdirSync(workspaceDir, { recursive: true });
-    }
-  }
-
-  getWorkspaceDir(): string {
-    return this.workspaceDir;
-  }
-
-  private getRepoDir(repoName: string): string {
-    return join(this.workspaceDir, repoName);
+  private getRepoDir(baseDir: string, repoName: string): string {
+    return join(baseDir, repoName);
   }
 
   /**
    * Ensure all repos are cloned and up to date.
    */
-  async ensureAllRepos(repos: RepositoryConfig[]): Promise<void> {
+  async ensureAllRepos(baseDir: string, repos: RepositoryConfig[]): Promise<void> {
+    if (!existsSync(baseDir)) {
+      mkdirSync(baseDir, { recursive: true });
+    }
+
     for (const repo of repos) {
-      const repoDir = this.getRepoDir(repo.name);
+      const repoDir = this.getRepoDir(baseDir, repo.name);
 
       if (existsSync(join(repoDir, ".git"))) {
         await git(["fetch", "origin"], repoDir);
       } else {
         mkdirSync(repoDir, { recursive: true });
-        await git(["clone", repo.url, repoDir], this.workspaceDir);
+        await git(["clone", repo.url, repoDir], baseDir);
       }
     }
   }
@@ -52,9 +43,9 @@ export class GitManager {
   /**
    * Create a new branch from the default branch in all repos.
    */
-  async prepareNewBranchAll(repos: RepositoryConfig[], branchName: string): Promise<void> {
+  async prepareNewBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string): Promise<void> {
     for (const repo of repos) {
-      const repoDir = this.getRepoDir(repo.name);
+      const repoDir = this.getRepoDir(baseDir, repo.name);
       await git(["checkout", repo.defaultBranch], repoDir);
       await git(["pull", "origin", repo.defaultBranch], repoDir);
       await git(["checkout", "-b", branchName], repoDir);
@@ -64,9 +55,9 @@ export class GitManager {
   /**
    * Checkout an existing branch in all repos.
    */
-  async checkoutBranchAll(repos: RepositoryConfig[], branchName: string): Promise<void> {
+  async checkoutBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string): Promise<void> {
     for (const repo of repos) {
-      const repoDir = this.getRepoDir(repo.name);
+      const repoDir = this.getRepoDir(baseDir, repo.name);
       await git(["fetch", "origin"], repoDir);
 
       try {
@@ -89,11 +80,22 @@ export class GitManager {
   }
 
   /**
+   * Reset all repos to their default branch and pull latest.
+   */
+  async resetToDefaultAll(baseDir: string, repos: RepositoryConfig[]): Promise<void> {
+    for (const repo of repos) {
+      const repoDir = this.getRepoDir(baseDir, repo.name);
+      await git(["checkout", repo.defaultBranch], repoDir);
+      await git(["pull", "origin", repo.defaultBranch], repoDir);
+    }
+  }
+
+  /**
    * Push the branch in all repos that have it checked out.
    */
-  async pushBranchAll(repos: RepositoryConfig[], branchName: string): Promise<void> {
+  async pushBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string): Promise<void> {
     for (const repo of repos) {
-      const repoDir = this.getRepoDir(repo.name);
+      const repoDir = this.getRepoDir(baseDir, repo.name);
 
       // Check if this repo is on the branch
       try {

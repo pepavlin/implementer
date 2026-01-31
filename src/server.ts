@@ -1,6 +1,7 @@
 import express from "express";
 import { z } from "zod";
-import { TaskManager, TaskBusyError } from "./task-manager.js";
+import { TaskManager } from "./task-manager.js";
+
 const TaskCreateSchema = z.object({
   prompt: z.string().min(1),
   fromBranch: z.string().optional(),
@@ -12,7 +13,7 @@ export function createServer(taskManager: TaskManager): express.Express {
   const app = express();
   app.use(express.json());
 
-  // POST /task - Start a new task
+  // POST /task - Start a new task (always accepts, parallel execution)
   app.post("/task", async (req, res) => {
     const parsed = TaskCreateSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -31,69 +32,58 @@ export function createServer(taskManager: TaskManager): express.Express {
         status: task.status,
       });
     } catch (err) {
-      if (err instanceof TaskBusyError) {
-        res.status(409).json({
-          error: "Task already running",
-          currentTask: {
-            taskId: err.currentTask.taskId,
-            status: err.currentTask.status,
-          },
-        });
-        return;
-      }
       res.status(500).json({
         error: err instanceof Error ? err.message : "Internal server error",
       });
     }
   });
 
-  // GET /task/status - Get current task status
-  app.get("/task/status", (_req, res) => {
-    const currentTask = taskManager.getCurrentTask();
+  // GET /tasks - List all tasks
+  app.get("/tasks", (_req, res) => {
+    const tasks = taskManager.listTasks().map((task) => ({
+      taskId: task.taskId,
+      branch: task.branch,
+      prompt: task.prompt,
+      status: task.status,
+      startedAt: task.startedAt,
+      completedAt: task.completedAt,
+    }));
+    res.json({ tasks });
+  });
 
-    if (currentTask) {
-      res.json({
-        taskId: currentTask.taskId,
-        branch: currentTask.branch,
-        prompt: currentTask.prompt,
-        status: currentTask.status,
-        startedAt: currentTask.startedAt,
-        completedAt: currentTask.completedAt,
-      });
+  // GET /task/:taskId - Get specific task status
+  app.get("/task/:taskId", (req, res) => {
+    const task = taskManager.getTask(req.params.taskId);
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
       return;
     }
 
-    const lastTask = taskManager.getLastTask();
     res.json({
-      status: "idle" as const,
-      lastTask: lastTask
-        ? {
-            taskId: lastTask.taskId,
-            branch: lastTask.branch,
-            prompt: lastTask.prompt,
-            status: lastTask.status,
-            startedAt: lastTask.startedAt,
-            completedAt: lastTask.completedAt,
-          }
-        : null,
+      taskId: task.taskId,
+      branch: task.branch,
+      prompt: task.prompt,
+      status: task.status,
+      startedAt: task.startedAt,
+      completedAt: task.completedAt,
+      error: task.error,
     });
   });
 
-  // GET /task/log - Get task output log
-  app.get("/task/log", (_req, res) => {
-    const taskId = taskManager.getActiveTaskId() ?? taskManager.getLastTask()?.taskId;
-
-    if (!taskId) {
-      res.status(404).json({ error: "No task found" });
+  // GET /task/:taskId/log - Get specific task output log
+  app.get("/task/:taskId/log", (req, res) => {
+    const task = taskManager.getTask(req.params.taskId);
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
       return;
     }
 
-    const fullOutput = taskManager.getOutput();
+    const fullOutput = taskManager.getOutput(req.params.taskId);
     const truncated = fullOutput.length > MAX_LOG_SIZE;
     const output = truncated ? fullOutput.slice(-MAX_LOG_SIZE) : fullOutput;
 
     res.json({
-      taskId,
+      taskId: task.taskId,
       output,
       truncated,
     });

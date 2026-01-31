@@ -21,7 +21,7 @@ export interface Config {
   claudeCode: ClaudeCodeConfig;
 }
 
-export type TaskStatus = "idle" | "running" | "completed" | "failed";
+export type TaskStatus = "running" | "completed" | "failed";
 
 export interface Task {
   taskId: string;
