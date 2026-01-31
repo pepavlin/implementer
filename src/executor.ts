@@ -98,9 +98,13 @@ export class Executor {
   }
 
   /**
-   * Run Claude Code CLI inside a Docker container with only the workspace mounted.
+   * Run Claude Code CLI inside a Docker container with the workspace mounted.
+   *
+   * @param prompt - The prompt to send to Claude Code
+   * @param volumeMount - The -v argument (e.g. "/host/path:/workspace" or "vol_name:/workspace")
+   * @param workdir - The -w argument (working directory inside the container, defaults to "/workspace")
    */
-  run(prompt: string, cwd: string): Promise<ExecutorResult> {
+  run(prompt: string, volumeMount: string, workdir = "/workspace"): Promise<ExecutorResult> {
     this.output = "";
 
     const oauthToken = getClaudeCredentials();
@@ -117,16 +121,11 @@ export class Executor {
       claudeArgs.push("--model", this.config.model);
     }
 
-    // Docker run args:
-    // - Mount only the repo workspace at /workspace
-    // - Pass OAuth token as env var
-    // - Remove container after exit
-    // - No extra capabilities, no host network access beyond what's needed for API
     const dockerArgs = [
       "run",
       "--rm",
-      "-v", `${cwd}:/workspace`,
-      "-w", "/workspace",
+      "-v", volumeMount,
+      "-w", workdir,
       "-e", `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`,
       this.config.dockerImage,
       ...claudeArgs,

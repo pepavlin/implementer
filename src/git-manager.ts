@@ -91,21 +91,49 @@ export class GitManager {
   }
 
   /**
-   * Check if any repo on the given branch has new commits ahead of the default branch.
+   * Get the current HEAD hash for all repos.
    */
-  async hasNewCommits(baseDir: string, repos: RepositoryConfig[], branchName: string): Promise<boolean> {
+  async getHeadAll(baseDir: string, repos: RepositoryConfig[]): Promise<Map<string, string>> {
+    const heads = new Map<string, string>();
+    for (const repo of repos) {
+      const repoDir = this.getRepoDir(baseDir, repo.name);
+      const head = await git(["rev-parse", "HEAD"], repoDir);
+      heads.set(repo.name, head);
+    }
+    return heads;
+  }
+
+  /**
+   * After Claude Code runs, ensure the impl branch points to HEAD for any repo
+   * where new commits were made. Handles the case where Claude switched branches.
+   * Returns true if any repo had new commits.
+   */
+  async ensureBranchAtHeadAll(
+    baseDir: string,
+    repos: RepositoryConfig[],
+    branchName: string,
+    preRunHeads: Map<string, string>,
+  ): Promise<boolean> {
+    let hasChanges = false;
     for (const repo of repos) {
       const repoDir = this.getRepoDir(baseDir, repo.name);
       try {
+        const currentHead = await git(["rev-parse", "HEAD"], repoDir);
+        const preHead = preRunHeads.get(repo.name);
+        if (currentHead === preHead) continue;
+
+        hasChanges = true;
         const currentBranch = await git(["rev-parse", "--abbrev-ref", "HEAD"], repoDir);
-        if (currentBranch !== branchName) continue;
-        const log = await git(["log", `${repo.defaultBranch}..${branchName}`, "--oneline"], repoDir);
-        if (log.length > 0) return true;
+        if (currentBranch !== branchName) {
+          // Claude switched branches — move our branch to current HEAD and check it out
+          await git(["branch", "-f", branchName, "HEAD"], repoDir);
+          await git(["checkout", branchName], repoDir);
+        }
       } catch {
         continue;
       }
     }
-    return false;
+    return hasChanges;
   }
 
   /**
@@ -131,15 +159,12 @@ export class GitManager {
   }
 
   /**
-   * Push the branch in all repos that have new commits on it.
-   * Returns true if any repo was pushed.
+   * Push the branch in all repos that are currently on it.
    */
-  async pushBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string): Promise<boolean> {
-    let pushed = false;
+  async pushBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string): Promise<void> {
     for (const repo of repos) {
       const repoDir = this.getRepoDir(baseDir, repo.name);
 
-      // Check if this repo is on the branch
       try {
         const currentBranch = await git(["rev-parse", "--abbrev-ref", "HEAD"], repoDir);
         if (currentBranch !== branchName) continue;
@@ -147,21 +172,7 @@ export class GitManager {
         continue;
       }
 
-      // Only push if there are new commits ahead of the default branch
-      try {
-        const log = await git(["log", `${repo.defaultBranch}..${branchName}`, "--oneline"], repoDir);
-        if (log.length === 0) continue;
-      } catch {
-        continue;
-      }
-
-      try {
-        await git(["push", "origin", branchName], repoDir);
-        pushed = true;
-      } catch {
-        // May fail if no remote tracking
-      }
+      await git(["push", "origin", branchName], repoDir);
     }
-    return pushed;
   }
 }

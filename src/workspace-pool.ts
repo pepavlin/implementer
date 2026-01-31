@@ -1,6 +1,18 @@
+import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { GitManager } from "./git-manager.js";
 import type { RepositoryConfig } from "./types.js";
+
+const SANDBOX_UID = "1000";
+
+function chownRecursive(dir: string): Promise<void> {
+  return new Promise((resolve) => {
+    execFile("chown", ["-R", `${SANDBOX_UID}:${SANDBOX_UID}`, dir], (error) => {
+      // Ignore errors — chown is only needed when running as root in Docker
+      resolve();
+    });
+  });
+}
 
 const MAX_CONCURRENT_TASKS = 5;
 
@@ -39,6 +51,7 @@ export class WorkspacePool {
         console.log(`[pool] Reusing workspace instance ${id}`);
         instance.inUse = true;
         await this.gitManager.resetToDefaultAll(instance.dir, repos);
+        await chownRecursive(instance.dir);
         return { id, dir: instance.dir };
       }
     }
@@ -56,6 +69,7 @@ export class WorkspacePool {
 
     this.instances.set(id, { dir, inUse: true });
     await this.gitManager.ensureAllRepos(dir, repos);
+    await chownRecursive(dir);
 
     return { id, dir };
   }

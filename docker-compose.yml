@@ -1,0 +1,29 @@
+services:
+  implementer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - workspace:/app/workspace
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      - WORKSPACE_VOLUME=implementer_workspace
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+
+  # Build-only: produces the implementer-sandbox image used by executor.
+  # Not started by `docker compose up` — only built by `docker compose build`.
+  sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+    image: implementer-sandbox
+    profiles:
+      - build-only
+
+volumes:
+  workspace:
+    name: implementer_workspace
