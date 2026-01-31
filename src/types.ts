@@ -22,6 +22,7 @@ export interface ClaudeCodeConfig {
   command: string;
   model?: string;
   dockerImage: string;
+  systemPrompt?: string;
   mcpServers?: Record<string, McpServerConfig>;
 }
 

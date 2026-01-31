@@ -151,7 +151,8 @@ export class TaskManager {
       // Step 3: Run Claude Code in workspace dir
       const { volumeMount, workdir } = this.getDockerMount(workspace.dir);
       console.log(`[${task.taskId}] Running Claude Code in workspace ${workspace.id}...`);
-      const fullPrompt = task.prompt + buildSystemInstructions(repos);
+      const systemPrompt = this.config.claudeCode.systemPrompt ?? "";
+      const fullPrompt = task.prompt + buildSystemInstructions(repos) + (systemPrompt ? `\n\n${systemPrompt}` : "");
       const result = await entry.executor.run(fullPrompt, volumeMount, workdir);
 
       task.output = result.output;
