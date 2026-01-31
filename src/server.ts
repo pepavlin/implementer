@@ -1,4 +1,5 @@
 import express from "express";
+import swaggerUi from "swagger-ui-express";
 import { z } from "zod";
 import { TaskManager } from "./task-manager.js";
 import { PoolExhaustedError } from "./workspace-pool.js";
@@ -10,9 +11,130 @@ const TaskCreateSchema = z.object({
 
 const MAX_LOG_SIZE = 1024 * 1024; // 1MB
 
+const openApiSpec = {
+  openapi: "3.0.3",
+  info: {
+    title: "Implementer",
+    description: "AI Code Task Execution Service — receives coding tasks via REST API, executes them using Claude Code CLI in isolated Docker sandboxes.",
+    version: "1.0.0",
+  },
+  servers: [{ url: "/" }],
+  security: [{ BearerAuth: [] }],
+  components: {
+    securitySchemes: {
+      BearerAuth: {
+        type: "http",
+        scheme: "bearer",
+      },
+    },
+    schemas: {
+      TaskCreateRequest: {
+        type: "object",
+        required: ["prompt"],
+        properties: {
+          prompt: { type: "string", description: "What to implement", example: "Add a dark mode toggle to the navbar" },
+          fromBranch: { type: "string", description: "Continue from an existing branch instead of creating a new one", example: "impl/dark-mode-abc123" },
+        },
+      },
+      TaskCreateResponse: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", example: "TVchAThD" },
+          branch: { type: "string", example: "impl/dark-mode-abc123" },
+          status: { type: "string", enum: ["running"], example: "running" },
+        },
+      },
+      TaskStatus: {
+        type: "object",
+        properties: {
+          taskId: { type: "string" },
+          branch: { type: "string", nullable: true },
+          prompt: { type: "string" },
+          status: { type: "string", enum: ["running", "completed", "failed"] },
+          startedAt: { type: "string", format: "date-time" },
+          completedAt: { type: "string", format: "date-time", nullable: true },
+          error: { type: "string", nullable: true },
+        },
+      },
+      TaskLog: {
+        type: "object",
+        properties: {
+          taskId: { type: "string" },
+          output: { type: "string", description: "Claude Code CLI output" },
+          truncated: { type: "boolean", description: "Whether the output was truncated to 1MB" },
+        },
+      },
+      Error: {
+        type: "object",
+        properties: {
+          error: { type: "string" },
+        },
+      },
+    },
+  },
+  paths: {
+    "/task": {
+      post: {
+        summary: "Start a new task",
+        description: "Creates a new coding task. The task runs asynchronously in an isolated Docker sandbox with Claude Code. Returns immediately with the task ID and branch name.",
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/TaskCreateRequest" } } },
+        },
+        responses: {
+          "200": { description: "Task started", content: { "application/json": { schema: { $ref: "#/components/schemas/TaskCreateResponse" } } } },
+          "400": { description: "Invalid request", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+          "401": { description: "Unauthorized" },
+          "429": { description: "Max concurrent tasks reached", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+        },
+      },
+    },
+    "/tasks": {
+      get: {
+        summary: "List all tasks",
+        description: "Returns all tasks (running, completed, and failed).",
+        responses: {
+          "200": {
+            description: "Task list",
+            content: { "application/json": { schema: { type: "object", properties: { tasks: { type: "array", items: { $ref: "#/components/schemas/TaskStatus" } } } } } },
+          },
+          "401": { description: "Unauthorized" },
+        },
+      },
+    },
+    "/task/{taskId}": {
+      get: {
+        summary: "Get task status",
+        description: "Returns the current status of a specific task.",
+        parameters: [{ name: "taskId", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "Task status", content: { "application/json": { schema: { $ref: "#/components/schemas/TaskStatus" } } } },
+          "401": { description: "Unauthorized" },
+          "404": { description: "Task not found", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+        },
+      },
+    },
+    "/task/{taskId}/log": {
+      get: {
+        summary: "Get task output log",
+        description: "Returns the Claude Code CLI output for a task. Output is truncated to 1MB if larger.",
+        parameters: [{ name: "taskId", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "Task log", content: { "application/json": { schema: { $ref: "#/components/schemas/TaskLog" } } } },
+          "401": { description: "Unauthorized" },
+          "404": { description: "Task not found", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+        },
+      },
+    },
+  },
+};
+
 export function createServer(taskManager: TaskManager): express.Express {
   const app = express();
   app.use(express.json());
+
+  // Swagger UI — served before auth so it's accessible without a key
+  app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
 
   // API key authentication
   const apiKey = process.env.API_KEY;
@@ -26,6 +148,11 @@ export function createServer(taskManager: TaskManager): express.Express {
       next();
     });
   }
+
+  // GET / - redirect to docs
+  app.get("/", (_req, res) => {
+    res.redirect("/docs");
+  });
 
   // POST /task - Start a new task (always accepts, parallel execution)
   app.post("/task", async (req, res) => {
