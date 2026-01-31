@@ -25,7 +25,7 @@ export type TaskStatus = "running" | "completed" | "failed";
 
 export interface Task {
   taskId: string;
-  branch: string;
+  branch: string | null;
   prompt: string;
   status: TaskStatus;
   startedAt: string;

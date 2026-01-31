@@ -91,6 +91,7 @@ export class TaskManager {
   ): Promise<void> {
     const repos = this.config.repositories;
     const entry = this.tasks.get(task.taskId)!;
+    const branchName = task.branch!;
 
     try {
       // Step 1: Prepare branch in all repos
@@ -98,8 +99,8 @@ export class TaskManager {
         console.log(`[${task.taskId}] Checking out continuation branch: ${fromBranch}`);
         await this.gitManager.checkoutBranchAll(workspace.dir, repos, fromBranch);
       } else {
-        console.log(`[${task.taskId}] Creating new branch: ${task.branch}`);
-        await this.gitManager.prepareNewBranchAll(workspace.dir, repos, task.branch);
+        console.log(`[${task.taskId}] Creating new branch: ${branchName}`);
+        await this.gitManager.prepareNewBranchAll(workspace.dir, repos, branchName);
       }
 
       // Step 2: Run Claude Code in workspace dir
@@ -110,12 +111,26 @@ export class TaskManager {
       task.output = result.output;
 
       if (result.exitCode === 0) {
-        // Step 3: Push branch in all repos
-        console.log(`[${task.taskId}] Pushing branches...`);
-        await this.gitManager.pushBranchAll(workspace.dir, repos, task.branch);
+        // Step 3: Check for uncommitted changes and ask Claude to commit if needed
+        const hasUncommitted = await this.gitManager.hasUncommittedChanges(workspace.dir, repos);
+        if (hasUncommitted) {
+          console.log(`[${task.taskId}] Uncommitted changes detected, asking Claude to commit...`);
+          const commitPrompt = `You have uncommitted changes in the workspace. Stage all changes with "git add" and commit them with a clear conventional commit message. Do NOT push.`;
+          await entry.executor.run(commitPrompt, workspace.dir);
+        }
 
-        task.status = "completed";
-        console.log(`[${task.taskId}] Completed and pushed successfully.`);
+        // Step 4: Push only if there are new commits
+        const hasCommits = await this.gitManager.hasNewCommits(workspace.dir, repos, branchName);
+        if (hasCommits) {
+          console.log(`[${task.taskId}] Pushing branches...`);
+          await this.gitManager.pushBranchAll(workspace.dir, repos, branchName);
+          task.status = "completed";
+          console.log(`[${task.taskId}] Completed and pushed successfully.`);
+        } else {
+          console.log(`[${task.taskId}] No new commits — skipping push.`);
+          task.branch = null;
+          task.status = "completed";
+        }
       } else {
         task.status = "failed";
         task.error = `Claude Code exited with code ${result.exitCode}`;
