@@ -3,6 +3,7 @@ import type { Config, Task, TaskCreateRequest } from "./types.js";
 import { GitManager } from "./git-manager.js";
 import { Executor } from "./executor.js";
 import { WorkspacePool, chownRecursive } from "./workspace-pool.js";
+import type { TokenManager } from "./auth.js";
 
 function buildSystemInstructions(repos: { name: string }[]): string {
   const repoList = repos.map((r) => r.name).join(", ");
@@ -24,10 +25,12 @@ export class TaskManager {
   private config: Config;
   private gitManager: GitManager;
   private pool: WorkspacePool;
+  private tokenManager: TokenManager;
   private tasks: Map<string, TaskEntry> = new Map();
 
-  constructor(config: Config) {
+  constructor(config: Config, tokenManager: TokenManager) {
     this.config = config;
+    this.tokenManager = tokenManager;
     this.gitManager = new GitManager();
     this.pool = new WorkspacePool(config.server.workspaceDir, config.claudeCode.mcpServers);
 
@@ -87,7 +90,7 @@ export class TaskManager {
    */
   async startTask(request: TaskCreateRequest): Promise<Task> {
     const taskId = nanoid(8);
-    const executor = new Executor(this.config.claudeCode);
+    const executor = new Executor(this.config.claudeCode, this.tokenManager);
 
     // Generate branch name before returning response
     let branch: string;

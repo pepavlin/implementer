@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { loadConfig } from "./config.js";
 import { TaskManager } from "./task-manager.js";
 import { createServer } from "./server.js";
+import { TokenManager } from "./auth.js";
 
 function ensureDockerImage(imageName: string, configPath: string | undefined) {
   // Check if the image already exists
@@ -33,7 +34,8 @@ function main() {
 
   ensureDockerImage(config.claudeCode.dockerImage, configPath);
 
-  const taskManager = new TaskManager(config);
+  const tokenManager = new TokenManager(config.server.workspaceDir);
+  const taskManager = new TaskManager(config, tokenManager);
   const app = createServer(taskManager);
 
   const port = Number(process.env.PORT) || 3000;

@@ -1,45 +1,22 @@
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import type { ClaudeCodeConfig } from "./types.js";
+import type { TokenManager } from "./auth.js";
 
 export interface ExecutorResult {
   exitCode: number | null;
   output: string;
 }
 
-/**
- * Extract Claude OAuth credentials from macOS Keychain.
- * Falls back to CLAUDE_CODE_OAUTH_TOKEN env var if set.
- */
-function getClaudeCredentials(): string {
-  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-    return process.env.CLAUDE_CODE_OAUTH_TOKEN;
-  }
-
-  try {
-    const creds = execFileSync(
-      "security",
-      ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
-      { encoding: "utf-8" }
-    ).trim();
-
-    // The keychain stores JSON with OAuth tokens - extract the access token
-    const parsed = JSON.parse(creds);
-    return parsed.claudeAiOauth?.accessToken ?? "";
-  } catch {
-    throw new Error(
-      "Could not retrieve Claude credentials. Set CLAUDE_CODE_OAUTH_TOKEN env var or run 'claude setup-token'."
-    );
-  }
-}
-
 export class Executor {
   private config: ClaudeCodeConfig;
+  private tokenManager: TokenManager;
   private process: ChildProcess | null = null;
   private output = "";
   private runCounter = 0;
 
-  constructor(config: ClaudeCodeConfig) {
+  constructor(config: ClaudeCodeConfig, tokenManager: TokenManager) {
     this.config = config;
+    this.tokenManager = tokenManager;
   }
 
   getOutput(): string {
@@ -50,8 +27,8 @@ export class Executor {
    * Generate a short branch name slug from the task prompt.
    * Runs a quick Claude call with no tools.
    */
-  generateBranchSlug(prompt: string, taskId?: string): Promise<string> {
-    const oauthToken = getClaudeCredentials();
+  async generateBranchSlug(prompt: string, taskId?: string): Promise<string> {
+    const creds = await this.tokenManager.getCredentials();
 
     const claudeArgs = [
       "-p",
@@ -68,12 +45,12 @@ export class Executor {
       "run",
       "--rm",
       "--name", `implementer-slug-${taskId ?? Date.now()}`,
-      "-e", `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`,
+      "-e", `${creds.envName}=${creds.value}`,
       this.config.dockerImage,
       ...claudeArgs,
     ];
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       let output = "";
       const proc = spawn("docker", dockerArgs, {
         stdio: ["ignore", "pipe", "pipe"],
@@ -101,15 +78,11 @@ export class Executor {
 
   /**
    * Run Claude Code CLI inside a Docker container with the workspace mounted.
-   *
-   * @param prompt - The prompt to send to Claude Code
-   * @param volumeMount - The -v argument (e.g. "/host/path:/workspace" or "vol_name:/workspace")
-   * @param workdir - The -w argument (working directory inside the container, defaults to "/workspace")
    */
-  run(prompt: string, volumeMount: string, workdir = "/workspace", taskId?: string): Promise<ExecutorResult> {
+  async run(prompt: string, volumeMount: string, workdir = "/workspace", taskId?: string): Promise<ExecutorResult> {
     this.output = "";
 
-    const oauthToken = getClaudeCredentials();
+    const creds = await this.tokenManager.getCredentials();
 
     const claudeArgs = [
       "-p",
@@ -132,7 +105,7 @@ export class Executor {
       "--name", containerName,
       "-v", volumeMount,
       "-w", workdir,
-      "-e", `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`,
+      "-e", `${creds.envName}=${creds.value}`,
       this.config.dockerImage,
       ...claudeArgs,
     ];
