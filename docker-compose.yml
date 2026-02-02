@@ -1,32 +1,33 @@
 services:
-  implementer:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "${PORT:-3000}:${PORT:-3000}"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - workspace:/app/workspace
-    environment:
-      - WORKSPACE_VOLUME=implementer_workspace
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
-      - CLAUDE_OAUTH_REFRESH_TOKEN=${CLAUDE_OAUTH_REFRESH_TOKEN:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - PORT=${PORT:-3000}
-      - API_KEY=${API_KEY}
+    implementer:
+        restart: unless-stopped
+        build:
+            context: .
+            dockerfile: Dockerfile
+        ports:
+            - "${PORT:-3000}:${PORT:-3000}"
+        volumes:
+            - /var/run/docker.sock:/var/run/docker.sock
+            - workspace:/app/workspace
+        environment:
+            - WORKSPACE_VOLUME=implementer_workspace
+            - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+            - CLAUDE_OAUTH_REFRESH_TOKEN=${CLAUDE_OAUTH_REFRESH_TOKEN:-}
+            - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+            - GITHUB_TOKEN=${GITHUB_TOKEN}
+            - PORT=${PORT:-3000}
+            - API_KEY=${API_KEY}
 
-  # Build-only: produces the implementer-sandbox image used by executor.
-  # Not started by `docker compose up` — only built by `docker compose build`.
-  sandbox:
-    build:
-      context: .
-      dockerfile: Dockerfile.sandbox
-    image: implementer-sandbox
-    profiles:
-      - build-only
+    # Build-only: produces the implementer-sandbox image used by executor.
+    # Not started by `docker compose up` — only built by `docker compose build`.
+    sandbox:
+        build:
+            context: .
+            dockerfile: Dockerfile.sandbox
+        image: implementer-sandbox
+        profiles:
+            - build-only
 
 volumes:
-  workspace:
-    name: implementer_workspace
+    workspace:
+        name: implementer_workspace
