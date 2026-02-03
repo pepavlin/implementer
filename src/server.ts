@@ -53,6 +53,7 @@ const openApiSpec = {
           status: { type: "string", enum: ["running", "completed", "failed"] },
           startedAt: { type: "string", format: "date-time" },
           completedAt: { type: "string", format: "date-time", nullable: true },
+          output: { type: "string", nullable: true, description: "Final response/answer from Claude Code (null while task is running)" },
           error: { type: "string", nullable: true },
         },
       },
@@ -211,6 +212,7 @@ export function createServer(taskManager: TaskManager): express.Express {
       status: task.status,
       startedAt: task.startedAt,
       completedAt: task.completedAt,
+      output: task.status === "running" ? null : task.output,
       error: task.error,
     });
   });
