@@ -1,6 +1,7 @@
 services:
     implementer:
         restart: unless-stopped
+        cpus: 1
         build:
             context: .
             dockerfile: Dockerfile
