@@ -109,7 +109,7 @@ describe("server", () => {
       expect(res.body.tasks).toEqual([]);
     });
 
-    it("returns task list", async () => {
+    it("returns task list with durationSeconds", async () => {
       const task = makeMockTask({ status: "completed", completedAt: "2025-01-01T01:00:00.000Z" });
       const tm = makeMockTaskManager({
         listTasks: vi.fn().mockReturnValue([task]),
@@ -120,12 +120,13 @@ describe("server", () => {
       expect(res.body.tasks).toHaveLength(1);
       expect(res.body.tasks[0].taskId).toBe("abc123");
       expect(res.body.tasks[0].status).toBe("completed");
+      expect(res.body.tasks[0].durationSeconds).toBe(3600);
     });
   });
 
   describe("GET /task/:taskId", () => {
-    it("returns task status", async () => {
-      const task = makeMockTask();
+    it("returns task status with durationSeconds", async () => {
+      const task = makeMockTask({ status: "completed", completedAt: "2025-01-01T00:05:00.000Z" });
       const tm = makeMockTaskManager({
         getTask: vi.fn().mockReturnValue(task),
       });
@@ -134,6 +135,21 @@ describe("server", () => {
       const res = await request(app).get("/task/abc123").expect(200);
       expect(res.body.taskId).toBe("abc123");
       expect(res.body.prompt).toBe("Add a button");
+      expect(res.body.durationSeconds).toBe(300);
+    });
+
+    it("returns growing durationSeconds for running task", async () => {
+      const now = new Date();
+      const fiveSecondsAgo = new Date(now.getTime() - 5000).toISOString();
+      const task = makeMockTask({ startedAt: fiveSecondsAgo, completedAt: null });
+      const tm = makeMockTaskManager({
+        getTask: vi.fn().mockReturnValue(task),
+      });
+      const app = createServer(tm);
+
+      const res = await request(app).get("/task/abc123").expect(200);
+      expect(res.body.durationSeconds).toBeGreaterThanOrEqual(4);
+      expect(res.body.durationSeconds).toBeLessThanOrEqual(10);
     });
 
     it("returns 404 for unknown task", async () => {

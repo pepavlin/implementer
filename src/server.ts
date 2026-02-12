@@ -53,6 +53,7 @@ const openApiSpec = {
           status: { type: "string", enum: ["running", "completed", "failed"] },
           startedAt: { type: "string", format: "date-time" },
           completedAt: { type: "string", format: "date-time", nullable: true },
+          durationSeconds: { type: "number", description: "Elapsed time in seconds (running tasks show time so far)" },
           output: { type: "string", nullable: true, description: "Final response/answer from Claude Code (null while task is running)" },
           error: { type: "string", nullable: true },
         },
@@ -130,6 +131,12 @@ const openApiSpec = {
   },
 };
 
+function getDurationSeconds(task: { startedAt: string; completedAt: string | null }): number {
+  const start = new Date(task.startedAt).getTime();
+  const end = task.completedAt ? new Date(task.completedAt).getTime() : Date.now();
+  return Math.round((end - start) / 1000);
+}
+
 export function createServer(taskManager: TaskManager): express.Express {
   const app = express();
   app.use(express.json());
@@ -193,6 +200,7 @@ export function createServer(taskManager: TaskManager): express.Express {
       status: task.status,
       startedAt: task.startedAt,
       completedAt: task.completedAt,
+      durationSeconds: getDurationSeconds(task),
     }));
     res.json({ tasks });
   });
@@ -212,6 +220,7 @@ export function createServer(taskManager: TaskManager): express.Express {
       status: task.status,
       startedAt: task.startedAt,
       completedAt: task.completedAt,
+      durationSeconds: getDurationSeconds(task),
       output: task.status === "running" ? null : task.output,
       error: task.error,
     });
