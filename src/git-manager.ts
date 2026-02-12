@@ -46,8 +46,9 @@ export class GitManager {
   async prepareNewBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string): Promise<void> {
     for (const repo of repos) {
       const repoDir = this.getRepoDir(baseDir, repo.name);
+      await git(["fetch", "origin"], repoDir);
       await git(["checkout", repo.defaultBranch], repoDir);
-      await git(["pull", "origin", repo.defaultBranch], repoDir);
+      await git(["reset", "--hard", `origin/${repo.defaultBranch}`], repoDir);
       await git(["checkout", "-b", branchName], repoDir);
     }
   }
@@ -85,8 +86,9 @@ export class GitManager {
   async resetToDefaultAll(baseDir: string, repos: RepositoryConfig[]): Promise<void> {
     for (const repo of repos) {
       const repoDir = this.getRepoDir(baseDir, repo.name);
+      await git(["fetch", "origin"], repoDir);
       await git(["checkout", repo.defaultBranch], repoDir);
-      await git(["pull", "origin", repo.defaultBranch], repoDir);
+      await git(["reset", "--hard", `origin/${repo.defaultBranch}`], repoDir);
     }
   }
 
