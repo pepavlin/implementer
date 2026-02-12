@@ -1,3 +1,5 @@
+name: ${INSTANCE_NAME:-implementer}
+
 services:
     implementer:
         restart: unless-stopped
