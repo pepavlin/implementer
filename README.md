@@ -31,12 +31,9 @@ repositories:
 claudeCode:
   command: claude                   # path to claude CLI binary
   model: sonnet                    # optional model override
-  dockerImage: implementer-sandbox  # Docker image for sandboxed execution
 ```
 
 You can define multiple repositories — Claude Code runs in the workspace root with access to all of them.
-
-The Docker image is built automatically on first startup if it doesn't exist.
 
 ## Running
 
@@ -51,21 +48,23 @@ cp config.example.yaml config.yaml
 2. Create a `.env` file with your credentials:
 
 ```bash
+INSTANCE_NAME=implementer          # unique name for this instance (affects container/image/volume names)
 CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token
 GITHUB_TOKEN=your-github-token
-API_KEY=your-secret-api-key    # optional, protects the API
-PORT=3000                      # optional, defaults to 3000
+API_KEY=your-secret-api-key        # optional, protects the API
+PORT=3000                          # optional, defaults to 3000
 ```
 
 3. Build and start:
 
 ```bash
-docker compose up -d --build
+docker compose --profile build-only build   # build the sandbox image
+docker compose up -d --build                # start the service
 ```
 
 This builds two images:
-- **implementer** — the main service
-- **implementer-sandbox** — the isolated environment where Claude Code runs
+- **{INSTANCE_NAME}** — the main service (default: `implementer`)
+- **{INSTANCE_NAME}-sandbox** — the isolated environment where Claude Code runs (default: `implementer-sandbox`)
 
 The API is available at `http://localhost:3000`. Swagger docs at `http://localhost:3000/docs`.
 
@@ -80,6 +79,24 @@ To view logs:
 ```bash
 docker compose logs -f
 ```
+
+### Running multiple instances
+
+To run multiple instances with different configurations, create separate directories each with their own `config.yaml` and `.env` file. Set a unique `INSTANCE_NAME` and `PORT` in each `.env`:
+
+**Instance A (`.env`):**
+```bash
+INSTANCE_NAME=impl-project-a
+PORT=3000
+```
+
+**Instance B (`.env`):**
+```bash
+INSTANCE_NAME=impl-project-b
+PORT=3001
+```
+
+Each instance gets its own containers, sandbox image, and workspace volume — they don't interfere with each other.
 
 ### Without Docker
 

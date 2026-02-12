@@ -26,7 +26,6 @@ const McpServerSchema = z.object({
 const ClaudeCodeSchema = z.object({
   command: z.string().default("claude"),
   model: z.string().optional(),
-  dockerImage: z.string().default("implementer-sandbox"),
   systemPrompt: z.string().optional(),
   mcpServers: z.record(McpServerSchema).optional(),
 });

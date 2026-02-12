@@ -32,7 +32,8 @@ function main() {
   const config = loadConfig(configPath);
   console.log(`Config loaded. ${config.repositories.length} repository(ies) configured.`);
 
-  ensureDockerImage(config.claudeCode.dockerImage, configPath);
+  const sandboxImage = process.env.SANDBOX_IMAGE || "implementer-sandbox";
+  ensureDockerImage(sandboxImage, configPath);
 
   const tokenManager = new TokenManager(config.server.workspaceDir);
   const taskManager = new TaskManager(config, tokenManager);
@@ -42,7 +43,7 @@ function main() {
   app.listen(port, () => {
     console.log(`Implementer service running on port ${port}`);
     console.log(`Workspace directory: ${config.server.workspaceDir}`);
-    console.log(`Docker image: ${config.claudeCode.dockerImage}`);
+    console.log(`Docker image: ${sandboxImage}`);
     console.log(`Repositories: ${config.repositories.map((r) => r.name).join(", ")}`);
   });
 }

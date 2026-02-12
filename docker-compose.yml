@@ -11,7 +11,9 @@ services:
             - /var/run/docker.sock:/var/run/docker.sock
             - workspace:/app/workspace
         environment:
-            - WORKSPACE_VOLUME=implementer_workspace
+            - WORKSPACE_VOLUME=${INSTANCE_NAME:-implementer}_workspace
+            - INSTANCE_NAME=${INSTANCE_NAME:-implementer}
+            - SANDBOX_IMAGE=${INSTANCE_NAME:-implementer}-sandbox
             - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
             - CLAUDE_OAUTH_REFRESH_TOKEN=${CLAUDE_OAUTH_REFRESH_TOKEN:-}
             - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
@@ -19,16 +21,16 @@ services:
             - PORT=${PORT:-3000}
             - API_KEY=${API_KEY}
 
-    # Build-only: produces the implementer-sandbox image used by executor.
+    # Build-only: produces the sandbox image used by executor.
     # Not started by `docker compose up` — only built by `docker compose build`.
     sandbox:
         build:
             context: .
             dockerfile: Dockerfile.sandbox
-        image: implementer-sandbox
+        image: ${INSTANCE_NAME:-implementer}-sandbox
         profiles:
             - build-only
 
 volumes:
     workspace:
-        name: implementer_workspace
+        name: ${INSTANCE_NAME:-implementer}_workspace

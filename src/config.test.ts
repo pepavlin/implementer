@@ -37,7 +37,6 @@ repositories:
     expect(config.repositories[0].name).toBe("my-repo");
     expect(config.repositories[0].defaultBranch).toBe("main");
     expect(config.claudeCode.command).toBe("claude");
-    expect(config.claudeCode.dockerImage).toBe("implementer-sandbox");
   });
 
   it("loads a full config with all fields", () => {
@@ -57,7 +56,6 @@ repositories:
 claudeCode:
   command: claude-dev
   model: opus
-  dockerImage: my-sandbox
   systemPrompt: "Always write tests."
   mcpServers:
     playwright:

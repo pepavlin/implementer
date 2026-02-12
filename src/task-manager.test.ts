@@ -10,7 +10,6 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     ],
     claudeCode: {
       command: "claude",
-      dockerImage: "implementer-sandbox",
     },
     ...overrides,
   };
@@ -66,7 +65,6 @@ describe("TaskManager", () => {
     const config = makeConfig({
       claudeCode: {
         command: "claude",
-        dockerImage: "implementer-sandbox",
         systemPrompt: "Always write tests.",
       },
     });

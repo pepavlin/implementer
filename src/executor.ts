@@ -14,9 +14,13 @@ export class Executor {
   private output = "";
   private runCounter = 0;
 
+  /** Sandbox Docker image name from SANDBOX_IMAGE env var. */
+  private sandboxImage: string;
+
   constructor(config: ClaudeCodeConfig, tokenManager: TokenManager) {
     this.config = config;
     this.tokenManager = tokenManager;
+    this.sandboxImage = process.env.SANDBOX_IMAGE || "implementer-sandbox";
   }
 
   getOutput(): string {
@@ -44,10 +48,10 @@ export class Executor {
     const dockerArgs = [
       "run",
       "--rm",
-      "--name", `implementer-slug-${taskId ?? Date.now()}`,
+      "--name", `${process.env.INSTANCE_NAME || "implementer"}-slug-${taskId ?? Date.now()}`,
       "--cpus=0.5",
       "-e", `${creds.envName}=${creds.value}`,
-      this.config.dockerImage,
+      this.sandboxImage,
       ...claudeArgs,
     ];
 
@@ -98,7 +102,7 @@ export class Executor {
       claudeArgs.push("--model", this.config.model);
     }
 
-    const containerName = `implementer-${taskId ?? Date.now()}-${this.runCounter++}`;
+    const containerName = `${process.env.INSTANCE_NAME || "implementer"}-${taskId ?? Date.now()}-${this.runCounter++}`;
 
     const dockerArgs = [
       "run",
@@ -108,7 +112,7 @@ export class Executor {
       "-v", volumeMount,
       "-w", workdir,
       "-e", `${creds.envName}=${creds.value}`,
-      this.config.dockerImage,
+      this.sandboxImage,
       ...claudeArgs,
     ];
 
