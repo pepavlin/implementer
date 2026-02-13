@@ -15,7 +15,7 @@ export function chownRecursive(dir: string): Promise<void> {
   });
 }
 
-const MAX_CONCURRENT_TASKS = 5;
+const MAX_CONCURRENT_TASKS = 4;
 
 interface WorkspaceInstance {
   dir: string;
