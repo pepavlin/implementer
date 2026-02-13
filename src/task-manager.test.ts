@@ -9,7 +9,7 @@ const TMP = join(import.meta.dirname, "..", "tmp", "task-manager-test");
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
-    server: { workspaceDir: TMP },
+    server: { workspaceDir: TMP, maxConcurrentTasks: 4 },
     repositories: [
       { name: "my-repo", url: "https://github.com/test/repo.git", defaultBranch: "main" },
     ],

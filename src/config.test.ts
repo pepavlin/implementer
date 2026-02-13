@@ -33,10 +33,42 @@ repositories:
     const config = loadConfig(path);
 
     expect(config.server.workspaceDir).toContain("tmp");
+    expect(config.server.maxConcurrentTasks).toBe(4);
     expect(config.repositories).toHaveLength(1);
     expect(config.repositories[0].name).toBe("my-repo");
     expect(config.repositories[0].defaultBranch).toBe("main");
     expect(config.claudeCode.command).toBe("claude");
+  });
+
+  it("loads custom maxConcurrentTasks from config", () => {
+    const path = writeYaml(
+      "config.yaml",
+      `
+server:
+  maxConcurrentTasks: 8
+repositories:
+  - name: my-repo
+    url: https://github.com/test/repo.git
+`,
+    );
+
+    const config = loadConfig(path);
+    expect(config.server.maxConcurrentTasks).toBe(8);
+  });
+
+  it("rejects maxConcurrentTasks less than 1", () => {
+    const path = writeYaml(
+      "config.yaml",
+      `
+server:
+  maxConcurrentTasks: 0
+repositories:
+  - name: my-repo
+    url: https://github.com/test/repo.git
+`,
+    );
+
+    expect(() => loadConfig(path)).toThrow();
   });
 
   it("loads a full config with all fields", () => {

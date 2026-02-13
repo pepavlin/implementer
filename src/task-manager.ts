@@ -34,7 +34,7 @@ export class TaskManager {
     this.config = config;
     this.tokenManager = tokenManager;
     this.gitManager = new GitManager();
-    this.pool = new WorkspacePool(config.server.workspaceDir, config.claudeCode.mcpServers);
+    this.pool = new WorkspacePool(config.server.workspaceDir, config.claudeCode.mcpServers, config.server.maxConcurrentTasks);
     this.store = new TaskStore(config.server.workspaceDir);
 
     if (process.env.WORKSPACE_VOLUME) {

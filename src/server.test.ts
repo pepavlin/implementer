@@ -75,7 +75,7 @@ describe("server", () => {
 
     it("returns 429 when pool exhausted", async () => {
       const tm = makeMockTaskManager({
-        startTask: vi.fn().mockRejectedValue(new PoolExhaustedError()),
+        startTask: vi.fn().mockRejectedValue(new PoolExhaustedError(4)),
       });
       const app = createServer(tm);
 

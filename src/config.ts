@@ -6,6 +6,7 @@ import type { Config } from "./types.js";
 
 const ServerSchema = z.object({
   workspaceDir: z.string().default("./workspace"),
+  maxConcurrentTasks: z.number().int().min(1).default(4),
 });
 
 const RepositorySchema = z.object({

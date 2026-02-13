@@ -1,5 +1,6 @@
 server:
   workspaceDir: ./workspace
+  maxConcurrentTasks: 4
 
 repositories:
   - name: my-app

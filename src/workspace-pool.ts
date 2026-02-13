@@ -15,7 +15,7 @@ export function chownRecursive(dir: string): Promise<void> {
   });
 }
 
-const MAX_CONCURRENT_TASKS = 4;
+const DEFAULT_MAX_CONCURRENT_TASKS = 4;
 
 interface WorkspaceInstance {
   dir: string;
@@ -23,21 +23,23 @@ interface WorkspaceInstance {
 }
 
 export class PoolExhaustedError extends Error {
-  constructor() {
-    super(`Maximum concurrent tasks reached (${MAX_CONCURRENT_TASKS})`);
+  constructor(maxConcurrentTasks: number) {
+    super(`Maximum concurrent tasks reached (${maxConcurrentTasks})`);
     this.name = "PoolExhaustedError";
   }
 }
 
 export class WorkspacePool {
   private baseDir: string;
+  private maxConcurrentTasks: number;
   private instances: Map<number, WorkspaceInstance> = new Map();
   private nextId = 0;
   private gitManager: GitManager;
   private mcpServers?: Record<string, McpServerConfig>;
 
-  constructor(workspaceDir: string, mcpServers?: Record<string, McpServerConfig>) {
+  constructor(workspaceDir: string, mcpServers?: Record<string, McpServerConfig>, maxConcurrentTasks?: number) {
     this.baseDir = join(workspaceDir, "instances");
+    this.maxConcurrentTasks = maxConcurrentTasks ?? DEFAULT_MAX_CONCURRENT_TASKS;
     this.gitManager = new GitManager();
     this.mcpServers = mcpServers;
   }
@@ -155,8 +157,8 @@ RULES:
 
     // Check concurrency limit before creating a new instance
     const inUseCount = Array.from(this.instances.values()).filter((i) => i.inUse).length;
-    if (inUseCount >= MAX_CONCURRENT_TASKS) {
-      throw new PoolExhaustedError();
+    if (inUseCount >= this.maxConcurrentTasks) {
+      throw new PoolExhaustedError(this.maxConcurrentTasks);
     }
 
     // No free instance — create a new one

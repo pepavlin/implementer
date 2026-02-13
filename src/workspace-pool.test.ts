@@ -216,8 +216,9 @@ describe("WorkspacePool", () => {
 
   describe("PoolExhaustedError", () => {
     it("has the correct message", () => {
-      const err = new PoolExhaustedError();
+      const err = new PoolExhaustedError(4);
       expect(err.message).toContain("Maximum concurrent tasks");
+      expect(err.message).toContain("4");
       expect(err.name).toBe("PoolExhaustedError");
     });
   });

@@ -1,5 +1,6 @@
 export interface ServerConfig {
   workspaceDir: string;
+  maxConcurrentTasks: number;
 }
 
 export interface RepositoryConfig {
