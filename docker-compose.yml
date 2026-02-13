@@ -20,6 +20,7 @@ services:
             - CLAUDE_OAUTH_REFRESH_TOKEN=${CLAUDE_OAUTH_REFRESH_TOKEN:-}
             - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
             - GITHUB_TOKEN=${GITHUB_TOKEN}
+            - GH_TOKEN=${GITHUB_TOKEN}
             - PORT=${PORT:-3000}
             - API_KEY=${API_KEY}
 

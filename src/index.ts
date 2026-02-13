@@ -35,6 +35,14 @@ async function main() {
   const sandboxImage = process.env.SANDBOX_IMAGE || "implementer-sandbox";
   ensureDockerImage(sandboxImage, configPath);
 
+  // Check gh CLI availability for PR creation
+  try {
+    execFileSync("gh", ["--version"], { stdio: "ignore" });
+    console.log("GitHub CLI (gh) found — pull requests will be created after tasks.");
+  } catch {
+    console.warn("WARNING: GitHub CLI (gh) not found. Pull requests will NOT be created after tasks. Install gh and run 'gh auth login' to enable PR creation.");
+  }
+
   const tokenManager = new TokenManager(config.server.workspaceDir);
   const taskManager = new TaskManager(config, tokenManager);
 

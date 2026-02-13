@@ -3,6 +3,14 @@ FROM node:22
 # Docker CLI for creating sandbox containers (talks to host daemon via mounted socket)
 COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
 
+# GitHub CLI for creating pull requests after task completion
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list && \
+    apt-get update && apt-get install -y gh && \
+    rm -rf /var/lib/apt/lists/*
+
 # Trust all directories for git (workspace files are chowned to sandbox user uid)
 RUN git config --global --add safe.directory '*'
 
