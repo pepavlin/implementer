@@ -1,8 +1,9 @@
 import { nanoid } from "nanoid";
-import type { Config, Task, TaskCreateRequest } from "./types.js";
+import type { Config, PersistedTask, Task, TaskCreateRequest } from "./types.js";
 import { GitManager } from "./git-manager.js";
 import { Executor } from "./executor.js";
 import { WorkspacePool, chownRecursive } from "./workspace-pool.js";
+import { TaskStore } from "./task-store.js";
 import type { TokenManager } from "./auth.js";
 
 function buildSystemInstructions(repos: { name: string }[]): string {
@@ -17,7 +18,7 @@ IMPORTANT WORKSPACE RULES:
 
 interface TaskEntry {
   task: Task;
-  executor: Executor;
+  executor: Executor | null;
   workspaceId: number;
 }
 
@@ -26,6 +27,7 @@ export class TaskManager {
   private gitManager: GitManager;
   private pool: WorkspacePool;
   private tokenManager: TokenManager;
+  private store: TaskStore;
   private tasks: Map<string, TaskEntry> = new Map();
 
   constructor(config: Config, tokenManager: TokenManager) {
@@ -33,11 +35,82 @@ export class TaskManager {
     this.tokenManager = tokenManager;
     this.gitManager = new GitManager();
     this.pool = new WorkspacePool(config.server.workspaceDir, config.claudeCode.mcpServers);
+    this.store = new TaskStore(config.server.workspaceDir);
 
     if (process.env.WORKSPACE_VOLUME) {
       console.log(`Docker volume mode: sandbox containers mount volume "${process.env.WORKSPACE_VOLUME}"`);
     } else if (process.env.WORKSPACE_HOST_DIR) {
       console.log(`Docker bind mode: mapping ${config.server.workspaceDir} → ${process.env.WORKSPACE_HOST_DIR} for sandbox mounts`);
+    }
+  }
+
+  /**
+   * Initialize task manager: rediscover workspaces, load persisted tasks,
+   * mark running tasks as interrupted, and resume them.
+   */
+  async init(): Promise<void> {
+    // Rediscover existing workspace directories from disk
+    this.pool.initFromDisk();
+
+    // Load all persisted tasks
+    const persisted = this.store.loadAll();
+    console.log(`[task-manager] Loaded ${persisted.length} persisted task(s) from disk`);
+
+    for (const pt of persisted) {
+      // Mark tasks that were "running" as "interrupted"
+      if (pt.status === "running") {
+        pt.status = "interrupted";
+        pt.output = "";
+        this.store.save(pt);
+        console.log(`[task-manager] Task ${pt.taskId} marked as interrupted`);
+      }
+
+      // Populate in-memory map (no live executor for historical tasks)
+      this.tasks.set(pt.taskId, {
+        task: pt,
+        executor: null,
+        workspaceId: pt.workspaceId,
+      });
+    }
+
+    // Resume interrupted tasks
+    await this.resumeInterruptedTasks();
+  }
+
+  private async resumeInterruptedTasks(): Promise<void> {
+    const repos = this.config.repositories;
+    const interrupted = Array.from(this.tasks.values()).filter(
+      (e) => e.task.status === "interrupted",
+    );
+
+    if (interrupted.length === 0) return;
+    console.log(`[task-manager] Resuming ${interrupted.length} interrupted task(s)...`);
+
+    for (const entry of interrupted) {
+      try {
+        const workspace = await this.pool.acquireExisting(entry.workspaceId, repos);
+        const executor = new Executor(this.config.claudeCode, this.tokenManager);
+        entry.executor = executor;
+        entry.task.status = "running";
+        entry.task.output = "";
+
+        const persistedTask: PersistedTask = { ...entry.task, workspaceId: entry.workspaceId };
+        this.store.save(persistedTask);
+
+        console.log(`[task-manager] Resuming task ${entry.task.taskId} on workspace ${entry.workspaceId}`);
+
+        // Fire in background with fromBranch so it checks out the existing branch
+        this.executeTask(entry.task, workspace, entry.task.branch ?? undefined).catch((err) => {
+          console.error(`Task ${entry.task.taskId} resumption failed:`, err);
+        });
+      } catch (err) {
+        console.error(`[task-manager] Failed to resume task ${entry.task.taskId}:`, err);
+        entry.task.status = "failed";
+        entry.task.error = `Resumption failed: ${err instanceof Error ? err.message : String(err)}`;
+        entry.task.completedAt = new Date().toISOString();
+        const persistedTask: PersistedTask = { ...entry.task, workspaceId: entry.workspaceId };
+        this.store.save(persistedTask);
+      }
     }
   }
 
@@ -79,7 +152,7 @@ export class TaskManager {
   getOutput(taskId: string): string {
     const entry = this.tasks.get(taskId);
     if (!entry) return "";
-    if (entry.task.status === "running") {
+    if (entry.task.status === "running" && entry.executor) {
       return entry.executor.getOutput();
     }
     return entry.task.output;
@@ -118,6 +191,9 @@ export class TaskManager {
 
     this.tasks.set(taskId, { task, executor, workspaceId: workspace.id });
 
+    // Persist to disk
+    this.store.save({ ...task, workspaceId: workspace.id });
+
     // Run async - don't await, let it run in background
     this.executeTask(task, workspace, request.fromBranch).catch((err) => {
       console.error(`Task ${taskId} failed unexpectedly:`, err);
@@ -133,6 +209,7 @@ export class TaskManager {
   ): Promise<void> {
     const repos = this.config.repositories;
     const entry = this.tasks.get(task.taskId)!;
+    const executor = entry.executor!;
     const branchName = task.branch!;
 
     try {
@@ -156,7 +233,7 @@ export class TaskManager {
       console.log(`[${task.taskId}] Running Claude Code in workspace ${workspace.id}...`);
       const systemPrompt = this.config.claudeCode.systemPrompt ?? "";
       const fullPrompt = task.prompt + buildSystemInstructions(repos) + (systemPrompt ? `\n\n${systemPrompt}` : "");
-      const result = await entry.executor.run(fullPrompt, volumeMount, workdir, task.taskId);
+      const result = await executor.run(fullPrompt, volumeMount, workdir, task.taskId);
 
       task.output = result.output;
 
@@ -166,7 +243,7 @@ export class TaskManager {
         if (hasUncommitted) {
           console.log(`[${task.taskId}] Uncommitted changes detected, asking Claude to commit...`);
           const commitPrompt = `You have uncommitted changes in the workspace. Stage all changes with "git add" and commit them with a clear conventional commit message. Do NOT push.`;
-          await entry.executor.run(commitPrompt, volumeMount, workdir, task.taskId);
+          await executor.run(commitPrompt, volumeMount, workdir, task.taskId);
         }
 
         // Step 5: Ensure our branch points to HEAD (handles Claude switching branches)
@@ -189,10 +266,11 @@ export class TaskManager {
     } catch (err) {
       task.status = "failed";
       task.error = err instanceof Error ? err.message : String(err);
-      task.output = entry.executor.getOutput();
+      task.output = executor.getOutput();
       console.error(`[${task.taskId}] Error:`, task.error);
     } finally {
       task.completedAt = new Date().toISOString();
+      this.store.save({ ...task, workspaceId: workspace.id });
       this.pool.release(workspace.id);
     }
   }

@@ -25,7 +25,7 @@ function ensureDockerImage(imageName: string, configPath: string | undefined) {
   console.log(`Docker image "${imageName}" built successfully.`);
 }
 
-function main() {
+async function main() {
   const configPath = process.argv[2] || undefined;
 
   console.log("Loading config...");
@@ -37,6 +37,9 @@ function main() {
 
   const tokenManager = new TokenManager(config.server.workspaceDir);
   const taskManager = new TaskManager(config, tokenManager);
+
+  await taskManager.init();
+
   const app = createServer(taskManager);
 
   const port = Number(process.env.PORT) || 3000;
@@ -48,4 +51,7 @@ function main() {
   });
 }
 
-main();
+main().catch((err) => {
+  console.error("Fatal startup error:", err);
+  process.exit(1);
+});

@@ -50,7 +50,7 @@ const openApiSpec = {
           taskId: { type: "string" },
           branch: { type: "string", nullable: true },
           prompt: { type: "string" },
-          status: { type: "string", enum: ["running", "completed", "failed"] },
+          status: { type: "string", enum: ["running", "completed", "failed", "interrupted"] },
           startedAt: { type: "string", format: "date-time" },
           completedAt: { type: "string", format: "date-time", nullable: true },
           durationSeconds: { type: "number", description: "Elapsed time in seconds (running tasks show time so far)" },

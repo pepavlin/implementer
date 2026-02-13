@@ -30,7 +30,7 @@ export interface Config {
   claudeCode: ClaudeCodeConfig;
 }
 
-export type TaskStatus = "running" | "completed" | "failed";
+export type TaskStatus = "running" | "completed" | "failed" | "interrupted";
 
 export interface Task {
   taskId: string;
@@ -41,6 +41,10 @@ export interface Task {
   completedAt: string | null;
   output: string;
   error?: string;
+}
+
+export interface PersistedTask extends Task {
+  workspaceId: number;
 }
 
 export interface TaskCreateRequest {

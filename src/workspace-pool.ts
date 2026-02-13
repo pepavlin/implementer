@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { GitManager } from "./git-manager.js";
 import type { McpServerConfig, RepositoryConfig } from "./types.js";
@@ -82,6 +82,51 @@ RULES:
       join(claudeDir, "settings.json"),
       JSON.stringify({ enableAllProjectMcpServers: true }, null, 2),
     );
+  }
+
+  /**
+   * Scan the instances/ directory on disk and register existing workspace dirs.
+   * Sets nextId to avoid collisions with existing workspaces.
+   */
+  initFromDisk(): void {
+    if (!existsSync(this.baseDir)) {
+      return;
+    }
+
+    const entries = readdirSync(this.baseDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const id = parseInt(entry.name, 10);
+      if (isNaN(id)) continue;
+
+      const dir = join(this.baseDir, entry.name);
+      this.instances.set(id, { dir, inUse: false });
+      console.log(`[pool] Discovered existing workspace instance ${id}`);
+
+      if (id >= this.nextId) {
+        this.nextId = id + 1;
+      }
+    }
+  }
+
+  /**
+   * Acquire a specific workspace by ID without resetting git state (for resumption).
+   * Only rewrites CLAUDE.md and MCP config.
+   */
+  async acquireExisting(id: number, repos: RepositoryConfig[]): Promise<{ id: number; dir: string }> {
+    const instance = this.instances.get(id);
+    if (!instance) {
+      throw new Error(`Workspace instance ${id} not found`);
+    }
+
+    instance.inUse = true;
+    // Remove stray .git that Claude Code may have created at the instance root
+    rmSync(join(instance.dir, ".git"), { recursive: true, force: true });
+    this.writeClaude(instance.dir, repos);
+    this.writeMcpConfig(instance.dir);
+    await chownRecursive(instance.dir);
+    console.log(`[pool] Acquired existing workspace instance ${id} for resumption`);
+    return { id, dir: instance.dir };
   }
 
   /**
