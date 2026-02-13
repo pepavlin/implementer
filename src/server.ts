@@ -44,6 +44,13 @@ const openApiSpec = {
           status: { type: "string", enum: ["running"], example: "running" },
         },
       },
+      PullRequest: {
+        type: "object",
+        properties: {
+          repo: { type: "string", example: "my-repo" },
+          url: { type: "string", example: "https://github.com/org/repo/pull/42" },
+        },
+      },
       TaskStatus: {
         type: "object",
         properties: {
@@ -56,6 +63,7 @@ const openApiSpec = {
           durationSeconds: { type: "number", description: "Elapsed time in seconds (running tasks show time so far)" },
           output: { type: "string", nullable: true, description: "Final response/answer from Claude Code (null while task is running)" },
           error: { type: "string", nullable: true },
+          pullRequests: { type: "array", items: { $ref: "#/components/schemas/PullRequest" }, nullable: true, description: "Pull requests created for this task" },
         },
       },
       TaskLog: {
@@ -223,6 +231,7 @@ export function createServer(taskManager: TaskManager): express.Express {
       durationSeconds: getDurationSeconds(task),
       output: task.status === "running" || task.status === "interrupted" ? null : task.output,
       error: task.error,
+      pullRequests: task.pullRequests ?? null,
     });
   });
 

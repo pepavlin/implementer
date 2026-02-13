@@ -32,6 +32,11 @@ export interface Config {
 
 export type TaskStatus = "running" | "completed" | "failed" | "interrupted";
 
+export interface PullRequest {
+  repo: string;
+  url: string;
+}
+
 export interface Task {
   taskId: string;
   branch: string | null;
@@ -41,6 +46,7 @@ export interface Task {
   completedAt: string | null;
   output: string;
   error?: string;
+  pullRequests?: PullRequest[];
 }
 
 export interface PersistedTask extends Task {

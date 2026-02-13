@@ -1,13 +1,25 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { RepositoryConfig } from "./types.js";
+import type { PullRequest, RepositoryConfig } from "./types.js";
 
 function git(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(`git ${args.join(" ")} failed: ${stderr || error.message}`));
+      } else {
+        resolve(stdout.trim());
+      }
+    });
+  });
+}
+
+function gh(args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile("gh", args, { cwd, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(`gh ${args.join(" ")} failed: ${stderr || error.message}`));
       } else {
         resolve(stdout.trim());
       }
@@ -176,5 +188,55 @@ export class GitManager {
 
       await git(["push", "origin", branchName], repoDir);
     }
+  }
+
+  /**
+   * Create a pull request in all repos that are currently on the given branch.
+   * Uses the `gh` CLI. If a PR already exists for the branch, retrieves its URL instead.
+   * Returns successfully created/found PRs; failures are logged but not thrown.
+   */
+  async createPullRequestAll(
+    baseDir: string,
+    repos: RepositoryConfig[],
+    branchName: string,
+    title: string,
+    body: string,
+  ): Promise<PullRequest[]> {
+    const results: PullRequest[] = [];
+
+    for (const repo of repos) {
+      const repoDir = this.getRepoDir(baseDir, repo.name);
+
+      try {
+        const currentBranch = await git(["rev-parse", "--abbrev-ref", "HEAD"], repoDir);
+        if (currentBranch !== branchName) continue;
+      } catch {
+        continue;
+      }
+
+      try {
+        // Try to create a new PR
+        const url = await gh(
+          ["pr", "create", "--title", title, "--body", body, "--base", repo.defaultBranch, "--head", branchName],
+          repoDir,
+        );
+        results.push({ repo: repo.name, url });
+      } catch (createErr) {
+        // PR might already exist — try to get its URL
+        try {
+          const url = await gh(
+            ["pr", "view", branchName, "--json", "url", "--jq", ".url"],
+            repoDir,
+          );
+          if (url) {
+            results.push({ repo: repo.name, url });
+          }
+        } catch {
+          console.error(`[git-manager] Failed to create PR for ${repo.name}: ${createErr instanceof Error ? createErr.message : String(createErr)}`);
+        }
+      }
+    }
+
+    return results;
   }
 }

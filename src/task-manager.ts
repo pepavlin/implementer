@@ -251,6 +251,23 @@ export class TaskManager {
         if (hasCommits) {
           console.log(`[${task.taskId}] Pushing branches...`);
           await this.gitManager.pushBranchAll(workspace.dir, repos, branchName);
+
+          // Step 6: Create pull request(s) to the default branch
+          console.log(`[${task.taskId}] Creating pull request(s)...`);
+          const prTitle = task.prompt.split("\n")[0].slice(0, 120);
+          const prBody = task.prompt;
+          try {
+            const pullRequests = await this.gitManager.createPullRequestAll(
+              workspace.dir, repos, branchName, prTitle, prBody,
+            );
+            if (pullRequests.length > 0) {
+              task.pullRequests = pullRequests;
+              console.log(`[${task.taskId}] Created ${pullRequests.length} PR(s): ${pullRequests.map((pr) => pr.url).join(", ")}`);
+            }
+          } catch (prErr) {
+            console.error(`[${task.taskId}] PR creation failed:`, prErr instanceof Error ? prErr.message : String(prErr));
+          }
+
           task.status = "completed";
           console.log(`[${task.taskId}] Completed and pushed successfully.`);
         } else {

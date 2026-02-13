@@ -138,6 +138,34 @@ describe("server", () => {
       expect(res.body.durationSeconds).toBe(300);
     });
 
+    it("returns pullRequests when present", async () => {
+      const task = makeMockTask({
+        status: "completed",
+        completedAt: "2025-01-01T00:05:00.000Z",
+        pullRequests: [{ repo: "my-repo", url: "https://github.com/org/repo/pull/42" }],
+      });
+      const tm = makeMockTaskManager({
+        getTask: vi.fn().mockReturnValue(task),
+      });
+      const app = createServer(tm);
+
+      const res = await request(app).get("/task/abc123").expect(200);
+      expect(res.body.pullRequests).toEqual([
+        { repo: "my-repo", url: "https://github.com/org/repo/pull/42" },
+      ]);
+    });
+
+    it("returns null pullRequests when not present", async () => {
+      const task = makeMockTask({ status: "completed", completedAt: "2025-01-01T00:05:00.000Z" });
+      const tm = makeMockTaskManager({
+        getTask: vi.fn().mockReturnValue(task),
+      });
+      const app = createServer(tm);
+
+      const res = await request(app).get("/task/abc123").expect(200);
+      expect(res.body.pullRequests).toBeNull();
+    });
+
     it("returns growing durationSeconds for running task", async () => {
       const now = new Date();
       const fiveSecondsAgo = new Date(now.getTime() - 5000).toISOString();
