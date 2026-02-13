@@ -120,6 +120,31 @@ describe("TaskStore", () => {
     expect(loaded[0].taskId).toBe("real-task");
   });
 
+  it("save() does not leave .tmp files on success", () => {
+    const store = new TaskStore(TMP);
+    store.save(makeTask({ taskId: "clean-task" }));
+
+    const files = require("node:fs").readdirSync(join(TMP, "tasks")) as string[];
+    const tmpFiles = files.filter((f: string) => f.endsWith(".tmp"));
+    expect(tmpFiles).toHaveLength(0);
+  });
+
+  it("loadAll() skips files without workspaceId", () => {
+    const store = new TaskStore(TMP);
+
+    store.save(makeTask({ taskId: "valid-task" }));
+
+    // Write a valid JSON with taskId but missing workspaceId
+    writeFileSync(
+      join(TMP, "tasks", "no-ws.json"),
+      JSON.stringify({ taskId: "no-ws", status: "completed", prompt: "test" }),
+    );
+
+    const loaded = store.loadAll();
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].taskId).toBe("valid-task");
+  });
+
   it("round-trips all task fields correctly", () => {
     const store = new TaskStore(TMP);
     const task = makeTask({

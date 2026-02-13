@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PersistedTask } from "./types.js";
 
@@ -11,11 +11,15 @@ export class TaskStore {
   }
 
   /**
-   * Persist a task to disk (synchronous to minimize crash window).
+   * Persist a task to disk. Uses write-to-temp-then-rename for atomicity —
+   * rename is atomic on POSIX, so a crash mid-write can't produce a
+   * half-written JSON file.
    */
   save(task: PersistedTask): void {
     const filePath = join(this.dir, `${task.taskId}.json`);
-    writeFileSync(filePath, JSON.stringify(task, null, 2));
+    const tmpPath = `${filePath}.tmp`;
+    writeFileSync(tmpPath, JSON.stringify(task, null, 2));
+    renameSync(tmpPath, filePath);
   }
 
   /**
@@ -35,7 +39,7 @@ export class TaskStore {
       try {
         const raw = readFileSync(join(this.dir, file), "utf-8");
         const task = JSON.parse(raw) as PersistedTask;
-        if (task.taskId) {
+        if (task.taskId && typeof task.workspaceId === "number") {
           tasks.push(task);
         }
       } catch (err) {

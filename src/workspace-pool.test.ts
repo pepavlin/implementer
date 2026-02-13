@@ -187,6 +187,19 @@ describe("WorkspacePool", () => {
       await expect(pool.acquireExisting(42, fakeRepos)).rejects.toThrow("not found");
     });
 
+    it("throws when workspace is already in use", async () => {
+      const pool = new WorkspacePool(TMP);
+
+      mkdirSync(join(TMP, "instances", "0"), { recursive: true });
+      pool.initFromDisk();
+
+      // Acquire once
+      await pool.acquireExisting(0, fakeRepos);
+
+      // Second acquire on same workspace should fail
+      await expect(pool.acquireExisting(0, fakeRepos)).rejects.toThrow("already in use");
+    });
+
     it("removes stray .git directory", async () => {
       const pool = new WorkspacePool(TMP);
 

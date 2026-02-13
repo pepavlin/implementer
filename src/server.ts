@@ -221,7 +221,7 @@ export function createServer(taskManager: TaskManager): express.Express {
       startedAt: task.startedAt,
       completedAt: task.completedAt,
       durationSeconds: getDurationSeconds(task),
-      output: task.status === "running" ? null : task.output,
+      output: task.status === "running" || task.status === "interrupted" ? null : task.output,
       error: task.error,
     });
   });

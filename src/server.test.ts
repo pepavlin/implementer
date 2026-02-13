@@ -152,6 +152,18 @@ describe("server", () => {
       expect(res.body.durationSeconds).toBeLessThanOrEqual(10);
     });
 
+    it("returns null output for interrupted task", async () => {
+      const task = makeMockTask({ status: "interrupted" as any, completedAt: null });
+      const tm = makeMockTaskManager({
+        getTask: vi.fn().mockReturnValue(task),
+      });
+      const app = createServer(tm);
+
+      const res = await request(app).get("/task/abc123").expect(200);
+      expect(res.body.status).toBe("interrupted");
+      expect(res.body.output).toBeNull();
+    });
+
     it("returns 404 for unknown task", async () => {
       const tm = makeMockTaskManager({
         getTask: vi.fn().mockReturnValue(undefined),

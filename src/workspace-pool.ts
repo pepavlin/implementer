@@ -118,6 +118,9 @@ RULES:
     if (!instance) {
       throw new Error(`Workspace instance ${id} not found`);
     }
+    if (instance.inUse) {
+      throw new Error(`Workspace instance ${id} is already in use`);
+    }
 
     instance.inUse = true;
     // Remove stray .git that Claude Code may have created at the instance root
