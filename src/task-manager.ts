@@ -222,13 +222,17 @@ export class TaskManager {
         await this.gitManager.prepareNewBranchAll(workspace.dir, repos, branchName);
       }
 
+      // Step 2: Push branch to remote immediately so it's visible in GitHub
+      console.log(`[${task.taskId}] Pushing branch to remote...`);
+      await this.gitManager.pushBranchAll(workspace.dir, repos, branchName);
+
       // Rechown after branch creation (new refs are owned by root)
       await chownRecursive(workspace.dir);
 
-      // Step 2: Save pre-run HEAD hashes to detect new commits later
+      // Step 3: Save pre-run HEAD hashes to detect new commits later
       const preRunHeads = await this.gitManager.getHeadAll(workspace.dir, repos);
 
-      // Step 3: Run Claude Code in workspace dir
+      // Step 4: Run Claude Code in workspace dir
       const { volumeMount, workdir } = this.getDockerMount(workspace.dir);
       console.log(`[${task.taskId}] Running Claude Code in workspace ${workspace.id}...`);
       const systemPrompt = this.config.claudeCode.systemPrompt ?? "";
@@ -237,22 +241,23 @@ export class TaskManager {
 
       task.output = result.output;
 
-      if (result.exitCode === 0) {
-        // Step 4: Check for uncommitted changes and ask Claude to commit if needed
-        const hasUncommitted = await this.gitManager.hasUncommittedChanges(workspace.dir, repos);
-        if (hasUncommitted) {
-          console.log(`[${task.taskId}] Uncommitted changes detected, asking Claude to commit...`);
-          const commitPrompt = `You have uncommitted changes in the workspace. Stage all changes with "git add" and commit them with a clear conventional commit message. Do NOT push.`;
-          await executor.run(commitPrompt, volumeMount, workdir, task.taskId);
-        }
+      // Step 5: Check for uncommitted changes and ask Claude to commit if needed
+      const hasUncommitted = await this.gitManager.hasUncommittedChanges(workspace.dir, repos);
+      if (hasUncommitted) {
+        console.log(`[${task.taskId}] Uncommitted changes detected, asking Claude to commit...`);
+        const commitPrompt = `You have uncommitted changes in the workspace. Stage all changes with "git add" and commit them with a clear conventional commit message. Do NOT push.`;
+        await executor.run(commitPrompt, volumeMount, workdir, task.taskId);
+      }
 
-        // Step 5: Ensure our branch points to HEAD (handles Claude switching branches)
-        const hasCommits = await this.gitManager.ensureBranchAtHeadAll(workspace.dir, repos, branchName, preRunHeads);
+      // Step 6: Ensure our branch points to HEAD (handles Claude switching branches)
+      const hasCommits = await this.gitManager.ensureBranchAtHeadAll(workspace.dir, repos, branchName, preRunHeads);
+
+      if (result.exitCode === 0) {
         if (hasCommits) {
+          // Success with commits: push and create ready PR
           console.log(`[${task.taskId}] Pushing branches...`);
           await this.gitManager.pushBranchAll(workspace.dir, repos, branchName);
 
-          // Step 6: Create pull request(s) to the default branch
           console.log(`[${task.taskId}] Creating pull request(s)...`);
           const prTitle = task.prompt.split("\n")[0].slice(0, 120);
           const prBody = task.prompt;
@@ -271,11 +276,39 @@ export class TaskManager {
           task.status = "completed";
           console.log(`[${task.taskId}] Completed and pushed successfully.`);
         } else {
-          console.log(`[${task.taskId}] No new commits — skipping push.`);
+          // Success with no commits: delete remote branch and clear branch ref
+          console.log(`[${task.taskId}] No new commits — cleaning up remote branch.`);
+          await this.gitManager.deleteRemoteBranchAll(workspace.dir, repos, branchName);
           task.branch = null;
           task.status = "completed";
         }
       } else {
+        if (hasCommits) {
+          // Failure with commits: push partial work and create draft PR
+          console.log(`[${task.taskId}] Failed but has commits — pushing partial work...`);
+          await this.gitManager.pushBranchAll(workspace.dir, repos, branchName);
+
+          console.log(`[${task.taskId}] Creating draft pull request(s)...`);
+          const prTitle = task.prompt.split("\n")[0].slice(0, 120);
+          const prBody = task.prompt;
+          try {
+            const pullRequests = await this.gitManager.createPullRequestAll(
+              workspace.dir, repos, branchName, prTitle, prBody, true,
+            );
+            if (pullRequests.length > 0) {
+              task.pullRequests = pullRequests;
+              console.log(`[${task.taskId}] Created ${pullRequests.length} draft PR(s): ${pullRequests.map((pr) => pr.url).join(", ")}`);
+            }
+          } catch (prErr) {
+            console.error(`[${task.taskId}] Draft PR creation failed:`, prErr instanceof Error ? prErr.message : String(prErr));
+          }
+        } else {
+          // Failure with no commits: delete remote branch
+          console.log(`[${task.taskId}] Failed with no commits — cleaning up remote branch.`);
+          await this.gitManager.deleteRemoteBranchAll(workspace.dir, repos, branchName);
+          task.branch = null;
+        }
+
         task.status = "failed";
         task.error = `Claude Code exited with code ${result.exitCode}`;
         console.log(`[${task.taskId}] Failed with exit code ${result.exitCode}.`);

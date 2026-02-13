@@ -191,6 +191,29 @@ export class GitManager {
   }
 
   /**
+   * Delete the remote branch in all repos that are currently on the given branch.
+   * Best-effort: errors are logged but not thrown.
+   */
+  async deleteRemoteBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string): Promise<void> {
+    for (const repo of repos) {
+      const repoDir = this.getRepoDir(baseDir, repo.name);
+
+      try {
+        const currentBranch = await git(["rev-parse", "--abbrev-ref", "HEAD"], repoDir);
+        if (currentBranch !== branchName) continue;
+      } catch {
+        continue;
+      }
+
+      try {
+        await git(["push", "origin", "--delete", branchName], repoDir);
+      } catch (err) {
+        console.error(`[git-manager] Failed to delete remote branch ${branchName} in ${repo.name}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
+  /**
    * Create a pull request in all repos that are currently on the given branch.
    * Uses the `gh` CLI. If a PR already exists for the branch, retrieves its URL instead.
    * Returns successfully created/found PRs; failures are logged but not thrown.
@@ -201,6 +224,7 @@ export class GitManager {
     branchName: string,
     title: string,
     body: string,
+    draft = false,
   ): Promise<PullRequest[]> {
     const results: PullRequest[] = [];
 
@@ -216,10 +240,9 @@ export class GitManager {
 
       try {
         // Try to create a new PR
-        const url = await gh(
-          ["pr", "create", "--title", title, "--body", body, "--base", repo.defaultBranch, "--head", branchName],
-          repoDir,
-        );
+        const args = ["pr", "create", "--title", title, "--body", body, "--base", repo.defaultBranch, "--head", branchName];
+        if (draft) args.push("--draft");
+        const url = await gh(args, repoDir);
         results.push({ repo: repo.name, url });
       } catch (createErr) {
         // PR might already exist — try to get its URL

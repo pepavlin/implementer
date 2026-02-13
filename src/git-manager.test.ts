@@ -45,6 +45,72 @@ describe("GitManager", () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  describe("deleteRemoteBranchAll", () => {
+    it("skips repos not on the target branch", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Stay on main, not on impl branch
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+
+      // Should not throw — just skips
+      await gm.deleteRemoteBranchAll(workDir, repos, "impl/test-branch");
+
+      // Verify the remote still has no impl branch (nothing was deleted)
+      const branches = await shell("git branch", bareDir);
+      expect(branches).toContain("main");
+    });
+
+    it("deletes the remote branch when on the target branch", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Create and push the impl branch
+      await shell("git checkout -b impl/test-branch", repoDir);
+      await shell("git push origin impl/test-branch", repoDir);
+
+      // Verify branch exists on remote
+      const branchesBefore = await shell("git branch -r", repoDir);
+      expect(branchesBefore).toContain("origin/impl/test-branch");
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      await gm.deleteRemoteBranchAll(workDir, repos, "impl/test-branch");
+
+      // Fetch and verify branch is gone from remote
+      await shell("git fetch origin --prune", repoDir);
+      const branchesAfter = await shell("git branch -r", repoDir);
+      expect(branchesAfter).not.toContain("origin/impl/test-branch");
+    });
+
+    it("handles error gracefully when remote branch does not exist", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Create local branch but don't push it
+      await shell("git checkout -b impl/test-branch", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      // Should not throw even though remote branch doesn't exist
+      await gm.deleteRemoteBranchAll(workDir, repos, "impl/test-branch");
+
+      consoleSpy.mockRestore();
+    });
+  });
+
   describe("createPullRequestAll", () => {
     it("skips repos not on the target branch", async () => {
       const bareDir = join(TMP, "bare-repo");
@@ -78,6 +144,29 @@ describe("GitManager", () => {
       // gh CLI won't work on a local bare repo — should handle gracefully
       const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const results = await gm.createPullRequestAll(workDir, repos, "impl/test-branch", "Test PR", "Body");
+      consoleSpy.mockRestore();
+
+      // Should return empty array (no crash), since gh can't create PR on local repo
+      expect(results).toEqual([]);
+    });
+
+    it("handles gh CLI with draft flag gracefully", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Create and checkout the impl branch
+      await shell("git checkout -b impl/test-branch", repoDir);
+      await shell("echo change > file2.txt && git add . && git commit -m 'change'", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+
+      // gh CLI won't work on a local bare repo — should handle gracefully even with draft
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const results = await gm.createPullRequestAll(workDir, repos, "impl/test-branch", "Test PR", "Body", true);
       consoleSpy.mockRestore();
 
       // Should return empty array (no crash), since gh can't create PR on local repo
