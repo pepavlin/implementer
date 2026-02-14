@@ -252,11 +252,26 @@ export class TaskManager {
       // Step 6: Ensure our branch points to HEAD (handles Claude switching branches)
       const hasCommits = await this.gitManager.ensureBranchAtHeadAll(workspace.dir, repos, branchName, preRunHeads);
 
+      // Step 7: Rebase on latest default branch to avoid conflicts in PR
+      if (hasCommits) {
+        console.log(`[${task.taskId}] Rebasing on latest default branch...`);
+        const { conflicted } = await this.gitManager.rebaseOnDefaultAll(workspace.dir, repos, branchName);
+
+        if (conflicted.length > 0) {
+          const repoInstructions = conflicted.map(
+            (r) => `- cd ${r.name} && git rebase origin/${r.defaultBranch} — resolve all conflicts, then git add the resolved files and git rebase --continue. Repeat until rebase completes.`,
+          ).join("\n");
+          console.log(`[${task.taskId}] Rebase conflicts in ${conflicted.map((r) => r.name).join(", ")} — asking Claude to resolve...`);
+          const rebasePrompt = `Some repositories need rebasing with conflict resolution:\n${repoInstructions}\nResolve every conflict by keeping the intent of your changes while incorporating the upstream updates. Do NOT push.`;
+          await executor.run(rebasePrompt, volumeMount, workdir, task.taskId);
+        }
+      }
+
       if (result.exitCode === 0) {
         if (hasCommits) {
-          // Success with commits: push and create ready PR
+          // Success with commits: force-push (rebase rewrites history) and create ready PR
           console.log(`[${task.taskId}] Pushing branches...`);
-          await this.gitManager.pushBranchAll(workspace.dir, repos, branchName);
+          await this.gitManager.pushBranchAll(workspace.dir, repos, branchName, true);
 
           console.log(`[${task.taskId}] Creating pull request(s)...`);
           const prTitle = task.prompt.split("\n")[0].slice(0, 120);
@@ -284,9 +299,9 @@ export class TaskManager {
         }
       } else {
         if (hasCommits) {
-          // Failure with commits: push partial work and create draft PR
+          // Failure with commits: force-push partial work and create draft PR
           console.log(`[${task.taskId}] Failed but has commits — pushing partial work...`);
-          await this.gitManager.pushBranchAll(workspace.dir, repos, branchName);
+          await this.gitManager.pushBranchAll(workspace.dir, repos, branchName, true);
 
           console.log(`[${task.taskId}] Creating draft pull request(s)...`);
           const prTitle = task.prompt.split("\n")[0].slice(0, 120);

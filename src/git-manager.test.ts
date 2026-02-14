@@ -111,6 +111,123 @@ describe("GitManager", () => {
     });
   });
 
+  describe("rebaseOnDefaultAll", () => {
+    it("skips repos not on the target branch", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Stay on main
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      const result = await gm.rebaseOnDefaultAll(workDir, repos, "impl/test-branch");
+
+      expect(result.rebased).toEqual([]);
+      expect(result.conflicted).toEqual([]);
+    });
+
+    it("rebases cleanly when no conflicts", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Create feature branch and add a commit
+      await shell("git checkout -b impl/feature", repoDir);
+      await shell("echo feature > feature.txt && git add . && git commit -m 'feat'", repoDir);
+
+      // Simulate main advancing: push a non-conflicting change to origin/main
+      // via a temporary clone
+      const tmpClone = join(TMP, "tmp-clone");
+      mkdirSync(tmpClone, { recursive: true });
+      await shell(`git clone ${bareDir} .`, tmpClone);
+      await shell('git config user.email "test@test.com"', tmpClone);
+      await shell('git config user.name "Test"', tmpClone);
+      await shell("echo upstream > upstream.txt && git add . && git commit -m 'upstream' && git push origin main", tmpClone);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      const result = await gm.rebaseOnDefaultAll(workDir, repos, "impl/feature");
+
+      expect(result.rebased).toEqual(["my-repo"]);
+      expect(result.conflicted).toEqual([]);
+
+      // Verify the rebase actually happened — upstream.txt should be in the tree
+      const files = await shell("ls", repoDir);
+      expect(files).toContain("upstream.txt");
+      expect(files).toContain("feature.txt");
+    });
+
+    it("aborts and returns conflicted repos on conflict", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Create feature branch and modify file.txt
+      await shell("git checkout -b impl/feature", repoDir);
+      await shell("echo feature-change > file.txt && git add . && git commit -m 'feat'", repoDir);
+
+      // Simulate conflicting change on main
+      const tmpClone = join(TMP, "tmp-clone");
+      mkdirSync(tmpClone, { recursive: true });
+      await shell(`git clone ${bareDir} .`, tmpClone);
+      await shell('git config user.email "test@test.com"', tmpClone);
+      await shell('git config user.name "Test"', tmpClone);
+      await shell("echo conflicting-change > file.txt && git add . && git commit -m 'conflict' && git push origin main", tmpClone);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      const result = await gm.rebaseOnDefaultAll(workDir, repos, "impl/feature");
+
+      expect(result.rebased).toEqual([]);
+      expect(result.conflicted).toHaveLength(1);
+      expect(result.conflicted[0].name).toBe("my-repo");
+
+      // Verify rebase was aborted — repo should be in clean state on the branch
+      const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
+      expect(branch).toBe("impl/feature");
+      const status = await shell("git status --porcelain", repoDir);
+      expect(status).toBe("");
+    });
+  });
+
+  describe("pushBranchAll", () => {
+    it("pushes with --force-with-lease when force is true", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Create branch, push it, then amend (simulating rebase rewriting history)
+      await shell("git checkout -b impl/feature", repoDir);
+      await shell("echo v1 > new.txt && git add . && git commit -m 'v1'", repoDir);
+      await shell("git push origin impl/feature", repoDir);
+
+      // Amend the commit (rewrites history like rebase would)
+      await shell("echo v2 > new.txt && git add . && git commit --amend -m 'v2'", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+
+      // Regular push would fail, force push should succeed
+      await gm.pushBranchAll(workDir, repos, "impl/feature", true);
+
+      // Verify the force-pushed content reached the remote
+      const tmpClone = join(TMP, "verify-clone");
+      mkdirSync(tmpClone, { recursive: true });
+      await shell(`git clone ${bareDir} .`, tmpClone);
+      await shell("git checkout impl/feature", tmpClone);
+      const content = await shell("cat new.txt", tmpClone);
+      expect(content).toBe("v2");
+    });
+  });
+
   describe("createPullRequestAll", () => {
     it("skips repos not on the target branch", async () => {
       const bareDir = join(TMP, "bare-repo");

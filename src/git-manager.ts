@@ -174,8 +174,9 @@ export class GitManager {
 
   /**
    * Push the branch in all repos that are currently on it.
+   * When force is true, uses --force-with-lease (needed after rebase).
    */
-  async pushBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string): Promise<void> {
+  async pushBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string, force = false): Promise<void> {
     for (const repo of repos) {
       const repoDir = this.getRepoDir(baseDir, repo.name);
 
@@ -186,8 +187,52 @@ export class GitManager {
         continue;
       }
 
-      await git(["push", "origin", branchName], repoDir);
+      const args = ["push", "origin", branchName];
+      if (force) args.push("--force-with-lease");
+      await git(args, repoDir);
     }
+  }
+
+  /**
+   * Rebase the branch on the latest default branch in all repos that are on it.
+   * Fetches origin first, then attempts rebase. If rebase fails (conflicts),
+   * aborts it and returns the repo in the conflicted list.
+   */
+  async rebaseOnDefaultAll(
+    baseDir: string,
+    repos: RepositoryConfig[],
+    branchName: string,
+  ): Promise<{ rebased: string[]; conflicted: RepositoryConfig[] }> {
+    const rebased: string[] = [];
+    const conflicted: RepositoryConfig[] = [];
+
+    for (const repo of repos) {
+      const repoDir = this.getRepoDir(baseDir, repo.name);
+
+      try {
+        const currentBranch = await git(["rev-parse", "--abbrev-ref", "HEAD"], repoDir);
+        if (currentBranch !== branchName) continue;
+      } catch {
+        continue;
+      }
+
+      await git(["fetch", "origin"], repoDir);
+
+      try {
+        await git(["rebase", `origin/${repo.defaultBranch}`], repoDir);
+        rebased.push(repo.name);
+      } catch {
+        // Rebase failed — abort and mark as conflicted
+        try {
+          await git(["rebase", "--abort"], repoDir);
+        } catch {
+          // Abort might fail if rebase wasn't actually in progress
+        }
+        conflicted.push(repo);
+      }
+    }
+
+    return { rebased, conflicted };
   }
 
   /**
