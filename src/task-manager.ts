@@ -258,6 +258,9 @@ export class TaskManager {
         const { conflicted } = await this.gitManager.rebaseOnDefaultAll(workspace.dir, repos, branchName);
 
         if (conflicted.length > 0) {
+          // Rechown after fetch/rebase so sandbox container (UID 1000) can write git objects
+          await chownRecursive(workspace.dir);
+
           const repoInstructions = conflicted.map(
             (r) => `- cd ${r.name} && git rebase origin/${r.defaultBranch} — resolve all conflicts, then git add the resolved files and git rebase --continue. Repeat until rebase completes.`,
           ).join("\n");
