@@ -147,6 +147,7 @@ RULES:
         instance.inUse = true;
         // Remove stray .git that Claude Code may have created at the instance root
         rmSync(join(instance.dir, ".git"), { recursive: true, force: true });
+        await this.gitManager.ensureAllRepos(instance.dir, repos);
         await this.gitManager.resetToDefaultAll(instance.dir, repos);
         this.writeClaude(instance.dir, repos);
         this.writeMcpConfig(instance.dir);
