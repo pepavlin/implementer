@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import type { Config, PersistedTask, Task, TaskCreateRequest } from "./types.js";
 import { GitManager } from "./git-manager.js";
-import { Executor } from "./executor.js";
+import { Executor, extractLastAssistantMessage } from "./executor.js";
 import { WorkspacePool, chownRecursive } from "./workspace-pool.js";
 import { TaskStore } from "./task-store.js";
 import type { TokenManager } from "./auth.js";
@@ -141,6 +141,24 @@ export class TaskManager {
     return { volumeMount: `${workspaceDir}:/workspace`, workdir: "/workspace" };
   }
 
+  /**
+   * Build a PR body from Claude's last message and commit logs.
+   */
+  private buildPrBody(assistantMessage: string, commitLogs: Map<string, string>): string {
+    const parts: string[] = [];
+
+    if (assistantMessage) {
+      parts.push(`## Summary\n\n${assistantMessage}`);
+    }
+
+    if (commitLogs.size > 0) {
+      const commitLines = Array.from(commitLogs.values()).join("\n");
+      parts.push(`## Commits\n\n${commitLines}`);
+    }
+
+    return parts.join("\n\n") || "No summary available.";
+  }
+
   getTask(taskId: string): Task | undefined {
     return this.tasks.get(taskId)?.task;
   }
@@ -276,9 +294,13 @@ export class TaskManager {
           console.log(`[${task.taskId}] Pushing branches...`);
           await this.gitManager.pushBranchAll(workspace.dir, repos, branchName, true);
 
+          // Build PR body from Claude's summary + commit log
+          const assistantMessage = extractLastAssistantMessage(task.output);
+          const commitLogs = await this.gitManager.getCommitLogAll(workspace.dir, repos, branchName, preRunHeads);
+          const prBody = this.buildPrBody(assistantMessage, commitLogs);
+
           console.log(`[${task.taskId}] Creating pull request(s)...`);
           const prTitle = task.prompt.split("\n")[0].slice(0, 120);
-          const prBody = task.prompt;
           try {
             const pullRequests = await this.gitManager.createPullRequestAll(
               workspace.dir, repos, branchName, prTitle, prBody,
@@ -286,6 +308,10 @@ export class TaskManager {
             if (pullRequests.length > 0) {
               task.pullRequests = pullRequests;
               console.log(`[${task.taskId}] Created ${pullRequests.length} PR(s): ${pullRequests.map((pr) => pr.url).join(", ")}`);
+
+              // Post original task prompt as a comment
+              const taskComment = `## Task\n\n${task.prompt}`;
+              await this.gitManager.commentOnPullRequestAll(workspace.dir, pullRequests, taskComment);
             }
           } catch (prErr) {
             console.error(`[${task.taskId}] PR creation failed:`, prErr instanceof Error ? prErr.message : String(prErr));
@@ -306,9 +332,13 @@ export class TaskManager {
           console.log(`[${task.taskId}] Failed but has commits — pushing partial work...`);
           await this.gitManager.pushBranchAll(workspace.dir, repos, branchName, true);
 
+          // Build PR body from Claude's summary + commit log
+          const assistantMessage = extractLastAssistantMessage(task.output);
+          const commitLogs = await this.gitManager.getCommitLogAll(workspace.dir, repos, branchName, preRunHeads);
+          const prBody = this.buildPrBody(assistantMessage, commitLogs);
+
           console.log(`[${task.taskId}] Creating draft pull request(s)...`);
           const prTitle = task.prompt.split("\n")[0].slice(0, 120);
-          const prBody = task.prompt;
           try {
             const pullRequests = await this.gitManager.createPullRequestAll(
               workspace.dir, repos, branchName, prTitle, prBody, true,
@@ -316,6 +346,10 @@ export class TaskManager {
             if (pullRequests.length > 0) {
               task.pullRequests = pullRequests;
               console.log(`[${task.taskId}] Created ${pullRequests.length} draft PR(s): ${pullRequests.map((pr) => pr.url).join(", ")}`);
+
+              // Post original task prompt as a comment
+              const taskComment = `## Task\n\n${task.prompt}`;
+              await this.gitManager.commentOnPullRequestAll(workspace.dir, pullRequests, taskComment);
             }
           } catch (prErr) {
             console.error(`[${task.taskId}] Draft PR creation failed:`, prErr instanceof Error ? prErr.message : String(prErr));

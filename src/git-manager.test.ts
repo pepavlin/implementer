@@ -228,6 +228,114 @@ describe("GitManager", () => {
     });
   });
 
+  describe("getCommitLogAll", () => {
+    it("returns commit subjects as markdown bullets", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Record pre-run head
+      const preHead = await shell("git rev-parse HEAD", repoDir);
+
+      // Create branch and add commits
+      await shell("git checkout -b impl/feature", repoDir);
+      await shell("echo a > a.txt && git add . && git commit -m 'feat: add animated hero'", repoDir);
+      await shell("echo b > b.txt && git add . && git commit -m 'fix: resolve hover styles'", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      const sinceHeads = new Map([["my-repo", preHead]]);
+
+      const logs = await gm.getCommitLogAll(workDir, repos, "impl/feature", sinceHeads);
+
+      expect(logs.has("my-repo")).toBe(true);
+      const log = logs.get("my-repo")!;
+      expect(log).toContain("- feat: add animated hero");
+      expect(log).toContain("- fix: resolve hover styles");
+    });
+
+    it("skips repos not on the target branch", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      const preHead = await shell("git rev-parse HEAD", repoDir);
+      // Stay on main
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      const sinceHeads = new Map([["my-repo", preHead]]);
+
+      const logs = await gm.getCommitLogAll(workDir, repos, "impl/feature", sinceHeads);
+      expect(logs.size).toBe(0);
+    });
+
+    it("skips repos with no sinceHead entry", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      await shell("git checkout -b impl/feature", repoDir);
+      await shell("echo a > a.txt && git add . && git commit -m 'feat'", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      const sinceHeads = new Map<string, string>(); // empty map
+
+      const logs = await gm.getCommitLogAll(workDir, repos, "impl/feature", sinceHeads);
+      expect(logs.size).toBe(0);
+    });
+
+    it("returns empty map when no new commits exist", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      await shell("git checkout -b impl/feature", repoDir);
+      const head = await shell("git rev-parse HEAD", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      const sinceHeads = new Map([["my-repo", head]]);
+
+      const logs = await gm.getCommitLogAll(workDir, repos, "impl/feature", sinceHeads);
+      // HEAD..HEAD produces no output, so repo won't be in the map
+      expect(logs.size).toBe(0);
+    });
+  });
+
+  describe("commentOnPullRequestAll", () => {
+    it("logs error when gh fails and does not throw", async () => {
+      const workDir = join(TMP, "workspace");
+      mkdirSync(workDir, { recursive: true });
+
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const pullRequests = [{ repo: "my-repo", url: "https://github.com/test/repo/pull/1" }];
+
+      // gh will fail since this is not a real repo — should not throw
+      await gm.commentOnPullRequestAll(workDir, pullRequests, "## Task\n\nDo something");
+
+      expect(consoleSpy).toHaveBeenCalled();
+      consoleSpy.mockRestore();
+    });
+
+    it("handles empty pull requests array", async () => {
+      const workDir = join(TMP, "workspace");
+      mkdirSync(workDir, { recursive: true });
+
+      // Should not throw
+      await gm.commentOnPullRequestAll(workDir, [], "comment");
+    });
+  });
+
   describe("createPullRequestAll", () => {
     it("skips repos not on the target branch", async () => {
       const bareDir = join(TMP, "bare-repo");

@@ -3,7 +3,7 @@ import * as child_process from "node:child_process";
 import { EventEmitter } from "node:events";
 import type { ClaudeCodeConfig } from "./types.js";
 import { TokenManager } from "./auth.js";
-import { Executor } from "./executor.js";
+import { Executor, extractLastAssistantMessage } from "./executor.js";
 
 // Mock child_process.spawn to capture docker args without running containers
 vi.mock("node:child_process", async () => {
@@ -38,6 +38,62 @@ function makeTokenManager(): TokenManager {
   });
   return tm;
 }
+
+describe("extractLastAssistantMessage", () => {
+  it("extracts text from a single assistant message", () => {
+    const output = '{"message":{"content":[{"type":"text","text":"I made the changes."}]}}';
+    expect(extractLastAssistantMessage(output)).toBe("I made the changes.");
+  });
+
+  it("returns the last assistant message when multiple exist", () => {
+    const lines = [
+      '{"message":{"content":[{"type":"text","text":"Starting work..."}]}}',
+      '{"type":"tool_use","name":"bash"}',
+      '{"message":{"content":[{"type":"text","text":"All done! Created the component."}]}}',
+    ].join("\n");
+    expect(extractLastAssistantMessage(lines)).toBe("All done! Created the component.");
+  });
+
+  it("joins multiple text blocks in a single message", () => {
+    const output = '{"message":{"content":[{"type":"text","text":"Part 1"},{"type":"text","text":"Part 2"}]}}';
+    expect(extractLastAssistantMessage(output)).toBe("Part 1\nPart 2");
+  });
+
+  it("skips non-text content blocks", () => {
+    const output = '{"message":{"content":[{"type":"tool_use","name":"bash"},{"type":"text","text":"Result here"}]}}';
+    expect(extractLastAssistantMessage(output)).toBe("Result here");
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(extractLastAssistantMessage("")).toBe("");
+  });
+
+  it("returns empty string when no assistant messages found", () => {
+    const lines = [
+      '{"type":"tool_result","output":"ok"}',
+      '{"system":"initialized"}',
+      "not json at all",
+    ].join("\n");
+    expect(extractLastAssistantMessage(lines)).toBe("");
+  });
+
+  it("skips malformed JSON lines gracefully", () => {
+    const lines = [
+      "this is not json",
+      '{"message":{"content":[{"type":"text","text":"Valid message"}]}}',
+      "{broken json",
+    ].join("\n");
+    expect(extractLastAssistantMessage(lines)).toBe("Valid message");
+  });
+
+  it("ignores messages with empty content array", () => {
+    const lines = [
+      '{"message":{"content":[]}}',
+      '{"message":{"content":[{"type":"text","text":"Real message"}]}}',
+    ].join("\n");
+    expect(extractLastAssistantMessage(lines)).toBe("Real message");
+  });
+});
 
 describe("Executor", () => {
   const originalEnv = { ...process.env };

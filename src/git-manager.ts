@@ -259,6 +259,60 @@ export class GitManager {
   }
 
   /**
+   * Get commit log (as markdown bullet list) for all repos since given HEAD refs.
+   * Returns a Map<repoName, markdownBulletList>.
+   */
+  async getCommitLogAll(
+    baseDir: string,
+    repos: RepositoryConfig[],
+    branchName: string,
+    sinceHeads: Map<string, string>,
+  ): Promise<Map<string, string>> {
+    const logs = new Map<string, string>();
+    for (const repo of repos) {
+      const repoDir = this.getRepoDir(baseDir, repo.name);
+
+      try {
+        const currentBranch = await git(["rev-parse", "--abbrev-ref", "HEAD"], repoDir);
+        if (currentBranch !== branchName) continue;
+      } catch {
+        continue;
+      }
+
+      const sinceHead = sinceHeads.get(repo.name);
+      if (!sinceHead) continue;
+
+      try {
+        const log = await git(["log", `${sinceHead}..HEAD`, "--format=- %s"], repoDir);
+        if (log) logs.set(repo.name, log);
+      } catch {
+        continue;
+      }
+    }
+    return logs;
+  }
+
+  /**
+   * Post a comment on each pull request. Best-effort: logs errors, doesn't throw.
+   */
+  async commentOnPullRequestAll(
+    baseDir: string,
+    pullRequests: PullRequest[],
+    comment: string,
+  ): Promise<void> {
+    for (const pr of pullRequests) {
+      try {
+        // Use gh pr comment with the PR URL
+        await gh(["pr", "comment", pr.url, "--body", comment], baseDir);
+      } catch (err) {
+        console.error(
+          `[git-manager] Failed to comment on PR ${pr.url}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
+
+  /**
    * Create a pull request in all repos that are currently on the given branch.
    * Uses the `gh` CLI. If a PR already exists for the branch, retrieves its URL instead.
    * Returns successfully created/found PRs; failures are logged but not thrown.

@@ -7,6 +7,27 @@ export interface ExecutorResult {
   output: string;
 }
 
+/**
+ * Extract the last assistant text message from Claude Code stream-json output.
+ * Stream-json is NDJSON where assistant messages have: { message: { content: [{ type: "text", text: "..." }] } }
+ */
+export function extractLastAssistantMessage(streamOutput: string): string {
+  let lastText = "";
+  for (const line of streamOutput.split("\n")) {
+    try {
+      const obj = JSON.parse(line);
+      const content = obj?.message?.content;
+      if (Array.isArray(content)) {
+        const texts = content
+          .filter((b: { type: string }) => b.type === "text")
+          .map((b: { text: string }) => b.text);
+        if (texts.length > 0) lastText = texts.join("\n");
+      }
+    } catch { /* skip non-JSON lines */ }
+  }
+  return lastText;
+}
+
 export class Executor {
   private config: ClaudeCodeConfig;
   private tokenManager: TokenManager;
