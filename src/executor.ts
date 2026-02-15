@@ -107,6 +107,7 @@ export class Executor {
     const dockerArgs = [
       "run",
       "--rm",
+      "--privileged",
       "--name", containerName,
       "--cpus=0.5",
       "-v", volumeMount,

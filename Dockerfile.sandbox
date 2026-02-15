@@ -1,5 +1,16 @@
 FROM node:22
 
+# Docker Engine (daemon + CLI) for true Docker-in-Docker inside the sandbox
+COPY --from=docker:27-dind /usr/local/bin/dockerd          /usr/local/bin/dockerd
+COPY --from=docker:27-dind /usr/local/bin/docker            /usr/local/bin/docker
+COPY --from=docker:27-dind /usr/local/bin/containerd        /usr/local/bin/containerd
+COPY --from=docker:27-dind /usr/local/bin/containerd-shim-runc-v2 /usr/local/bin/containerd-shim-runc-v2
+COPY --from=docker:27-dind /usr/local/bin/runc              /usr/local/bin/runc
+
+# gosu for dropping privileges; iptables for Docker container networking
+RUN apt-get update && apt-get install -y --no-install-recommends gosu iptables \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
 
@@ -21,13 +32,20 @@ RUN npx -y @playwright/mcp@latest --help > /dev/null 2>&1 || true \
 
 # Replace the default node user (uid 1000) with claude at the same uid
 RUN userdel -r node && useradd -m -s /bin/bash -u 1000 claude
-USER claude
 
-# Git identity and config for commits inside the container
-RUN git config --global user.name "Implementer" && \
-    git config --global user.email "implementer@noreply" && \
-    echo "._*" > ~/.gitignore_global && \
-    git config --global core.excludesFile ~/.gitignore_global
+# Add claude to the docker group so it can use the nested Docker daemon
+RUN groupadd -f docker && usermod -aG docker claude
+
+# Git identity and config for commits inside the container (as claude user)
+RUN gosu claude git config --global user.name "Implementer" && \
+    gosu claude git config --global user.email "implementer@noreply" && \
+    gosu claude bash -c 'echo "._*" > ~/.gitignore_global' && \
+    gosu claude git config --global core.excludesFile /home/claude/.gitignore_global
+
 WORKDIR /home/claude
 
-ENTRYPOINT ["claude"]
+# Entrypoint starts dockerd, waits for it, then runs claude as unprivileged user
+COPY sandbox-entrypoint.sh /usr/local/bin/sandbox-entrypoint.sh
+RUN chmod +x /usr/local/bin/sandbox-entrypoint.sh
+
+ENTRYPOINT ["sandbox-entrypoint.sh"]
