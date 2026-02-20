@@ -15,9 +15,10 @@ function git(args: string[], cwd: string): Promise<string> {
   });
 }
 
-function gh(args: string[], cwd: string): Promise<string> {
+function gh(args: string[], cwd: string, githubToken?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("gh", args, { cwd, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+    const env = githubToken ? { ...process.env, GH_TOKEN: githubToken } : undefined;
+    execFile("gh", args, { cwd, env, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(`gh ${args.join(" ")} failed: ${stderr || error.message}`));
       } else {
@@ -299,11 +300,11 @@ export class GitManager {
     baseDir: string,
     pullRequests: PullRequest[],
     comment: string,
+    githubToken?: string,
   ): Promise<void> {
     for (const pr of pullRequests) {
       try {
-        // Use gh pr comment with the PR URL
-        await gh(["pr", "comment", pr.url, "--body", comment], baseDir);
+        await gh(["pr", "comment", pr.url, "--body", comment], baseDir, githubToken);
       } catch (err) {
         console.error(
           `[git-manager] Failed to comment on PR ${pr.url}: ${err instanceof Error ? err.message : String(err)}`,
@@ -324,6 +325,7 @@ export class GitManager {
     title: string,
     body: string,
     draft = false,
+    githubToken?: string,
   ): Promise<PullRequest[]> {
     const results: PullRequest[] = [];
 
@@ -341,7 +343,7 @@ export class GitManager {
         // Try to create a new PR
         const args = ["pr", "create", "--title", title, "--body", body, "--base", repo.defaultBranch, "--head", branchName];
         if (draft) args.push("--draft");
-        const url = await gh(args, repoDir);
+        const url = await gh(args, repoDir, githubToken);
         results.push({ repo: repo.name, url });
       } catch (createErr) {
         // PR might already exist — try to get its URL
@@ -349,6 +351,7 @@ export class GitManager {
           const url = await gh(
             ["pr", "view", branchName, "--json", "url", "--jq", ".url"],
             repoDir,
+            githubToken,
           );
           if (url) {
             results.push({ repo: repo.name, url });

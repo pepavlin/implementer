@@ -30,7 +30,7 @@ function makeConfig(overrides: Partial<ClaudeCodeConfig> = {}): ClaudeCodeConfig
 }
 
 function makeTokenManager(): TokenManager {
-  const tm = new TokenManager("/tmp/executor-test");
+  const tm = new TokenManager(undefined, "/tmp/executor-test");
   // Stub getCredentials to avoid real token lookups
   vi.spyOn(tm, "getCredentials").mockResolvedValue({
     envName: "ANTHROPIC_API_KEY",

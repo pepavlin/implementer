@@ -2,12 +2,28 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
 import { createServer } from "./server.js";
 import type { TaskManager } from "./task-manager.js";
-import type { Task } from "./types.js";
+import type { Config, Task } from "./types.js";
 import { PoolExhaustedError } from "./workspace-pool.js";
+
+const PROJECT_ID = "test-project";
+
+function makeConfig(projectOverrides: Record<string, unknown> = {}): Config {
+  return {
+    server: { workspaceDir: "/tmp/test" },
+    projects: {
+      [PROJECT_ID]: {
+        repositories: [{ name: "repo", url: "https://example.com/repo.git", defaultBranch: "main" }],
+        claudeCode: { command: "claude" },
+        ...projectOverrides,
+      },
+    },
+  };
+}
 
 function makeMockTask(overrides: Partial<Task> = {}): Task {
   return {
     taskId: "abc123",
+    projectId: PROJECT_ID,
     branch: "impl/test-branch-abc123",
     prompt: "Add a button",
     status: "running",
@@ -31,7 +47,7 @@ function makeMockTaskManager(overrides: Partial<TaskManager> = {}) {
 describe("server", () => {
   describe("GET /docs", () => {
     it("returns Swagger UI HTML", async () => {
-      const app = createServer(makeMockTaskManager());
+      const app = createServer(makeMockTaskManager(), makeConfig());
       const res = await request(app).get("/docs/").expect(200);
       expect(res.text).toContain("swagger");
     });
@@ -39,7 +55,7 @@ describe("server", () => {
 
   describe("GET /", () => {
     it("redirects to /docs", async () => {
-      const app = createServer(makeMockTaskManager());
+      const app = createServer(makeMockTaskManager(), makeConfig());
       const res = await request(app).get("/").expect(302);
       expect(res.headers.location).toBe("/docs");
     });
@@ -51,7 +67,7 @@ describe("server", () => {
       const tm = makeMockTaskManager({
         startTask: vi.fn().mockResolvedValue(task),
       });
-      const app = createServer(tm);
+      const app = createServer(tm, makeConfig());
 
       const res = await request(app)
         .post("/task")
@@ -64,12 +80,12 @@ describe("server", () => {
     });
 
     it("rejects empty prompt", async () => {
-      const app = createServer(makeMockTaskManager());
+      const app = createServer(makeMockTaskManager(), makeConfig());
       await request(app).post("/task").send({ prompt: "" }).expect(400);
     });
 
     it("rejects missing prompt", async () => {
-      const app = createServer(makeMockTaskManager());
+      const app = createServer(makeMockTaskManager(), makeConfig());
       await request(app).post("/task").send({}).expect(400);
     });
 
@@ -77,7 +93,7 @@ describe("server", () => {
       const tm = makeMockTaskManager({
         startTask: vi.fn().mockRejectedValue(new PoolExhaustedError(4)),
       });
-      const app = createServer(tm);
+      const app = createServer(tm, makeConfig());
 
       const res = await request(app)
         .post("/task")
@@ -91,7 +107,7 @@ describe("server", () => {
       const tm = makeMockTaskManager({
         startTask: vi.fn().mockRejectedValue(new Error("boom")),
       });
-      const app = createServer(tm);
+      const app = createServer(tm, makeConfig());
 
       const res = await request(app)
         .post("/task")
@@ -104,7 +120,7 @@ describe("server", () => {
 
   describe("GET /tasks", () => {
     it("returns empty list when no tasks", async () => {
-      const app = createServer(makeMockTaskManager());
+      const app = createServer(makeMockTaskManager(), makeConfig());
       const res = await request(app).get("/tasks").expect(200);
       expect(res.body.tasks).toEqual([]);
     });
@@ -114,7 +130,7 @@ describe("server", () => {
       const tm = makeMockTaskManager({
         listTasks: vi.fn().mockReturnValue([task]),
       });
-      const app = createServer(tm);
+      const app = createServer(tm, makeConfig());
 
       const res = await request(app).get("/tasks").expect(200);
       expect(res.body.tasks).toHaveLength(1);
@@ -130,7 +146,7 @@ describe("server", () => {
       const tm = makeMockTaskManager({
         getTask: vi.fn().mockReturnValue(task),
       });
-      const app = createServer(tm);
+      const app = createServer(tm, makeConfig());
 
       const res = await request(app).get("/task/abc123").expect(200);
       expect(res.body.taskId).toBe("abc123");
@@ -147,7 +163,7 @@ describe("server", () => {
       const tm = makeMockTaskManager({
         getTask: vi.fn().mockReturnValue(task),
       });
-      const app = createServer(tm);
+      const app = createServer(tm, makeConfig());
 
       const res = await request(app).get("/task/abc123").expect(200);
       expect(res.body.pullRequests).toEqual([
@@ -160,7 +176,7 @@ describe("server", () => {
       const tm = makeMockTaskManager({
         getTask: vi.fn().mockReturnValue(task),
       });
-      const app = createServer(tm);
+      const app = createServer(tm, makeConfig());
 
       const res = await request(app).get("/task/abc123").expect(200);
       expect(res.body.pullRequests).toBeNull();
@@ -173,7 +189,7 @@ describe("server", () => {
       const tm = makeMockTaskManager({
         getTask: vi.fn().mockReturnValue(task),
       });
-      const app = createServer(tm);
+      const app = createServer(tm, makeConfig());
 
       const res = await request(app).get("/task/abc123").expect(200);
       expect(res.body.durationSeconds).toBeGreaterThanOrEqual(4);
@@ -185,7 +201,7 @@ describe("server", () => {
       const tm = makeMockTaskManager({
         getTask: vi.fn().mockReturnValue(task),
       });
-      const app = createServer(tm);
+      const app = createServer(tm, makeConfig());
 
       const res = await request(app).get("/task/abc123").expect(200);
       expect(res.body.status).toBe("interrupted");
@@ -196,7 +212,7 @@ describe("server", () => {
       const tm = makeMockTaskManager({
         getTask: vi.fn().mockReturnValue(undefined),
       });
-      const app = createServer(tm);
+      const app = createServer(tm, makeConfig());
 
       await request(app).get("/task/nonexistent").expect(404);
     });
@@ -209,7 +225,7 @@ describe("server", () => {
         getTask: vi.fn().mockReturnValue(task),
         getOutput: vi.fn().mockReturnValue("Hello from Claude"),
       });
-      const app = createServer(tm);
+      const app = createServer(tm, makeConfig());
 
       const res = await request(app).get("/task/abc123/log").expect(200);
       expect(res.body.output).toBe("Hello from Claude");
@@ -220,7 +236,7 @@ describe("server", () => {
       const tm = makeMockTaskManager({
         getTask: vi.fn().mockReturnValue(undefined),
       });
-      const app = createServer(tm);
+      const app = createServer(tm, makeConfig());
 
       await request(app).get("/task/nonexistent/log").expect(404);
     });
@@ -228,51 +244,52 @@ describe("server", () => {
 
   describe("authentication", () => {
     it("rejects requests without API key when configured", async () => {
-      const original = process.env.API_KEY;
-      process.env.API_KEY = "test-secret";
-      try {
-        const app = createServer(makeMockTaskManager());
-        await request(app).get("/tasks").expect(401);
-      } finally {
-        if (original === undefined) {
-          delete process.env.API_KEY;
-        } else {
-          process.env.API_KEY = original;
-        }
-      }
+      const app = createServer(makeMockTaskManager(), makeConfig({ apiKey: "test-secret" }));
+      await request(app).get("/tasks").expect(401);
     });
 
     it("accepts requests with correct API key", async () => {
-      const original = process.env.API_KEY;
-      process.env.API_KEY = "test-secret";
-      try {
-        const app = createServer(makeMockTaskManager());
-        await request(app)
-          .get("/tasks")
-          .set("Authorization", "Bearer test-secret")
-          .expect(200);
-      } finally {
-        if (original === undefined) {
-          delete process.env.API_KEY;
-        } else {
-          process.env.API_KEY = original;
-        }
-      }
+      const app = createServer(makeMockTaskManager(), makeConfig({ apiKey: "test-secret" }));
+      await request(app)
+        .get("/tasks")
+        .set("Authorization", "Bearer test-secret")
+        .expect(200);
     });
 
-    it("allows /docs without API key", async () => {
-      const original = process.env.API_KEY;
-      process.env.API_KEY = "test-secret";
-      try {
-        const app = createServer(makeMockTaskManager());
-        await request(app).get("/docs/").expect(200);
-      } finally {
-        if (original === undefined) {
-          delete process.env.API_KEY;
-        } else {
-          process.env.API_KEY = original;
-        }
-      }
+    it("rejects requests with wrong API key", async () => {
+      const app = createServer(makeMockTaskManager(), makeConfig({ apiKey: "test-secret" }));
+      await request(app)
+        .get("/tasks")
+        .set("Authorization", "Bearer wrong-key")
+        .expect(401);
+    });
+
+    it("allows /docs without API key even when auth is configured", async () => {
+      const app = createServer(makeMockTaskManager(), makeConfig({ apiKey: "test-secret" }));
+      await request(app).get("/docs/").expect(200);
+    });
+
+    it("allows requests without API key in dev mode (single project, no apiKey)", async () => {
+      const app = createServer(makeMockTaskManager(), makeConfig()); // no apiKey
+      await request(app).get("/tasks").expect(200);
+    });
+
+    it("rejects when multiple projects configured but no API keys", async () => {
+      const config: Config = {
+        server: { workspaceDir: "/tmp/test" },
+        projects: {
+          "project-a": {
+            repositories: [{ name: "repo-a", url: "https://example.com/a.git", defaultBranch: "main" }],
+            claudeCode: { command: "claude" },
+          },
+          "project-b": {
+            repositories: [{ name: "repo-b", url: "https://example.com/b.git", defaultBranch: "main" }],
+            claudeCode: { command: "claude" },
+          },
+        },
+      };
+      const app = createServer(makeMockTaskManager(), config);
+      await request(app).get("/tasks").expect(401);
     });
   });
 });

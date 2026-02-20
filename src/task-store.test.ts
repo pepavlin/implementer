@@ -9,6 +9,7 @@ const TMP = join(import.meta.dirname, "..", "tmp", "task-store-test");
 function makeTask(overrides: Partial<PersistedTask> = {}): PersistedTask {
   return {
     taskId: "abc123",
+    projectId: "test-project",
     branch: "impl/test-abc123",
     prompt: "Add a button",
     status: "completed",
@@ -149,6 +150,7 @@ describe("TaskStore", () => {
     const store = new TaskStore(TMP);
     const task = makeTask({
       taskId: "rt-test",
+      projectId: "my-project",
       branch: "impl/round-trip-rt-test",
       prompt: "Implement dark mode",
       status: "failed",
@@ -165,6 +167,7 @@ describe("TaskStore", () => {
     expect(loaded).toHaveLength(1);
     const rt = loaded[0];
     expect(rt.taskId).toBe("rt-test");
+    expect(rt.projectId).toBe("my-project");
     expect(rt.branch).toBe("impl/round-trip-rt-test");
     expect(rt.prompt).toBe("Implement dark mode");
     expect(rt.status).toBe("failed");
@@ -173,5 +176,21 @@ describe("TaskStore", () => {
     expect(rt.output).toBe("Error occurred");
     expect(rt.error).toBe("Claude Code exited with code 1");
     expect(rt.workspaceId).toBe(3);
+  });
+
+  it("loadAll() skips files without projectId", () => {
+    const store = new TaskStore(TMP);
+
+    store.save(makeTask({ taskId: "valid-task" }));
+
+    // Write a valid JSON with taskId and workspaceId but missing projectId
+    writeFileSync(
+      join(TMP, "tasks", "no-project.json"),
+      JSON.stringify({ taskId: "no-project", workspaceId: 0, status: "completed" }),
+    );
+
+    const loaded = store.loadAll();
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].taskId).toBe("valid-task");
   });
 });

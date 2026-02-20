@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
+import type { ProjectAuth } from "./types.js";
 
 const OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token";
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
@@ -21,18 +22,21 @@ interface TokenResult {
 /**
  * Manages Claude Code authentication credentials.
  *
- * Supports three modes (checked in order):
- *   1. ANTHROPIC_API_KEY – long-lived API key, never expires (pay-per-use)
- *   2. OAuth with auto-refresh – uses subscription (Pro/Max), refreshes automatically
- *   3. macOS Keychain fallback – dev-only, reads tokens from local keychain
+ * Supports these modes (checked in order):
+ *   1. Project-level API key (from ProjectAuth)
+ *   2. Global ANTHROPIC_API_KEY env var
+ *   3. OAuth with auto-refresh – project-level or global refresh token
+ *   4. Static global OAuth token (no refresh – will expire)
+ *   5. macOS Keychain fallback – dev-only, reads tokens from local keychain
  */
 export class TokenManager {
   private cache: TokenCache | null = null;
   private cacheFile: string;
+  private auth: ProjectAuth | undefined;
 
-  constructor(cacheDir?: string) {
-    const dir = cacheDir ?? resolve(process.cwd(), "workspace");
-    this.cacheFile = resolve(dir, ".claude-token-cache.json");
+  constructor(auth: ProjectAuth | undefined, cacheDir: string) {
+    this.auth = auth;
+    this.cacheFile = resolve(cacheDir, ".claude-token-cache.json");
   }
 
   /**
@@ -40,37 +44,47 @@ export class TokenManager {
    * Automatically refreshes OAuth tokens when needed.
    */
   async getCredentials(): Promise<TokenResult> {
-    // 1. API key takes priority (never expires)
+    // 1. Project-level API key
+    if (this.auth?.anthropicApiKey) {
+      return { envName: "ANTHROPIC_API_KEY", value: this.auth.anthropicApiKey };
+    }
+
+    // 2. Global API key (never expires)
     if (process.env.ANTHROPIC_API_KEY) {
       return { envName: "ANTHROPIC_API_KEY", value: process.env.ANTHROPIC_API_KEY };
     }
 
-    // 2. OAuth with auto-refresh
+    // 3. OAuth with auto-refresh (project-level or global)
     const refreshToken = this.getRefreshToken();
     if (refreshToken) {
       const accessToken = await this.getValidAccessToken(refreshToken);
       return { envName: "CLAUDE_CODE_OAUTH_TOKEN", value: accessToken };
     }
 
-    // 3. Static OAuth token (no refresh – will expire)
+    // 4. Static OAuth token (no refresh – will expire)
     if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
       console.warn("Warning: Using static OAuth token without refresh token. It will expire in ~1h.");
       return { envName: "CLAUDE_CODE_OAUTH_TOKEN", value: process.env.CLAUDE_CODE_OAUTH_TOKEN };
     }
 
-    // 4. macOS Keychain fallback (dev only)
+    // 5. macOS Keychain fallback (dev only)
     return this.fromKeychain();
   }
 
   private getRefreshToken(): string | null {
     // Disk cache first — it has the most recent refresh token after a refresh cycle
-    // (refresh tokens are single-use, so the env var becomes stale after first refresh)
+    // (refresh tokens are single-use, so the initial seed becomes stale after first refresh)
     const cached = this.loadCache();
     if (cached?.refreshToken) {
       return cached.refreshToken;
     }
 
-    // Env var as initial seed (used on first-ever start)
+    // Project-level refresh token as initial seed
+    if (this.auth?.claudeOauthRefreshToken) {
+      return this.auth.claudeOauthRefreshToken;
+    }
+
+    // Global env var as initial seed (used on first-ever start)
     if (process.env.CLAUDE_OAUTH_REFRESH_TOKEN) {
       return process.env.CLAUDE_OAUTH_REFRESH_TOKEN;
     }

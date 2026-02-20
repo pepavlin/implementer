@@ -3,6 +3,7 @@ import swaggerUi from "swagger-ui-express";
 import { z } from "zod";
 import { TaskManager } from "./task-manager.js";
 import { PoolExhaustedError } from "./workspace-pool.js";
+import type { Config } from "./types.js";
 
 const TaskCreateSchema = z.object({
   prompt: z.string().min(1),
@@ -102,7 +103,7 @@ const openApiSpec = {
     "/tasks": {
       get: {
         summary: "List all tasks",
-        description: "Returns all tasks (running, completed, and failed).",
+        description: "Returns all tasks for the authenticated project (running, completed, and failed).",
         responses: {
           "200": {
             description: "Task list",
@@ -145,33 +146,57 @@ function getDurationSeconds(task: { startedAt: string; completedAt: string | nul
   return Math.round((end - start) / 1000);
 }
 
-export function createServer(taskManager: TaskManager): express.Express {
+export function createServer(taskManager: TaskManager, config: Config): express.Express {
   const app = express();
   app.use(express.json());
 
   // Swagger UI — served before auth so it's accessible without a key
   app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
 
-  // API key authentication
-  const apiKey = process.env.API_KEY;
-  if (apiKey) {
-    app.use((req, res, next) => {
-      const header = req.headers.authorization;
-      if (header !== `Bearer ${apiKey}`) {
-        res.status(401).json({ error: "Unauthorized" });
-        return;
-      }
-      next();
-    });
+  // Build Bearer token → projectId map from config
+  const projectByKey = new Map<string, string>();
+  for (const [projectId, project] of Object.entries(config.projects)) {
+    if (project.apiKey) {
+      projectByKey.set(project.apiKey, projectId);
+    }
   }
+
+  const projectIds = Object.keys(config.projects);
+  const hasAuth = projectByKey.size > 0;
+
+  // Authentication middleware: maps Bearer token to a project
+  app.use((req, res, next) => {
+    // Swagger UI is always accessible
+    if (req.path.startsWith("/docs")) return next();
+
+    if (!hasAuth) {
+      // Dev mode: no API keys configured — require exactly one project
+      if (projectIds.length === 1) {
+        res.locals.projectId = projectIds[0];
+        return next();
+      }
+      res.status(401).json({ error: "API key required when multiple projects are configured without apiKey" });
+      return;
+    }
+
+    const token = req.headers.authorization?.replace("Bearer ", "");
+    const projectId = projectByKey.get(token ?? "");
+    if (!projectId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    res.locals.projectId = projectId;
+    next();
+  });
 
   // GET / - redirect to docs
   app.get("/", (_req, res) => {
     res.redirect("/docs");
   });
 
-  // POST /task - Start a new task (always accepts, parallel execution)
+  // POST /task - Start a new task
   app.post("/task", async (req, res) => {
+    const projectId = res.locals.projectId as string;
     const parsed = TaskCreateSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({
@@ -182,7 +207,7 @@ export function createServer(taskManager: TaskManager): express.Express {
     }
 
     try {
-      const task = await taskManager.startTask(parsed.data);
+      const task = await taskManager.startTask(projectId, parsed.data);
       res.status(200).json({
         taskId: task.taskId,
         branch: task.branch,
@@ -199,9 +224,10 @@ export function createServer(taskManager: TaskManager): express.Express {
     }
   });
 
-  // GET /tasks - List all tasks
-  app.get("/tasks", (_req, res) => {
-    const tasks = taskManager.listTasks().map((task) => ({
+  // GET /tasks - List all tasks for the authenticated project
+  app.get("/tasks", (req, res) => {
+    const projectId = res.locals.projectId as string;
+    const tasks = taskManager.listTasks(projectId).map((task) => ({
       taskId: task.taskId,
       branch: task.branch,
       prompt: task.prompt,
@@ -215,7 +241,8 @@ export function createServer(taskManager: TaskManager): express.Express {
 
   // GET /task/:taskId - Get specific task status
   app.get("/task/:taskId", (req, res) => {
-    const task = taskManager.getTask(req.params.taskId);
+    const projectId = res.locals.projectId as string;
+    const task = taskManager.getTask(projectId, req.params.taskId);
     if (!task) {
       res.status(404).json({ error: "Task not found" });
       return;
@@ -237,13 +264,14 @@ export function createServer(taskManager: TaskManager): express.Express {
 
   // GET /task/:taskId/log - Get specific task output log
   app.get("/task/:taskId/log", (req, res) => {
-    const task = taskManager.getTask(req.params.taskId);
+    const projectId = res.locals.projectId as string;
+    const task = taskManager.getTask(projectId, req.params.taskId);
     if (!task) {
       res.status(404).json({ error: "Task not found" });
       return;
     }
 
-    const fullOutput = taskManager.getOutput(req.params.taskId);
+    const fullOutput = taskManager.getOutput(projectId, req.params.taskId);
     const truncated = fullOutput.length > MAX_LOG_SIZE;
     const output = truncated ? fullOutput.slice(-MAX_LOG_SIZE) : fullOutput;
 

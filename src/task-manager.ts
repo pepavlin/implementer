@@ -1,10 +1,11 @@
+import { join } from "node:path";
 import { nanoid } from "nanoid";
-import type { Config, PersistedTask, Task, TaskCreateRequest } from "./types.js";
+import type { Config, PersistedTask, ProjectConfig, Task, TaskCreateRequest } from "./types.js";
 import { GitManager } from "./git-manager.js";
 import { Executor, extractLastAssistantMessage } from "./executor.js";
 import { WorkspacePool, chownRecursive } from "./workspace-pool.js";
 import { TaskStore } from "./task-store.js";
-import type { TokenManager } from "./auth.js";
+import { TokenManager } from "./auth.js";
 
 function buildSystemInstructions(repos: { name: string }[]): string {
   const repoList = repos.map((r) => r.name).join(", ");
@@ -16,6 +17,12 @@ IMPORTANT WORKSPACE RULES:
 - When you need to visually inspect a web application, ALWAYS start the dev server locally first (e.g. npm start, npm run dev) and use Playwright on the local URL (http://localhost:...). NEVER screenshot external/production URLs — you must test against the local code in your workspace so your changes are reflected.`;
 }
 
+interface ProjectState {
+  config: ProjectConfig;
+  pool: WorkspacePool;
+  tokenManager: TokenManager;
+}
+
 interface TaskEntry {
   task: Task;
   executor: Executor | null;
@@ -23,19 +30,27 @@ interface TaskEntry {
 }
 
 export class TaskManager {
-  private config: Config;
+  private serverWorkspaceDir: string;
+  private projects: Map<string, ProjectState> = new Map();
   private gitManager: GitManager;
-  private pool: WorkspacePool;
-  private tokenManager: TokenManager;
   private store: TaskStore;
   private tasks: Map<string, TaskEntry> = new Map();
 
-  constructor(config: Config, tokenManager: TokenManager) {
-    this.config = config;
-    this.tokenManager = tokenManager;
+  constructor(config: Config) {
+    this.serverWorkspaceDir = config.server.workspaceDir;
     this.gitManager = new GitManager();
-    this.pool = new WorkspacePool(config.server.workspaceDir, config.claudeCode.mcpServers, config.server.maxConcurrentTasks);
     this.store = new TaskStore(config.server.workspaceDir);
+
+    for (const [projectId, projectConfig] of Object.entries(config.projects)) {
+      const projectDir = join(config.server.workspaceDir, "projects", projectId);
+      const pool = new WorkspacePool(
+        projectDir,
+        projectConfig.claudeCode.mcpServers,
+        projectConfig.maxConcurrentTasks,
+      );
+      const tokenManager = new TokenManager(projectConfig.auth, projectDir);
+      this.projects.set(projectId, { config: projectConfig, pool, tokenManager });
+    }
 
     if (process.env.WORKSPACE_VOLUME) {
       console.log(`Docker volume mode: sandbox containers mount volume "${process.env.WORKSPACE_VOLUME}"`);
@@ -49,8 +64,10 @@ export class TaskManager {
    * mark running tasks as interrupted, and resume them.
    */
   async init(): Promise<void> {
-    // Rediscover existing workspace directories from disk
-    this.pool.initFromDisk();
+    // Rediscover existing workspace directories from disk for each project
+    for (const state of this.projects.values()) {
+      state.pool.initFromDisk();
+    }
 
     // Load all persisted tasks
     const persisted = this.store.loadAll();
@@ -78,7 +95,6 @@ export class TaskManager {
   }
 
   private async resumeInterruptedTasks(): Promise<void> {
-    const repos = this.config.repositories;
     const interrupted = Array.from(this.tasks.values()).filter(
       (e) => e.task.status === "interrupted",
     );
@@ -87,9 +103,19 @@ export class TaskManager {
     console.log(`[task-manager] Resuming ${interrupted.length} interrupted task(s)...`);
 
     for (const entry of interrupted) {
+      const state = this.projects.get(entry.task.projectId);
+      if (!state) {
+        console.error(`[task-manager] Unknown project "${entry.task.projectId}" for task ${entry.task.taskId} — marking as failed`);
+        entry.task.status = "failed";
+        entry.task.error = `Unknown project: ${entry.task.projectId}`;
+        entry.task.completedAt = new Date().toISOString();
+        this.store.save({ ...entry.task, workspaceId: entry.workspaceId });
+        continue;
+      }
+
       try {
-        const workspace = await this.pool.acquireExisting(entry.workspaceId, repos);
-        const executor = new Executor(this.config.claudeCode, this.tokenManager);
+        const workspace = await state.pool.acquireExisting(entry.workspaceId, state.config.repositories);
+        const executor = new Executor(state.config.claudeCode, state.tokenManager);
         entry.executor = executor;
         entry.task.status = "running";
         entry.task.output = "";
@@ -100,7 +126,7 @@ export class TaskManager {
         console.log(`[task-manager] Resuming task ${entry.task.taskId} on workspace ${entry.workspaceId}`);
 
         // Fire in background with fromBranch so it checks out the existing branch
-        this.executeTask(entry.task, workspace, entry.task.branch ?? undefined).catch((err) => {
+        this.executeTask(entry.task, workspace, state, entry.task.branch ?? undefined).catch((err) => {
           console.error(`Task ${entry.task.taskId} resumption failed:`, err);
         });
       } catch (err) {
@@ -125,7 +151,7 @@ export class TaskManager {
   private getDockerMount(workspaceDir: string): { volumeMount: string; workdir: string } {
     const volume = process.env.WORKSPACE_VOLUME;
     if (volume) {
-      const relativePath = workspaceDir.replace(this.config.server.workspaceDir, "");
+      const relativePath = workspaceDir.replace(this.serverWorkspaceDir, "");
       return {
         volumeMount: `${volume}:/workspace`,
         workdir: `/workspace${relativePath}`,
@@ -134,7 +160,7 @@ export class TaskManager {
 
     const hostDir = process.env.WORKSPACE_HOST_DIR;
     if (hostDir) {
-      const hostPath = workspaceDir.replace(this.config.server.workspaceDir, hostDir);
+      const hostPath = workspaceDir.replace(this.serverWorkspaceDir, hostDir);
       return { volumeMount: `${hostPath}:/workspace`, workdir: "/workspace" };
     }
 
@@ -159,17 +185,21 @@ export class TaskManager {
     return parts.join("\n\n") || "No summary available.";
   }
 
-  getTask(taskId: string): Task | undefined {
-    return this.tasks.get(taskId)?.task;
-  }
-
-  listTasks(): Task[] {
-    return Array.from(this.tasks.values()).map((entry) => entry.task);
-  }
-
-  getOutput(taskId: string): string {
+  getTask(projectId: string, taskId: string): Task | undefined {
     const entry = this.tasks.get(taskId);
-    if (!entry) return "";
+    if (!entry || entry.task.projectId !== projectId) return undefined;
+    return entry.task;
+  }
+
+  listTasks(projectId: string): Task[] {
+    return Array.from(this.tasks.values())
+      .filter((entry) => entry.task.projectId === projectId)
+      .map((entry) => entry.task);
+  }
+
+  getOutput(projectId: string, taskId: string): string {
+    const entry = this.tasks.get(taskId);
+    if (!entry || entry.task.projectId !== projectId) return "";
     if (entry.task.status === "running" && entry.executor) {
       return entry.executor.getOutput();
     }
@@ -177,11 +207,15 @@ export class TaskManager {
   }
 
   /**
-   * Start a new task. Always accepts — tasks run in parallel on isolated workspaces.
+   * Start a new task for the given project. Always accepts — tasks run in parallel
+   * on isolated workspaces within the project's pool.
    */
-  async startTask(request: TaskCreateRequest): Promise<Task> {
+  async startTask(projectId: string, request: TaskCreateRequest): Promise<Task> {
+    const state = this.projects.get(projectId);
+    if (!state) throw new Error(`Unknown project: ${projectId}`);
+
     const taskId = nanoid(8);
-    const executor = new Executor(this.config.claudeCode, this.tokenManager);
+    const executor = new Executor(state.config.claudeCode, state.tokenManager);
 
     // Generate branch name before returning response
     let branch: string;
@@ -196,6 +230,7 @@ export class TaskManager {
 
     const task: Task = {
       taskId,
+      projectId,
       branch,
       prompt: request.prompt,
       status: "running",
@@ -204,8 +239,8 @@ export class TaskManager {
       output: "",
     };
 
-    // Acquire a workspace instance (clone or reuse)
-    const workspace = await this.pool.acquire(this.config.repositories);
+    // Acquire a workspace instance from the project's pool
+    const workspace = await state.pool.acquire(state.config.repositories);
 
     this.tasks.set(taskId, { task, executor, workspaceId: workspace.id });
 
@@ -213,7 +248,7 @@ export class TaskManager {
     this.store.save({ ...task, workspaceId: workspace.id });
 
     // Run async - don't await, let it run in background
-    this.executeTask(task, workspace, request.fromBranch).catch((err) => {
+    this.executeTask(task, workspace, state, request.fromBranch).catch((err) => {
       console.error(`Task ${taskId} failed unexpectedly:`, err);
     });
 
@@ -223,12 +258,14 @@ export class TaskManager {
   private async executeTask(
     task: Task,
     workspace: { id: number; dir: string },
+    state: ProjectState,
     fromBranch?: string,
   ): Promise<void> {
-    const repos = this.config.repositories;
+    const repos = state.config.repositories;
     const entry = this.tasks.get(task.taskId)!;
     const executor = entry.executor!;
     const branchName = task.branch!;
+    const githubToken = state.config.auth?.githubToken;
 
     try {
       // Step 1: Prepare branch in all repos
@@ -253,7 +290,7 @@ export class TaskManager {
       // Step 4: Run Claude Code in workspace dir
       const { volumeMount, workdir } = this.getDockerMount(workspace.dir);
       console.log(`[${task.taskId}] Running Claude Code in workspace ${workspace.id}...`);
-      const systemPrompt = this.config.claudeCode.systemPrompt ?? "";
+      const systemPrompt = state.config.claudeCode.systemPrompt ?? "";
       const fullPrompt = task.prompt + buildSystemInstructions(repos) + (systemPrompt ? `\n\n${systemPrompt}` : "");
       const result = await executor.run(fullPrompt, volumeMount, workdir, task.taskId);
 
@@ -303,7 +340,7 @@ export class TaskManager {
           const prTitle = task.prompt.split("\n")[0].slice(0, 120);
           try {
             const pullRequests = await this.gitManager.createPullRequestAll(
-              workspace.dir, repos, branchName, prTitle, prBody,
+              workspace.dir, repos, branchName, prTitle, prBody, false, githubToken,
             );
             if (pullRequests.length > 0) {
               task.pullRequests = pullRequests;
@@ -311,7 +348,7 @@ export class TaskManager {
 
               // Post original task prompt as a comment
               const taskComment = `## Task\n\n${task.prompt}`;
-              await this.gitManager.commentOnPullRequestAll(workspace.dir, pullRequests, taskComment);
+              await this.gitManager.commentOnPullRequestAll(workspace.dir, pullRequests, taskComment, githubToken);
             }
           } catch (prErr) {
             console.error(`[${task.taskId}] PR creation failed:`, prErr instanceof Error ? prErr.message : String(prErr));
@@ -341,7 +378,7 @@ export class TaskManager {
           const prTitle = task.prompt.split("\n")[0].slice(0, 120);
           try {
             const pullRequests = await this.gitManager.createPullRequestAll(
-              workspace.dir, repos, branchName, prTitle, prBody, true,
+              workspace.dir, repos, branchName, prTitle, prBody, true, githubToken,
             );
             if (pullRequests.length > 0) {
               task.pullRequests = pullRequests;
@@ -349,7 +386,7 @@ export class TaskManager {
 
               // Post original task prompt as a comment
               const taskComment = `## Task\n\n${task.prompt}`;
-              await this.gitManager.commentOnPullRequestAll(workspace.dir, pullRequests, taskComment);
+              await this.gitManager.commentOnPullRequestAll(workspace.dir, pullRequests, taskComment, githubToken);
             }
           } catch (prErr) {
             console.error(`[${task.taskId}] Draft PR creation failed:`, prErr instanceof Error ? prErr.message : String(prErr));
@@ -373,7 +410,7 @@ export class TaskManager {
     } finally {
       task.completedAt = new Date().toISOString();
       this.store.save({ ...task, workspaceId: workspace.id });
-      this.pool.release(workspace.id);
+      state.pool.release(workspace.id);
     }
   }
 }

@@ -1,6 +1,5 @@
 export interface ServerConfig {
   workspaceDir: string;
-  maxConcurrentTasks: number;
 }
 
 export interface RepositoryConfig {
@@ -25,10 +24,23 @@ export interface ClaudeCodeConfig {
   mcpServers?: Record<string, McpServerConfig>;
 }
 
-export interface Config {
-  server: ServerConfig;
+export interface ProjectAuth {
+  anthropicApiKey?: string;
+  claudeOauthRefreshToken?: string;
+  githubToken?: string;
+}
+
+export interface ProjectConfig {
+  apiKey?: string;
+  maxConcurrentTasks?: number;
   repositories: RepositoryConfig[];
   claudeCode: ClaudeCodeConfig;
+  auth?: ProjectAuth;
+}
+
+export interface Config {
+  server: ServerConfig;
+  projects: Record<string, ProjectConfig>;
 }
 
 export type TaskStatus = "running" | "completed" | "failed" | "interrupted";
@@ -40,6 +52,7 @@ export interface PullRequest {
 
 export interface Task {
   taskId: string;
+  projectId: string;
   branch: string | null;
   prompt: string;
   status: TaskStatus;
