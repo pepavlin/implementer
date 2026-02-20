@@ -362,7 +362,7 @@ export class TaskManager {
         };
 
         // Acquire a workspace instance from the project's pool
-        const workspace = await state.pool.acquire(state.config.repositories);
+        const workspace = await state.pool.acquire(state.config.repositories, state.config.auth?.githubToken);
 
         this.tasks.set(taskId, { task, executor, workspaceId: workspace.id });
 
@@ -400,7 +400,8 @@ export class TaskManager {
                 await this.gitManager.checkoutBranchAll(
                     workspace.dir,
                     repos,
-                    fromBranch
+                    fromBranch,
+                    githubToken
                 );
             } else {
                 console.log(
@@ -409,7 +410,8 @@ export class TaskManager {
                 await this.gitManager.prepareNewBranchAll(
                     workspace.dir,
                     repos,
-                    branchName
+                    branchName,
+                    githubToken
                 );
             }
 
@@ -418,7 +420,9 @@ export class TaskManager {
             await this.gitManager.pushBranchAll(
                 workspace.dir,
                 repos,
-                branchName
+                branchName,
+                false,
+                githubToken
             );
 
             // Rechown after branch creation (new refs are owned by root)
@@ -483,7 +487,8 @@ export class TaskManager {
                 const { conflicted } = await this.gitManager.rebaseOnDefaultAll(
                     workspace.dir,
                     repos,
-                    branchName
+                    branchName,
+                    githubToken
                 );
 
                 if (conflicted.length > 0) {
@@ -517,7 +522,8 @@ export class TaskManager {
                         workspace.dir,
                         repos,
                         branchName,
-                        true
+                        true,
+                        githubToken
                     );
 
                     // Build PR body from Claude's summary + commit log
@@ -584,7 +590,8 @@ export class TaskManager {
                     await this.gitManager.deleteRemoteBranchAll(
                         workspace.dir,
                         repos,
-                        branchName
+                        branchName,
+                        githubToken
                     );
                     task.branch = null;
                     task.status = "completed";
@@ -599,7 +606,8 @@ export class TaskManager {
                         workspace.dir,
                         repos,
                         branchName,
-                        true
+                        true,
+                        githubToken
                     );
 
                     // Build PR body from Claude's summary + commit log
@@ -663,7 +671,8 @@ export class TaskManager {
                     await this.gitManager.deleteRemoteBranchAll(
                         workspace.dir,
                         repos,
-                        branchName
+                        branchName,
+                        githubToken
                     );
                     task.branch = null;
                 }

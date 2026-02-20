@@ -139,7 +139,7 @@ RULES:
    * or creates a new one by cloning all repos. Throws PoolExhaustedError if the
    * maximum number of concurrent tasks is reached.
    */
-  async acquire(repos: RepositoryConfig[]): Promise<{ id: number; dir: string }> {
+  async acquire(repos: RepositoryConfig[], githubToken?: string): Promise<{ id: number; dir: string }> {
     // Look for a free instance
     for (const [id, instance] of this.instances) {
       if (!instance.inUse) {
@@ -147,8 +147,8 @@ RULES:
         instance.inUse = true;
         // Remove stray .git that Claude Code may have created at the instance root
         rmSync(join(instance.dir, ".git"), { recursive: true, force: true });
-        await this.gitManager.ensureAllRepos(instance.dir, repos);
-        await this.gitManager.resetToDefaultAll(instance.dir, repos);
+        await this.gitManager.ensureAllRepos(instance.dir, repos, githubToken);
+        await this.gitManager.resetToDefaultAll(instance.dir, repos, githubToken);
         this.writeClaude(instance.dir, repos);
         this.writeMcpConfig(instance.dir);
         await chownRecursive(instance.dir);
@@ -168,7 +168,7 @@ RULES:
     console.log(`[pool] Creating new workspace instance ${id} at ${dir}`);
 
     this.instances.set(id, { dir, inUse: true });
-    await this.gitManager.ensureAllRepos(dir, repos);
+    await this.gitManager.ensureAllRepos(dir, repos, githubToken);
     this.writeClaude(dir, repos);
     this.writeMcpConfig(dir);
     await chownRecursive(dir);

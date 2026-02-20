@@ -3,9 +3,16 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { PullRequest, RepositoryConfig } from "./types.js";
 
-function git(args: string[], cwd: string): Promise<string> {
+function git(args: string[], cwd: string, githubToken?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+    // When a GitHub token is provided, inject it via GH_TOKEN and use
+    // `gh auth git-credential` as the credential helper so HTTPS remotes
+    // authenticate without embedding credentials in the URL.
+    const env = githubToken ? { ...process.env, GH_TOKEN: githubToken } : undefined;
+    const fullArgs = githubToken
+      ? ["-c", "credential.helper=!gh auth git-credential", ...args]
+      : args;
+    execFile("git", fullArgs, { cwd, env, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(`git ${args.join(" ")} failed: ${stderr || error.message}`));
       } else {
@@ -36,7 +43,7 @@ export class GitManager {
   /**
    * Ensure all repos are cloned and up to date.
    */
-  async ensureAllRepos(baseDir: string, repos: RepositoryConfig[]): Promise<void> {
+  async ensureAllRepos(baseDir: string, repos: RepositoryConfig[], githubToken?: string): Promise<void> {
     if (!existsSync(baseDir)) {
       mkdirSync(baseDir, { recursive: true });
     }
@@ -45,10 +52,10 @@ export class GitManager {
       const repoDir = this.getRepoDir(baseDir, repo.name);
 
       if (existsSync(join(repoDir, ".git"))) {
-        await git(["fetch", "origin"], repoDir);
+        await git(["fetch", "origin"], repoDir, githubToken);
       } else {
         mkdirSync(repoDir, { recursive: true });
-        await git(["clone", repo.url, repoDir], baseDir);
+        await git(["clone", repo.url, repoDir], baseDir, githubToken);
       }
     }
   }
@@ -56,10 +63,10 @@ export class GitManager {
   /**
    * Create a new branch from the default branch in all repos.
    */
-  async prepareNewBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string): Promise<void> {
+  async prepareNewBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string, githubToken?: string): Promise<void> {
     for (const repo of repos) {
       const repoDir = this.getRepoDir(baseDir, repo.name);
-      await git(["fetch", "origin"], repoDir);
+      await git(["fetch", "origin"], repoDir, githubToken);
       await git(["checkout", repo.defaultBranch], repoDir);
       await git(["reset", "--hard", `origin/${repo.defaultBranch}`], repoDir);
       await git(["checkout", "-b", branchName], repoDir);
@@ -69,10 +76,10 @@ export class GitManager {
   /**
    * Checkout an existing branch in all repos.
    */
-  async checkoutBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string): Promise<void> {
+  async checkoutBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string, githubToken?: string): Promise<void> {
     for (const repo of repos) {
       const repoDir = this.getRepoDir(baseDir, repo.name);
-      await git(["fetch", "origin"], repoDir);
+      await git(["fetch", "origin"], repoDir, githubToken);
 
       try {
         await git(["checkout", branchName], repoDir);
@@ -86,7 +93,7 @@ export class GitManager {
       }
 
       try {
-        await git(["pull", "origin", branchName], repoDir);
+        await git(["pull", "origin", branchName], repoDir, githubToken);
       } catch {
         // Branch may not exist on remote yet
       }
@@ -96,10 +103,10 @@ export class GitManager {
   /**
    * Reset all repos to their default branch and pull latest.
    */
-  async resetToDefaultAll(baseDir: string, repos: RepositoryConfig[]): Promise<void> {
+  async resetToDefaultAll(baseDir: string, repos: RepositoryConfig[], githubToken?: string): Promise<void> {
     for (const repo of repos) {
       const repoDir = this.getRepoDir(baseDir, repo.name);
-      await git(["fetch", "origin"], repoDir);
+      await git(["fetch", "origin"], repoDir, githubToken);
       await git(["checkout", repo.defaultBranch], repoDir);
       await git(["reset", "--hard", `origin/${repo.defaultBranch}`], repoDir);
     }
@@ -177,7 +184,7 @@ export class GitManager {
    * Push the branch in all repos that are currently on it.
    * When force is true, uses --force-with-lease (needed after rebase).
    */
-  async pushBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string, force = false): Promise<void> {
+  async pushBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string, force = false, githubToken?: string): Promise<void> {
     for (const repo of repos) {
       const repoDir = this.getRepoDir(baseDir, repo.name);
 
@@ -190,7 +197,7 @@ export class GitManager {
 
       const args = ["push", "origin", branchName];
       if (force) args.push("--force-with-lease");
-      await git(args, repoDir);
+      await git(args, repoDir, githubToken);
     }
   }
 
@@ -203,6 +210,7 @@ export class GitManager {
     baseDir: string,
     repos: RepositoryConfig[],
     branchName: string,
+    githubToken?: string,
   ): Promise<{ rebased: string[]; conflicted: RepositoryConfig[] }> {
     const rebased: string[] = [];
     const conflicted: RepositoryConfig[] = [];
@@ -217,7 +225,7 @@ export class GitManager {
         continue;
       }
 
-      await git(["fetch", "origin"], repoDir);
+      await git(["fetch", "origin"], repoDir, githubToken);
 
       try {
         await git(["rebase", `origin/${repo.defaultBranch}`], repoDir);
@@ -240,7 +248,7 @@ export class GitManager {
    * Delete the remote branch in all repos that are currently on the given branch.
    * Best-effort: errors are logged but not thrown.
    */
-  async deleteRemoteBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string): Promise<void> {
+  async deleteRemoteBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string, githubToken?: string): Promise<void> {
     for (const repo of repos) {
       const repoDir = this.getRepoDir(baseDir, repo.name);
 
@@ -252,7 +260,7 @@ export class GitManager {
       }
 
       try {
-        await git(["push", "origin", "--delete", branchName], repoDir);
+        await git(["push", "origin", "--delete", branchName], repoDir, githubToken);
       } catch (err) {
         console.error(`[git-manager] Failed to delete remote branch ${branchName} in ${repo.name}: ${err instanceof Error ? err.message : String(err)}`);
       }
