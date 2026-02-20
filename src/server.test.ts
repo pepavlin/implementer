@@ -3,8 +3,6 @@ import request from "supertest";
 import { createServer } from "./server.js";
 import type { TaskManager } from "./task-manager.js";
 import type { Config, Task } from "./types.js";
-import { PoolExhaustedError } from "./workspace-pool.js";
-import { GlobalConcurrencyLimitError } from "./task-manager.js";
 import { UsageLimitError } from "./usage-limiter.js";
 
 const PROJECT_ID = "test-project";
@@ -97,34 +95,19 @@ describe("server", () => {
             await request(app).post("/task").send({}).expect(400);
         });
 
-        it("returns 429 when pool exhausted", async () => {
+        it("returns queued status when at capacity", async () => {
+            const task = makeMockTask({ status: "queued" });
             const tm = makeMockTaskManager({
-                startTask: vi.fn().mockRejectedValue(new PoolExhaustedError(4))
+                startTask: vi.fn().mockResolvedValue(task)
             });
             const app = createServer(tm, makeConfig());
 
             const res = await request(app)
                 .post("/task")
                 .send({ prompt: "Do something" })
-                .expect(429);
+                .expect(200);
 
-            expect(res.body.error).toContain("Maximum concurrent tasks");
-        });
-
-        it("returns 429 when global concurrent task limit is reached", async () => {
-            const tm = makeMockTaskManager({
-                startTask: vi
-                    .fn()
-                    .mockRejectedValue(new GlobalConcurrencyLimitError(10))
-            });
-            const app = createServer(tm, makeConfig());
-
-            const res = await request(app)
-                .post("/task")
-                .send({ prompt: "Do something" })
-                .expect(429);
-
-            expect(res.body.error).toContain("Global concurrent task limit");
+            expect(res.body.status).toBe("queued");
         });
 
         it("returns 429 when token usage limit is exceeded", async () => {

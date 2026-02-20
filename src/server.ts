@@ -1,8 +1,7 @@
 import express from "express";
 import swaggerUi from "swagger-ui-express";
 import { z } from "zod";
-import { TaskManager, GlobalConcurrencyLimitError } from "./task-manager.js";
-import { PoolExhaustedError } from "./workspace-pool.js";
+import { TaskManager } from "./task-manager.js";
 import { UsageLimitError } from "./usage-limiter.js";
 import { extractLastAssistantMessage } from "./executor.js";
 import type { Config } from "./types.js";
@@ -67,7 +66,7 @@ const openApiSpec = {
                     },
                     status: {
                         type: "string",
-                        enum: ["running"],
+                        enum: ["queued", "running"],
                         example: "running"
                     }
                 }
@@ -90,7 +89,7 @@ const openApiSpec = {
                     prompt: { type: "string" },
                     status: {
                         type: "string",
-                        enum: ["running", "completed", "failed", "interrupted"]
+                        enum: ["queued", "running", "completed", "failed", "interrupted"]
                     },
                     startedAt: { type: "string", format: "date-time" },
                     completedAt: {
@@ -371,11 +370,7 @@ export function createServer(
                 status: task.status
             });
         } catch (err) {
-            if (
-                err instanceof PoolExhaustedError ||
-                err instanceof GlobalConcurrencyLimitError ||
-                err instanceof UsageLimitError
-            ) {
+            if (err instanceof UsageLimitError) {
                 res.status(429).json({ error: err.message });
                 return;
             }
@@ -419,7 +414,7 @@ export function createServer(
             completedAt: task.completedAt,
             durationSeconds: getDurationSeconds(task),
             output:
-                task.status === "running" || task.status === "interrupted"
+                task.status === "queued" || task.status === "running" || task.status === "interrupted"
                     ? null
                     : extractLastAssistantMessage(task.output) || null,
             error: task.error,

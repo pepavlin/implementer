@@ -14,16 +14,6 @@ import { TaskStore } from "./task-store.js";
 import { TokenManager } from "./auth.js";
 import { UsageLimiter } from "./usage-limiter.js";
 
-/**
- * Thrown when the global (server-level) concurrent task limit is reached.
- * Results in a 429 response.
- */
-export class GlobalConcurrencyLimitError extends Error {
-    constructor(maxConcurrentTasks: number) {
-        super(`Global concurrent task limit reached (${maxConcurrentTasks})`);
-        this.name = "GlobalConcurrencyLimitError";
-    }
-}
 
 function buildSystemInstructions(repos: { name: string }[]): string {
     const repoList = repos.map((r) => r.name).join(", ");
@@ -46,7 +36,7 @@ interface ProjectState {
 interface TaskEntry {
     task: Task;
     executor: Executor | null;
-    workspaceId: number;
+    workspaceId: number | null;
 }
 
 export class TaskManager {
@@ -56,6 +46,8 @@ export class TaskManager {
     private gitManager: GitManager;
     private store: TaskStore;
     private tasks: Map<string, TaskEntry> = new Map();
+    /** Per-project FIFO queues of taskIds waiting to run. */
+    private queues: Map<string, string[]> = new Map();
 
     constructor(config: Config) {
         this.serverWorkspaceDir = config.server.workspaceDir;
@@ -135,10 +127,21 @@ export class TaskManager {
                 executor: null,
                 workspaceId: pt.workspaceId
             });
+
+            // Re-enqueue tasks that were waiting in the queue before restart
+            if (pt.status === "queued") {
+                this.enqueue(pt.projectId, pt.taskId);
+                console.log(`[task-manager] Task ${pt.taskId} re-enqueued`);
+            }
         }
 
         // Resume interrupted tasks
         await this.resumeInterruptedTasks();
+
+        // Try to start any queued tasks (capacity may be available after resumption)
+        for (const [projectId, state] of this.projects) {
+            this.tryDequeue(projectId, state);
+        }
     }
 
     private async resumeInterruptedTasks(): Promise<void> {
@@ -169,7 +172,7 @@ export class TaskManager {
 
             try {
                 const workspace = await state.pool.acquireExisting(
-                    entry.workspaceId,
+                    entry.workspaceId!,
                     state.config.repositories
                 );
                 const executor = new Executor(
@@ -190,7 +193,7 @@ export class TaskManager {
                     `[task-manager] Resuming task ${entry.task.taskId} on workspace ${entry.workspaceId}`
                 );
 
-                // Fire in background with fromBranch so it checks out the existing branch
+                // Fire in background — resume by checking out the existing branch
                 this.executeTask(
                     entry.task,
                     workspace,
@@ -303,6 +306,63 @@ export class TaskManager {
         return entry.task.output;
     }
 
+    private shouldQueue(projectId: string, state: ProjectState): boolean {
+        const runningCount = Array.from(this.tasks.values()).filter(
+            (e) => e.task.status === "running"
+        ).length;
+        if (
+            this.globalMaxConcurrentTasks !== undefined &&
+            runningCount >= this.globalMaxConcurrentTasks
+        ) {
+            return true;
+        }
+        return !state.pool.hasFreeSlot();
+    }
+
+    private enqueue(projectId: string, taskId: string): void {
+        if (!this.queues.has(projectId)) this.queues.set(projectId, []);
+        this.queues.get(projectId)!.push(taskId);
+    }
+
+    private tryDequeue(projectId: string, state: ProjectState): void {
+        const queue = this.queues.get(projectId);
+        if (!queue || queue.length === 0) return;
+        if (this.shouldQueue(projectId, state)) return;
+
+        const taskId = queue.shift()!;
+        const entry = this.tasks.get(taskId);
+        if (!entry) {
+            // Task was somehow removed — try the next one
+            this.tryDequeue(projectId, state);
+            return;
+        }
+
+        const task = entry.task;
+        const executor = new Executor(state.config.claudeCode, state.tokenManager);
+        entry.executor = executor;
+        task.status = "running";
+
+        console.log(`[${taskId}] Dequeuing task (${queue.length} still queued for ${projectId})`);
+
+        state.pool
+            .acquire(state.config.repositories, state.config.auth?.githubToken)
+            .then((workspace) => {
+                entry.workspaceId = workspace.id;
+                this.store.save({ ...task, workspaceId: workspace.id });
+                return this.executeTask(task, workspace, state);
+            })
+            .catch((err) => {
+                console.error(`[${taskId}] Dequeue/acquire failed:`, err);
+                task.status = "failed";
+                task.error = err instanceof Error ? err.message : String(err);
+                task.completedAt = new Date().toISOString();
+                this.store.save({ ...task, workspaceId: entry.workspaceId });
+                if (task.callbackUrl) {
+                    this.fireWebhook(task.taskId, task.status, task.callbackUrl);
+                }
+            });
+    }
+
     private fireWebhook(taskId: string, status: string, url: string): void {
         fetch(url, {
             method: "POST",
@@ -324,39 +384,21 @@ export class TaskManager {
         const state = this.projects.get(projectId);
         if (!state) throw new Error(`Unknown project: ${projectId}`);
 
-        // Check global concurrent task limit (across all projects)
-        if (this.globalMaxConcurrentTasks !== undefined) {
-            const runningCount = Array.from(this.tasks.values()).filter(
-                (e) => e.task.status === "running"
-            ).length;
-            if (runningCount >= this.globalMaxConcurrentTasks) {
-                throw new GlobalConcurrencyLimitError(
-                    this.globalMaxConcurrentTasks
-                );
-            }
-        }
-
         // Check token usage limit (OAuth only, non-fatal on API error)
         if (state.usageLimiter) {
             await state.usageLimiter.checkLimit();
         }
 
         const taskId = nanoid(8);
-        const executor = new Executor(
-            state.config.claudeCode,
-            state.tokenManager
-        );
 
-        // Generate branch name before returning response
+        // Generate branch name before returning response (fast slug call)
         let branch: string;
         if (request.fromBranch) {
             branch = request.fromBranch;
         } else {
             console.log(`[${taskId}] Generating branch name...`);
-            const slug = await executor.generateBranchSlug(
-                request.prompt,
-                taskId
-            );
+            const slugExecutor = new Executor(state.config.claudeCode, state.tokenManager);
+            const slug = await slugExecutor.generateBranchSlug(request.prompt, taskId);
             branch = `impl/${slug}-${taskId}`;
             console.log(`[${taskId}] Branch: ${branch}`);
         }
@@ -365,6 +407,7 @@ export class TaskManager {
             taskId,
             projectId,
             branch,
+            fromBranch: request.fromBranch,
             prompt: request.prompt,
             status: "running",
             startedAt: new Date().toISOString(),
@@ -373,20 +416,41 @@ export class TaskManager {
             callbackUrl: request.callbackUrl
         };
 
-        // Acquire a workspace instance from the project's pool
-        const workspace = await state.pool.acquire(state.config.repositories, state.config.auth?.githubToken);
+        // Queue if at capacity
+        if (this.shouldQueue(projectId, state)) {
+            task.status = "queued";
+            this.tasks.set(taskId, { task, executor: null, workspaceId: null });
+            this.store.save({ ...task, workspaceId: null });
+            this.enqueue(projectId, taskId);
+            const queueLen = this.queues.get(projectId)!.length;
+            console.log(`[${taskId}] Queued (position ${queueLen} for ${projectId})`);
+            return task;
+        }
 
-        this.tasks.set(taskId, { task, executor, workspaceId: workspace.id });
+        // Run immediately
+        const executor = new Executor(state.config.claudeCode, state.tokenManager);
+        this.tasks.set(taskId, { task, executor, workspaceId: null });
 
-        // Persist to disk
+        let workspace: { id: number; dir: string };
+        try {
+            workspace = await state.pool.acquire(state.config.repositories, state.config.auth?.githubToken);
+        } catch (err) {
+            // Race condition: another task grabbed the last slot between shouldQueue and acquire
+            task.status = "queued";
+            this.tasks.get(taskId)!.executor = null;
+            this.store.save({ ...task, workspaceId: null });
+            this.enqueue(projectId, taskId);
+            console.log(`[${taskId}] Queued after acquire race`);
+            return task;
+        }
+
+        this.tasks.get(taskId)!.workspaceId = workspace.id;
         this.store.save({ ...task, workspaceId: workspace.id });
 
         // Run async - don't await, let it run in background
-        this.executeTask(task, workspace, state, request.fromBranch).catch(
-            (err) => {
-                console.error(`Task ${taskId} failed unexpectedly:`, err);
-            }
-        );
+        this.executeTask(task, workspace, state).catch((err) => {
+            console.error(`Task ${taskId} failed unexpectedly:`, err);
+        });
 
         return task;
     }
@@ -395,13 +459,15 @@ export class TaskManager {
         task: Task,
         workspace: { id: number; dir: string },
         state: ProjectState,
-        fromBranch?: string
+        /** Override which branch to checkout. Defaults to task.fromBranch. Used for resume after restart. */
+        checkoutBranch?: string
     ): Promise<void> {
         const repos = state.config.repositories;
         const entry = this.tasks.get(task.taskId)!;
         const executor = entry.executor!;
         const branchName = task.branch!;
         const githubToken = state.config.auth?.githubToken;
+        const fromBranch = checkoutBranch ?? task.fromBranch;
 
         try {
             // Step 1: Prepare branch in all repos
@@ -707,6 +773,8 @@ export class TaskManager {
             if (task.callbackUrl) {
                 this.fireWebhook(task.taskId, task.status, task.callbackUrl);
             }
+            // Start next queued task for this project if capacity is now available
+            this.tryDequeue(task.projectId, state);
         }
     }
 }

@@ -51,7 +51,7 @@ export interface Config {
     projects: Record<string, ProjectConfig>;
 }
 
-export type TaskStatus = "running" | "completed" | "failed" | "interrupted";
+export type TaskStatus = "queued" | "running" | "completed" | "failed" | "interrupted";
 
 export interface PullRequest {
     repo: string;
@@ -70,10 +70,12 @@ export interface Task {
     error?: string;
     pullRequests?: PullRequest[];
     callbackUrl?: string;
+    /** Original fromBranch value from the create request, needed when dequeuing. */
+    fromBranch?: string;
 }
 
 export interface PersistedTask extends Task {
-    workspaceId: number;
+    workspaceId: number | null;
 }
 
 export interface TaskCreateRequest {

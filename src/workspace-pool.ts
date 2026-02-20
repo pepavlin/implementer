@@ -177,6 +177,18 @@ RULES:
   }
 
   /**
+   * Returns true if the pool can accept another task right now
+   * (either a free instance exists or the concurrency cap hasn't been hit yet).
+   */
+  hasFreeSlot(): boolean {
+    for (const instance of this.instances.values()) {
+      if (!instance.inUse) return true;
+    }
+    const inUseCount = Array.from(this.instances.values()).filter((i) => i.inUse).length;
+    return inUseCount < this.maxConcurrentTasks;
+  }
+
+  /**
    * Release a workspace instance back to the pool.
    */
   release(id: number): void {
