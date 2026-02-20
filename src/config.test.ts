@@ -6,80 +6,80 @@ import { loadConfig } from "./config.js";
 const TMP = join(import.meta.dirname, "..", "tmp", "config-test");
 
 function writeYaml(filename: string, content: string): string {
-  const path = join(TMP, filename);
-  writeFileSync(path, content);
-  return path;
+    const path = join(TMP, filename);
+    writeFileSync(path, content);
+    return path;
 }
 
 beforeEach(() => {
-  mkdirSync(TMP, { recursive: true });
+    mkdirSync(TMP, { recursive: true });
 });
 
 afterEach(() => {
-  rmSync(TMP, { recursive: true, force: true });
+    rmSync(TMP, { recursive: true, force: true });
 });
 
 describe("loadConfig", () => {
-  it("loads a minimal valid config", () => {
-    const path = writeYaml(
-      "config.yaml",
-      `
+    it("loads a minimal valid config", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
 projects:
   my-project:
     repositories:
       - name: my-repo
         url: https://github.com/test/repo.git
-`,
-    );
+`
+        );
 
-    const config = loadConfig(path);
+        const config = loadConfig(path);
 
-    expect(config.server.workspaceDir).toContain("tmp");
-    expect(Object.keys(config.projects)).toHaveLength(1);
-    const project = config.projects["my-project"];
-    expect(project.repositories).toHaveLength(1);
-    expect(project.repositories[0].name).toBe("my-repo");
-    expect(project.repositories[0].defaultBranch).toBe("main");
-    expect(project.claudeCode.command).toBe("claude");
-  });
+        expect(config.server.workspaceDir).toContain("tmp");
+        expect(Object.keys(config.projects)).toHaveLength(1);
+        const project = config.projects["my-project"];
+        expect(project.repositories).toHaveLength(1);
+        expect(project.repositories[0].name).toBe("my-repo");
+        expect(project.repositories[0].defaultBranch).toBe("main");
+        expect(project.claudeCode.command).toBe("claude");
+    });
 
-  it("loads maxConcurrentTasks per project", () => {
-    const path = writeYaml(
-      "config.yaml",
-      `
+    it("loads maxConcurrentTasks per project", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
 projects:
   my-project:
     maxConcurrentTasks: 8
     repositories:
       - name: my-repo
         url: https://github.com/test/repo.git
-`,
-    );
+`
+        );
 
-    const config = loadConfig(path);
-    expect(config.projects["my-project"].maxConcurrentTasks).toBe(8);
-  });
+        const config = loadConfig(path);
+        expect(config.projects["my-project"].maxConcurrentTasks).toBe(8);
+    });
 
-  it("rejects maxConcurrentTasks less than 1", () => {
-    const path = writeYaml(
-      "config.yaml",
-      `
+    it("rejects maxConcurrentTasks less than 1", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
 projects:
   my-project:
     maxConcurrentTasks: 0
     repositories:
       - name: my-repo
         url: https://github.com/test/repo.git
-`,
-    );
+`
+        );
 
-    expect(() => loadConfig(path)).toThrow();
-  });
+        expect(() => loadConfig(path)).toThrow();
+    });
 
-  it("loads a full config with all fields", () => {
-    const path = writeYaml(
-      "config.yaml",
-      `
+    it("loads a full config with all fields", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
 server:
   workspaceDir: ./workspaces
 
@@ -104,33 +104,33 @@ projects:
     auth:
       anthropicApiKey: sk-test-key
       githubToken: ghp-test-token
-`,
-    );
+`
+        );
 
-    const config = loadConfig(path);
+        const config = loadConfig(path);
 
-    const project = config.projects["webapp"];
-    expect(project.repositories).toHaveLength(2);
-    expect(project.repositories[0].defaultBranch).toBe("develop");
-    expect(project.repositories[1].defaultBranch).toBe("main");
-    expect(project.claudeCode.command).toBe("claude-dev");
-    expect(project.claudeCode.model).toBe("opus");
-    expect(project.claudeCode.systemPrompt).toBe("Always write tests.");
-    expect(project.claudeCode.mcpServers?.playwright.command).toBe("npx");
-    expect(project.claudeCode.mcpServers?.playwright.args).toEqual([
-      "@playwright/mcp@latest",
-      "--headless",
-    ]);
-    expect(project.apiKey).toBe("secret-key");
-    expect(project.maxConcurrentTasks).toBe(2);
-    expect(project.auth?.anthropicApiKey).toBe("sk-test-key");
-    expect(project.auth?.githubToken).toBe("ghp-test-token");
-  });
+        const project = config.projects["webapp"];
+        expect(project.repositories).toHaveLength(2);
+        expect(project.repositories[0].defaultBranch).toBe("develop");
+        expect(project.repositories[1].defaultBranch).toBe("main");
+        expect(project.claudeCode.command).toBe("claude-dev");
+        expect(project.claudeCode.model).toBe("opus");
+        expect(project.claudeCode.systemPrompt).toBe("Always write tests.");
+        expect(project.claudeCode.mcpServers?.playwright.command).toBe("npx");
+        expect(project.claudeCode.mcpServers?.playwright.args).toEqual([
+            "@playwright/mcp@latest",
+            "--headless"
+        ]);
+        expect(project.apiKey).toBe("secret-key");
+        expect(project.maxConcurrentTasks).toBe(2);
+        expect(project.auth?.anthropicApiKey).toBe("sk-test-key");
+        expect(project.auth?.githubToken).toBe("ghp-test-token");
+    });
 
-  it("supports multiple projects", () => {
-    const path = writeYaml(
-      "config.yaml",
-      `
+    it("supports multiple projects", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
 projects:
   project-a:
     repositories:
@@ -140,71 +140,107 @@ projects:
     repositories:
       - name: repo-b
         url: https://github.com/test/repo-b.git
-`,
-    );
+`
+        );
 
-    const config = loadConfig(path);
-    expect(Object.keys(config.projects)).toHaveLength(2);
-    expect(config.projects["project-a"].repositories[0].name).toBe("repo-a");
-    expect(config.projects["project-b"].repositories[0].name).toBe("repo-b");
-  });
+        const config = loadConfig(path);
+        expect(Object.keys(config.projects)).toHaveLength(2);
+        expect(config.projects["project-a"].repositories[0].name).toBe(
+            "repo-a"
+        );
+        expect(config.projects["project-b"].repositories[0].name).toBe(
+            "repo-b"
+        );
+    });
 
-  it("rejects config with no projects", () => {
-    const path = writeYaml(
-      "config.yaml",
-      `
+    it("rejects config with no projects", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
 projects: {}
-`,
-    );
+`
+        );
 
-    expect(() => loadConfig(path)).toThrow();
-  });
+        expect(() => loadConfig(path)).toThrow();
+    });
 
-  it("rejects project with no repositories", () => {
-    const path = writeYaml(
-      "config.yaml",
-      `
+    it("rejects project with no repositories", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
 projects:
   my-project:
     repositories: []
-`,
-    );
+`
+        );
 
-    expect(() => loadConfig(path)).toThrow();
-  });
+        expect(() => loadConfig(path)).toThrow();
+    });
 
-  it("rejects project with missing repository name", () => {
-    const path = writeYaml(
-      "config.yaml",
-      `
+    it("rejects project with missing repository name", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
 projects:
   my-project:
     repositories:
       - url: https://github.com/test/repo.git
-`,
-    );
+`
+        );
 
-    expect(() => loadConfig(path)).toThrow();
-  });
+        expect(() => loadConfig(path)).toThrow();
+    });
 
-  it("rejects project with missing repository url", () => {
-    const path = writeYaml(
-      "config.yaml",
-      `
+    it("rejects project with missing repository url", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
 projects:
   my-project:
     repositories:
       - name: my-repo
-`,
-    );
+`
+        );
 
-    expect(() => loadConfig(path)).toThrow();
-  });
+        expect(() => loadConfig(path)).toThrow();
+    });
 
-  it("resolves workspaceDir relative to config file", () => {
-    const path = writeYaml(
-      "config.yaml",
-      `
+    it("rejects unknown top-level fields", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+unknownField: true
+`
+        );
+
+        expect(() => loadConfig(path)).toThrow();
+    });
+
+    it("rejects unknown project fields", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+    unknownSetting: value
+`
+        );
+
+        expect(() => loadConfig(path)).toThrow();
+    });
+
+    it("resolves workspaceDir relative to config file", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
 server:
   workspaceDir: ./my-workspace
 projects:
@@ -212,20 +248,20 @@ projects:
     repositories:
       - name: repo
         url: https://github.com/test/repo.git
-`,
-    );
+`
+        );
 
-    const config = loadConfig(path);
-    expect(config.server.workspaceDir).toBe(join(TMP, "my-workspace"));
-  });
+        const config = loadConfig(path);
+        expect(config.server.workspaceDir).toBe(join(TMP, "my-workspace"));
+    });
 
-  it("interpolates ${VAR} references in auth fields", () => {
-    process.env.TEST_ANTHROPIC_KEY = "sk-from-env";
-    process.env.TEST_GITHUB_TOKEN = "ghp-from-env";
+    it("interpolates ${VAR} references in auth fields", () => {
+        process.env.TEST_ANTHROPIC_KEY = "sk-from-env";
+        process.env.TEST_GITHUB_TOKEN = "ghp-from-env";
 
-    const path = writeYaml(
-      "config.yaml",
-      `
+        const path = writeYaml(
+            "config.yaml",
+            `
 projects:
   my-project:
     repositories:
@@ -234,35 +270,39 @@ projects:
     auth:
       anthropicApiKey: \${TEST_ANTHROPIC_KEY}
       githubToken: \${TEST_GITHUB_TOKEN}
-`,
-    );
+`
+        );
 
-    const config = loadConfig(path);
-    expect(config.projects["my-project"].auth?.anthropicApiKey).toBe("sk-from-env");
-    expect(config.projects["my-project"].auth?.githubToken).toBe("ghp-from-env");
+        const config = loadConfig(path);
+        expect(config.projects["my-project"].auth?.anthropicApiKey).toBe(
+            "sk-from-env"
+        );
+        expect(config.projects["my-project"].auth?.githubToken).toBe(
+            "ghp-from-env"
+        );
 
-    delete process.env.TEST_ANTHROPIC_KEY;
-    delete process.env.TEST_GITHUB_TOKEN;
-  });
+        delete process.env.TEST_ANTHROPIC_KEY;
+        delete process.env.TEST_GITHUB_TOKEN;
+    });
 
-  it("interpolates ${VAR} references in apiKey field", () => {
-    process.env.TEST_API_KEY = "my-api-key";
+    it("interpolates ${VAR} references in apiKey field", () => {
+        process.env.TEST_API_KEY = "my-api-key";
 
-    const path = writeYaml(
-      "config.yaml",
-      `
+        const path = writeYaml(
+            "config.yaml",
+            `
 projects:
   my-project:
     apiKey: \${TEST_API_KEY}
     repositories:
       - name: repo
         url: https://github.com/test/repo.git
-`,
-    );
+`
+        );
 
-    const config = loadConfig(path);
-    expect(config.projects["my-project"].apiKey).toBe("my-api-key");
+        const config = loadConfig(path);
+        expect(config.projects["my-project"].apiKey).toBe("my-api-key");
 
-    delete process.env.TEST_API_KEY;
-  });
+        delete process.env.TEST_API_KEY;
+    });
 });

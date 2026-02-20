@@ -21,19 +21,29 @@ Edit `config.yaml` to match your environment:
 
 ```yaml
 server:
-  workspaceDir: ./workspace        # where workspace instances are stored
+    workspaceDir: ./workspace # where workspace instances are stored
 
-repositories:
-  - name: my-project
-    url: git@github.com:user/my-project.git
-    defaultBranch: main
-
-claudeCode:
-  command: claude                   # path to claude CLI binary
-  model: sonnet                    # optional model override
+projects:
+    demo-webapp:
+        maxConcurrentTasks: 2
+        repositories:
+            - name: demo-webapp
+              url: git@github.com:user/demo-webapp.git
+              defaultBranch: main
+        claudeCode:
+            command: claude # path to claude CLI binary
+            model: sonnet # optional model override
 ```
 
-You can define multiple repositories — Claude Code runs in the workspace root with access to all of them.
+You can define multiple projects and multiple repositories per project.
+
+Config is validated both at startup and via:
+
+```bash
+npm run check
+```
+
+The same validation logic is used in both cases, and unknown fields are rejected (strict schema).
 
 ## Running
 
@@ -63,6 +73,7 @@ docker compose up -d --build                # start the service
 ```
 
 This builds two images:
+
 - **{INSTANCE_NAME}** — the main service (default: `implementer`)
 - **{INSTANCE_NAME}-sandbox** — the isolated environment where Claude Code runs (default: `implementer-sandbox`)
 
@@ -85,12 +96,14 @@ docker compose logs -f
 To run multiple instances with different configurations, create separate directories each with their own `config.yaml` and `.env` file. Set a unique `INSTANCE_NAME` and `PORT` in each `.env`:
 
 **Instance A (`.env`):**
+
 ```bash
 INSTANCE_NAME=impl-project-a
 PORT=3000
 ```
 
 **Instance B (`.env`):**
+
 ```bash
 INSTANCE_NAME=impl-project-b
 PORT=3001
@@ -125,11 +138,12 @@ curl -X POST http://localhost:3000/task \
 ```
 
 Response (`200`):
+
 ```json
 {
-  "taskId": "a1b2c3d4",
-  "branch": "impl/login-page-email-password-a1b2c3d4",
-  "status": "running"
+    "taskId": "a1b2c3d4",
+    "branch": "impl/login-page-email-password-a1b2c3d4",
+    "status": "running"
 }
 ```
 
@@ -157,26 +171,27 @@ curl http://localhost:3000/tasks
 ```
 
 Response:
+
 ```json
 {
-  "tasks": [
-    {
-      "taskId": "a1b2c3d4",
-      "branch": "impl/login-page-a1b2c3d4",
-      "prompt": "Implement a login page",
-      "status": "completed",
-      "startedAt": "2026-01-30T12:00:00.000Z",
-      "completedAt": "2026-01-30T12:05:00.000Z"
-    },
-    {
-      "taskId": "e5f6g7h8",
-      "branch": "impl/dashboard-e5f6g7h8",
-      "prompt": "Build a dashboard",
-      "status": "running",
-      "startedAt": "2026-01-30T12:03:00.000Z",
-      "completedAt": null
-    }
-  ]
+    "tasks": [
+        {
+            "taskId": "a1b2c3d4",
+            "branch": "impl/login-page-a1b2c3d4",
+            "prompt": "Implement a login page",
+            "status": "completed",
+            "startedAt": "2026-01-30T12:00:00.000Z",
+            "completedAt": "2026-01-30T12:05:00.000Z"
+        },
+        {
+            "taskId": "e5f6g7h8",
+            "branch": "impl/dashboard-e5f6g7h8",
+            "prompt": "Build a dashboard",
+            "status": "running",
+            "startedAt": "2026-01-30T12:03:00.000Z",
+            "completedAt": null
+        }
+    ]
 }
 ```
 
@@ -187,14 +202,15 @@ curl http://localhost:3000/task/:taskId
 ```
 
 Response:
+
 ```json
 {
-  "taskId": "a1b2c3d4",
-  "branch": "impl/login-page-email-password-a1b2c3d4",
-  "prompt": "Implement a login page",
-  "status": "running",
-  "startedAt": "2026-01-30T12:00:00.000Z",
-  "completedAt": null
+    "taskId": "a1b2c3d4",
+    "branch": "impl/login-page-email-password-a1b2c3d4",
+    "prompt": "Implement a login page",
+    "status": "running",
+    "startedAt": "2026-01-30T12:00:00.000Z",
+    "completedAt": null
 }
 ```
 
@@ -207,11 +223,12 @@ curl http://localhost:3000/task/:taskId/log
 ```
 
 Returns the Claude Code CLI output for the specified task:
+
 ```json
 {
-  "taskId": "a1b2c3d4",
-  "output": "... claude code output ...",
-  "truncated": false
+    "taskId": "a1b2c3d4",
+    "output": "... claude code output ...",
+    "truncated": false
 }
 ```
 
