@@ -22,6 +22,8 @@ Edit `config.yaml` to match your environment:
 ```yaml
 server:
     workspaceDir: ./workspace # where workspace instances are stored
+    maxConcurrentTasks: 10 # global cap across all projects (optional)
+    maxTokensPerHour: 100000 # hourly token limit, OAuth mode only (optional); ~1/3 of Claude Max 5x capacity
 
 projects:
     demo-webapp:

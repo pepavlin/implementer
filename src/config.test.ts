@@ -76,6 +76,59 @@ projects:
         expect(() => loadConfig(path)).toThrow();
     });
 
+    it("loads server-level maxConcurrentTasks", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+server:
+  maxConcurrentTasks: 5
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+`
+        );
+
+        const config = loadConfig(path);
+        expect(config.server.maxConcurrentTasks).toBe(5);
+    });
+
+    it("loads server-level maxTokensPerHour", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+server:
+  maxTokensPerHour: 200000
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+`
+        );
+
+        const config = loadConfig(path);
+        expect(config.server.maxTokensPerHour).toBe(200_000);
+    });
+
+    it("rejects server.maxConcurrentTasks less than 1", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+server:
+  maxConcurrentTasks: 0
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+`
+        );
+
+        expect(() => loadConfig(path)).toThrow();
+    });
+
     it("loads a full config with all fields", () => {
         const path = writeYaml(
             "config.yaml",

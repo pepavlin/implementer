@@ -14,7 +14,9 @@ function interpolateEnv(value: string): string {
 
 const ServerSchema = z
     .object({
-        workspaceDir: z.string().default("./workspace")
+        workspaceDir: z.string().default("./workspace"),
+        maxConcurrentTasks: z.number().int().min(1).optional(),
+        maxTokensPerHour: z.number().int().min(1).optional()
     })
     .strict();
 

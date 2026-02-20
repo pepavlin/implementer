@@ -1,5 +1,9 @@
 export interface ServerConfig {
     workspaceDir: string;
+    /** Global cap on tasks running simultaneously across all projects. */
+    maxConcurrentTasks?: number;
+    /** Max tokens/hour allowed via the OAuth usage API before rejecting new tasks. Only applies in OAuth mode. */
+    maxTokensPerHour?: number;
 }
 
 export interface RepositoryConfig {
