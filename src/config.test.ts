@@ -305,4 +305,28 @@ projects:
 
         delete process.env.TEST_API_KEY;
     });
+
+    it("interpolates ${VAR} references in claudeOauthToken field", () => {
+        process.env.TEST_CLAUDE_OAUTH_TOKEN = "oauth-from-env";
+
+        const path = writeYaml(
+            "config.yaml",
+            `
+    projects:
+      my-project:
+        repositories:
+          - name: repo
+            url: https://github.com/test/repo.git
+        auth:
+          claudeOauthToken: \${TEST_CLAUDE_OAUTH_TOKEN}
+    `
+        );
+
+        const config = loadConfig(path);
+        expect(config.projects["my-project"].auth?.claudeOauthToken).toBe(
+            "oauth-from-env"
+        );
+
+        delete process.env.TEST_CLAUDE_OAUTH_TOKEN;
+    });
 });

@@ -1,73 +1,73 @@
 export interface ServerConfig {
-  workspaceDir: string;
+    workspaceDir: string;
 }
 
 export interface RepositoryConfig {
-  name: string;
-  url: string;
-  defaultBranch: string;
+    name: string;
+    url: string;
+    defaultBranch: string;
 }
 
 export interface McpServerConfig {
-  type?: string;
-  command?: string;
-  args?: string[];
-  env?: Record<string, string>;
-  url?: string;
-  headers?: Record<string, string>;
+    type?: string;
+    command?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    url?: string;
+    headers?: Record<string, string>;
 }
 
 export interface ClaudeCodeConfig {
-  command: string;
-  model?: string;
-  systemPrompt?: string;
-  mcpServers?: Record<string, McpServerConfig>;
+    command: string;
+    model?: string;
+    systemPrompt?: string;
+    mcpServers?: Record<string, McpServerConfig>;
 }
 
 export interface ProjectAuth {
-  anthropicApiKey?: string;
-  claudeOauthRefreshToken?: string;
-  githubToken?: string;
+    anthropicApiKey?: string;
+    claudeOauthToken?: string;
+    githubToken?: string;
 }
 
 export interface ProjectConfig {
-  apiKey?: string;
-  maxConcurrentTasks?: number;
-  repositories: RepositoryConfig[];
-  claudeCode: ClaudeCodeConfig;
-  auth?: ProjectAuth;
+    apiKey?: string;
+    maxConcurrentTasks?: number;
+    repositories: RepositoryConfig[];
+    claudeCode: ClaudeCodeConfig;
+    auth?: ProjectAuth;
 }
 
 export interface Config {
-  server: ServerConfig;
-  projects: Record<string, ProjectConfig>;
+    server: ServerConfig;
+    projects: Record<string, ProjectConfig>;
 }
 
 export type TaskStatus = "running" | "completed" | "failed" | "interrupted";
 
 export interface PullRequest {
-  repo: string;
-  url: string;
+    repo: string;
+    url: string;
 }
 
 export interface Task {
-  taskId: string;
-  projectId: string;
-  branch: string | null;
-  prompt: string;
-  status: TaskStatus;
-  startedAt: string;
-  completedAt: string | null;
-  output: string;
-  error?: string;
-  pullRequests?: PullRequest[];
+    taskId: string;
+    projectId: string;
+    branch: string | null;
+    prompt: string;
+    status: TaskStatus;
+    startedAt: string;
+    completedAt: string | null;
+    output: string;
+    error?: string;
+    pullRequests?: PullRequest[];
 }
 
 export interface PersistedTask extends Task {
-  workspaceId: number;
+    workspaceId: number;
 }
 
 export interface TaskCreateRequest {
-  prompt: string;
-  fromBranch?: string;
+    prompt: string;
+    fromBranch?: string;
 }

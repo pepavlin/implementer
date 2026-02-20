@@ -1,19 +1,30 @@
 server:
-  workspaceDir: ./workspace
-  maxConcurrentTasks: 4
+    workspaceDir: ./workspace
 
-repositories:
-  - name: my-app
-    url: https://github.com/your-org/your-repo.git
-    defaultBranch: main
-
-claudeCode:
-  command: claude
-  model: sonnet
-  # systemPrompt: |
-  #   Custom instructions applied to every task.
-  #   e.g. "Always write tests. Follow existing code style."
-  mcpServers:
-    playwright:
-      command: npx
-      args: ["@playwright/mcp@latest", "--headless", "--browser", "chromium"]
+projects:
+    demo-webapp:
+        maxConcurrentTasks: 2
+        repositories:
+            - name: demo-webapp
+              url: https://github.com/your-org/demo-webapp.git
+              defaultBranch: main
+        auth:
+            claudeOauthToken: claude-oauth-demo-webapp
+            githubToken: ghp-demo-webapp
+        apiKey: demo-webapp-secret
+        claudeCode:
+            command: claude
+            model: sonnet
+            # systemPrompt: |
+            #   Custom instructions applied to every task.
+            #   e.g. "Always write tests. Follow existing code style."
+            mcpServers:
+                playwright:
+                    command: npx
+                    args:
+                        [
+                            "@playwright/mcp@latest",
+                            "--headless",
+                            "--browser",
+                            "chromium"
+                        ]

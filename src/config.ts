@@ -49,7 +49,7 @@ const ClaudeCodeSchema = z
 const ProjectAuthSchema = z
     .object({
         anthropicApiKey: z.string().optional(),
-        claudeOauthRefreshToken: z.string().optional(),
+        claudeOauthToken: z.string().optional(),
         githubToken: z.string().optional()
     })
     .strict();
@@ -97,9 +97,9 @@ function normalizeValidatedConfig(
                     project.auth.anthropicApiKey
                 );
             }
-            if (project.auth.claudeOauthRefreshToken) {
-                project.auth.claudeOauthRefreshToken = interpolateEnv(
-                    project.auth.claudeOauthRefreshToken
+            if (project.auth.claudeOauthToken) {
+                project.auth.claudeOauthToken = interpolateEnv(
+                    project.auth.claudeOauthToken
                 );
             }
             if (project.auth.githubToken) {

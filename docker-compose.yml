@@ -16,13 +16,7 @@ services:
             - WORKSPACE_VOLUME=${INSTANCE_NAME:-implementer}_workspace
             - INSTANCE_NAME=${INSTANCE_NAME:-implementer}
             - SANDBOX_IMAGE=${INSTANCE_NAME:-implementer}-sandbox
-            - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
-            - CLAUDE_OAUTH_REFRESH_TOKEN=${CLAUDE_OAUTH_REFRESH_TOKEN:-}
-            - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-            - GITHUB_TOKEN=${GITHUB_TOKEN}
-            - GH_TOKEN=${GITHUB_TOKEN}
             - PORT=${PORT:-3000}
-            - API_KEY=${API_KEY}
 
     # Build-only: produces the sandbox image used by executor.
     # Not started by `docker compose up` — only built by `docker compose build`.

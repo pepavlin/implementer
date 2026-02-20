@@ -13,7 +13,7 @@ npm install
 ### Prerequisites
 
 - **Docker** — must be running (Claude Code executes inside a sandboxed container)
-- **Claude Code auth** — either set `CLAUDE_CODE_OAUTH_TOKEN` env var, or have Claude Code credentials stored in macOS Keychain (from a previous `claude` login)
+- **Claude Code auth** — configure auth per project in `config.yaml`, or use Claude Code credentials stored in macOS Keychain (from a previous `claude` login)
 
 ## Configuration
 
@@ -30,12 +30,17 @@ projects:
             - name: demo-webapp
               url: git@github.com:user/demo-webapp.git
               defaultBranch: main
+        auth:
+            claudeOauthToken: claude-oauth-demo-webapp
+            githubToken: ghp_your_github_token
         claudeCode:
             command: claude # path to claude CLI binary
             model: sonnet # optional model override
 ```
 
 You can define multiple projects and multiple repositories per project.
+
+`apiKey` is configured per project (`projects.<projectId>.apiKey`), not as a single global top-level config field.
 
 Config is validated both at startup and via:
 
@@ -55,15 +60,36 @@ The same validation logic is used in both cases, and unknown fields are rejected
 cp config.example.yaml config.yaml
 ```
 
-2. Create a `.env` file with your credentials:
+2. Create a minimal `.env` file from template:
+
+```bash
+cp .env.example .env
+```
+
+Then keep only runtime values in `.env`:
 
 ```bash
 INSTANCE_NAME=implementer          # unique name for this instance (affects container/image/volume names)
-CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token
-GITHUB_TOKEN=your-github-token
-API_KEY=your-secret-api-key        # optional, protects the API
 PORT=3000                          # optional, defaults to 3000
 ```
+
+For multi-project setups, define each project's auth directly in `config.yaml` (recommended), for example:
+
+```yaml
+projects:
+    demo-webapp:
+        apiKey: demo-webapp-secret
+        auth:
+            claudeOauthToken: claude-oauth-demo-webapp
+            githubToken: ghp-demo-webapp
+    backend-service:
+        apiKey: backend-secret
+        auth:
+            claudeOauthToken: claude-oauth-backend
+            githubToken: ghp-backend
+```
+
+If you prefer secrets from environment, you can still use `${...}` interpolation in `config.yaml`, but it is optional.
 
 3. Build and start:
 
