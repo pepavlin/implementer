@@ -5,14 +5,13 @@ import type { PullRequest, RepositoryConfig } from "./types.js";
 
 function git(args: string[], cwd: string, githubToken?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    // When a GitHub token is provided, inject it via GH_TOKEN and use
-    // `gh auth git-credential` as the credential helper so HTTPS remotes
-    // authenticate without embedding credentials in the URL.
-    const env = githubToken ? { ...process.env, GH_TOKEN: githubToken } : undefined;
+    // When a GitHub token is provided, inject it via http.extraHeader scoped
+    // to github.com so HTTPS remotes authenticate without embedding credentials
+    // in the URL or relying on shell-based credential helpers.
     const fullArgs = githubToken
-      ? ["-c", "credential.helper=!gh auth git-credential", ...args]
+      ? ["-c", `http.https://github.com/.extraHeader=Authorization: Bearer ${githubToken}`, ...args]
       : args;
-    execFile("git", fullArgs, { cwd, env, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile("git", fullArgs, { cwd, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(`git ${args.join(" ")} failed: ${stderr || error.message}`));
       } else {
