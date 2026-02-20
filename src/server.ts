@@ -9,7 +9,8 @@ import type { Config } from "./types.js";
 
 const TaskCreateSchema = z.object({
     prompt: z.string().min(1),
-    fromBranch: z.string().optional()
+    fromBranch: z.string().optional(),
+    callbackUrl: z.string().url().optional()
 });
 
 const MAX_LOG_SIZE = 1024 * 1024; // 1MB
@@ -46,6 +47,13 @@ const openApiSpec = {
                         description:
                             "Continue from an existing branch instead of creating a new one",
                         example: "impl/dark-mode-abc123"
+                    },
+                    callbackUrl: {
+                        type: "string",
+                        format: "uri",
+                        description:
+                            "URL to POST to when the task finishes. Body: { taskId, status }",
+                        example: "https://example.com/webhook/task-done"
                     }
                 }
             },

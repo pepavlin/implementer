@@ -303,6 +303,16 @@ export class TaskManager {
         return entry.task.output;
     }
 
+    private fireWebhook(taskId: string, status: string, url: string): void {
+        fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ taskId, status })
+        }).catch((err) => {
+            console.error(`[${taskId}] Webhook POST to ${url} failed:`, err instanceof Error ? err.message : String(err));
+        });
+    }
+
     /**
      * Start a new task for the given project. Always accepts — tasks run in parallel
      * on isolated workspaces within the project's pool.
@@ -359,7 +369,8 @@ export class TaskManager {
             status: "running",
             startedAt: new Date().toISOString(),
             completedAt: null,
-            output: ""
+            output: "",
+            callbackUrl: request.callbackUrl
         };
 
         // Acquire a workspace instance from the project's pool
@@ -693,6 +704,9 @@ export class TaskManager {
             task.completedAt = new Date().toISOString();
             this.store.save({ ...task, workspaceId: workspace.id });
             state.pool.release(workspace.id);
+            if (task.callbackUrl) {
+                this.fireWebhook(task.taskId, task.status, task.callbackUrl);
+            }
         }
     }
 }

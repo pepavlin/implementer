@@ -69,6 +69,7 @@ export interface Task {
     output: string;
     error?: string;
     pullRequests?: PullRequest[];
+    callbackUrl?: string;
 }
 
 export interface PersistedTask extends Task {
@@ -78,4 +79,5 @@ export interface PersistedTask extends Task {
 export interface TaskCreateRequest {
     prompt: string;
     fromBranch?: string;
+    callbackUrl?: string;
 }
