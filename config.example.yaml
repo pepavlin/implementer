@@ -14,8 +14,12 @@ projects:
               url: https://github.com/your-org/demo-webapp.git
               defaultBranch: main
         auth:
-            claudeOauthToken: claude-oauth-demo-webapp
-            githubToken: ghp-demo-webapp
+            # Use claudeOauthRefreshToken for long-lived auth (auto-refreshes access tokens).
+            # Get it from ~/.claude.json after running: claude setup-token
+            claudeOauthRefreshToken: ${CLAUDE_OAUTH_REFRESH_TOKEN}
+            # Or use claudeOauthToken for a static access token (~1h lifetime, no auto-refresh).
+            # claudeOauthToken: ${CLAUDE_CODE_OAUTH_TOKEN}
+            githubToken: ${GITHUB_TOKEN}
         apiKey: demo-webapp-secret
         claudeCode:
             command: claude

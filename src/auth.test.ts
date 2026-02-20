@@ -38,17 +38,17 @@ describe("TokenManager", () => {
         expect(credentials.value).toBe("access-token");
     });
 
-    it("uses project-level claudeOauthToken field", async () => {
+    it("uses project-level claudeOauthRefreshToken field as refresh-token source", async () => {
         const manager = new TokenManager(
             {
-                claudeOauthToken: "oauth-from-config"
+                claudeOauthRefreshToken: "refresh-from-config"
             },
             TMP
         );
 
         const refreshSpy = vi.spyOn(manager as any, "refreshAccessToken");
         refreshSpy.mockResolvedValue({
-            accessToken: "access-from-project-token",
+            accessToken: "access-from-project-refresh",
             refreshToken: "next-refresh-token",
             expiresAt: Date.now() + 3600_000
         });
@@ -56,6 +56,24 @@ describe("TokenManager", () => {
         const credentials = await manager.getCredentials();
 
         expect(credentials.envName).toBe("CLAUDE_CODE_OAUTH_TOKEN");
-        expect(credentials.value).toBe("access-from-project-token");
+        expect(credentials.value).toBe("access-from-project-refresh");
+        expect(refreshSpy).toHaveBeenCalledWith("refresh-from-config");
+    });
+
+    it("uses project-level claudeOauthToken field as static access token (no refresh)", async () => {
+        const manager = new TokenManager(
+            {
+                claudeOauthToken: "static-access-token"
+            },
+            TMP
+        );
+
+        const refreshSpy = vi.spyOn(manager as any, "refreshAccessToken");
+
+        const credentials = await manager.getCredentials();
+
+        expect(credentials.envName).toBe("CLAUDE_CODE_OAUTH_TOKEN");
+        expect(credentials.value).toBe("static-access-token");
+        expect(refreshSpy).not.toHaveBeenCalled();
     });
 });

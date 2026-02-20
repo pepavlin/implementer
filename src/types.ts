@@ -30,7 +30,10 @@ export interface ClaudeCodeConfig {
 
 export interface ProjectAuth {
     anthropicApiKey?: string;
+    /** Static OAuth access token (expires in ~1h, no auto-refresh). */
     claudeOauthToken?: string;
+    /** OAuth refresh token used to obtain new access tokens automatically. */
+    claudeOauthRefreshToken?: string;
     githubToken?: string;
 }
 

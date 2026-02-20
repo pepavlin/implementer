@@ -67,7 +67,18 @@ export class TokenManager {
             return { envName: "CLAUDE_CODE_OAUTH_TOKEN", value: accessToken };
         }
 
-        // 4. Static OAuth token (no refresh – will expire)
+        // 4. Static OAuth token from config (no refresh – will expire in ~1h)
+        if (this.auth?.claudeOauthToken) {
+            console.warn(
+                "Warning: Using static OAuth token from config without refresh token. It will expire in ~1h."
+            );
+            return {
+                envName: "CLAUDE_CODE_OAUTH_TOKEN",
+                value: this.auth.claudeOauthToken
+            };
+        }
+
+        // 5. Static OAuth token from env (no refresh – will expire)
         if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
             console.warn(
                 "Warning: Using static OAuth token without refresh token. It will expire in ~1h."
@@ -78,7 +89,7 @@ export class TokenManager {
             };
         }
 
-        // 5. macOS Keychain fallback (dev only)
+        // 6. macOS Keychain fallback (dev only)
         return this.fromKeychain();
     }
 
@@ -90,9 +101,9 @@ export class TokenManager {
             return cached.refreshToken;
         }
 
-        // Project-level OAuth token as initial seed
-        if (this.auth?.claudeOauthToken) {
-            return this.auth.claudeOauthToken;
+        // Project-level OAuth refresh token as initial seed
+        if (this.auth?.claudeOauthRefreshToken) {
+            return this.auth.claudeOauthRefreshToken;
         }
 
         // Global env var as initial seed (used on first-ever start)
