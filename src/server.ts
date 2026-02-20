@@ -4,6 +4,7 @@ import { z } from "zod";
 import { TaskManager, GlobalConcurrencyLimitError } from "./task-manager.js";
 import { PoolExhaustedError } from "./workspace-pool.js";
 import { UsageLimitError } from "./usage-limiter.js";
+import { extractLastAssistantMessage } from "./executor.js";
 import type { Config } from "./types.js";
 
 const TaskCreateSchema = z.object({
@@ -412,7 +413,7 @@ export function createServer(
             output:
                 task.status === "running" || task.status === "interrupted"
                     ? null
-                    : task.output,
+                    : extractLastAssistantMessage(task.output) || null,
             error: task.error,
             pullRequests: task.pullRequests ?? null
         });

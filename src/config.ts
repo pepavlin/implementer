@@ -44,7 +44,8 @@ const ClaudeCodeSchema = z
         command: z.string().default("claude"),
         model: z.string().optional(),
         systemPrompt: z.string().optional(),
-        mcpServers: z.record(McpServerSchema).optional()
+        mcpServers: z.record(McpServerSchema).optional(),
+        maxOutputTokens: z.number().int().min(1).optional()
     })
     .strict();
 

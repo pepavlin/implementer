@@ -134,6 +134,9 @@ export class Executor {
       "-v", volumeMount,
       "-w", workdir,
       "-e", `${creds.envName}=${creds.value}`,
+      ...(this.config.maxOutputTokens
+        ? ["-e", `CLAUDE_CODE_MAX_OUTPUT_TOKENS=${this.config.maxOutputTokens}`]
+        : []),
       this.sandboxImage,
       ...claudeArgs,
     ];

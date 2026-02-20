@@ -26,6 +26,7 @@ export interface ClaudeCodeConfig {
     model?: string;
     systemPrompt?: string;
     mcpServers?: Record<string, McpServerConfig>;
+    maxOutputTokens?: number;
 }
 
 export interface ProjectAuth {
