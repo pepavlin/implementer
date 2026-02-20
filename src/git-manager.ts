@@ -5,11 +5,11 @@ import type { PullRequest, RepositoryConfig } from "./types.js";
 
 function git(args: string[], cwd: string, githubToken?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    // When a GitHub token is provided, inject it via http.extraHeader scoped
-    // to github.com so HTTPS remotes authenticate without embedding credentials
-    // in the URL or relying on shell-based credential helpers.
+    // When a GitHub token is provided, inject it via http.extraHeader using
+    // Basic auth (x-oauth-basic:TOKEN), which is what GitHub expects for git
+    // HTTPS operations (not Bearer, which is for the REST API).
     const fullArgs = githubToken
-      ? ["-c", `http.https://github.com/.extraHeader=Authorization: Bearer ${githubToken}`, ...args]
+      ? ["-c", `http.https://github.com/.extraHeader=Authorization: Basic ${Buffer.from(`x-oauth-basic:${githubToken}`).toString("base64")}`, ...args]
       : args;
     execFile("git", fullArgs, { cwd, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
