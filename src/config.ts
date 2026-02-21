@@ -58,13 +58,21 @@ const ProjectAuthSchema = z
     })
     .strict();
 
+const ErrorRetrySchema = z
+    .object({
+        maxAttempts: z.number().int().min(2),
+        delaySeconds: z.number().int().min(0).default(60)
+    })
+    .strict();
+
 const ProjectSchema = z
     .object({
         apiKey: z.string().optional(),
         maxConcurrentTasks: z.number().int().min(1).optional(),
         repositories: z.array(RepositorySchema).min(1),
         claudeCode: ClaudeCodeSchema.default({}),
-        auth: ProjectAuthSchema.optional()
+        auth: ProjectAuthSchema.optional(),
+        errorRetry: ErrorRetrySchema.optional()
     })
     .strict();
 

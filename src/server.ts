@@ -89,7 +89,7 @@ const openApiSpec = {
                     prompt: { type: "string" },
                     status: {
                         type: "string",
-                        enum: ["queued", "running", "completed", "failed", "interrupted"]
+                        enum: ["queued", "running", "retrying", "completed", "failed", "interrupted"]
                     },
                     startedAt: { type: "string", format: "date-time" },
                     completedAt: {
@@ -410,14 +410,15 @@ export function createServer(
             branch: task.branch,
             prompt: task.prompt,
             status: task.status,
+            attempt: task.attempt,
             startedAt: task.startedAt,
             completedAt: task.completedAt,
             durationSeconds: getDurationSeconds(task),
             output:
-                task.status === "queued" || task.status === "running" || task.status === "interrupted"
+                task.status === "queued" || task.status === "running" || task.status === "retrying" || task.status === "interrupted"
                     ? null
                     : extractLastAssistantMessage(task.output) || null,
-            error: task.error,
+            error: task.error ?? null,
             pullRequests: task.pullRequests ?? null
         });
     });

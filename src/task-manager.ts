@@ -363,6 +363,65 @@ export class TaskManager {
             });
     }
 
+    private scheduleRetry(task: Task, state: ProjectState): void {
+        const retryConfig = state.config.errorRetry!;
+        task.attempt += 1;
+        task.status = "retrying";
+        task.completedAt = null;
+
+        const entry = this.tasks.get(task.taskId);
+        if (entry) {
+            this.store.save({ ...task, workspaceId: entry.workspaceId });
+        }
+
+        console.log(
+            `[${task.taskId}] Retrying in ${retryConfig.delaySeconds}s (attempt ${task.attempt}/${retryConfig.maxAttempts})`
+        );
+
+        setTimeout(async () => {
+            if (this.shouldQueue(task.projectId, state)) {
+                // No capacity right now — put in queue and wait
+                task.status = "queued";
+                this.enqueue(task.projectId, task.taskId);
+                const entry = this.tasks.get(task.taskId);
+                if (entry) this.store.save({ ...task, workspaceId: entry.workspaceId });
+                console.log(`[${task.taskId}] Retry queued (no capacity)`);
+                return;
+            }
+
+            task.status = "running";
+            task.error = undefined;
+
+            let workspace: { id: number; dir: string };
+            try {
+                workspace = await state.pool.acquire(
+                    state.config.repositories,
+                    state.config.auth?.githubToken
+                );
+            } catch (err) {
+                // Pool full despite check — queue it
+                task.status = "queued";
+                this.enqueue(task.projectId, task.taskId);
+                const entry = this.tasks.get(task.taskId);
+                if (entry) this.store.save({ ...task, workspaceId: entry.workspaceId });
+                console.log(`[${task.taskId}] Retry queued after acquire race`);
+                return;
+            }
+
+            const entry = this.tasks.get(task.taskId);
+            if (entry) {
+                entry.workspaceId = workspace.id;
+                entry.executor = new Executor(state.config.claudeCode, state.tokenManager);
+            }
+            this.store.save({ ...task, workspaceId: workspace.id });
+
+            // Retry on the same branch — Claude can see previous partial work
+            this.executeTask(task, workspace, state, task.branch ?? undefined).catch((err) => {
+                console.error(`[${task.taskId}] Retry execution failed:`, err);
+            });
+        }, retryConfig.delaySeconds * 1000);
+    }
+
     private fireWebhook(taskId: string, status: string, url: string): void {
         fetch(url, {
             method: "POST",
@@ -413,7 +472,8 @@ export class TaskManager {
             startedAt: new Date().toISOString(),
             completedAt: null,
             output: "",
-            callbackUrl: request.callbackUrl
+            callbackUrl: request.callbackUrl,
+            attempt: 1
         };
 
         // Queue if at capacity
@@ -770,11 +830,23 @@ export class TaskManager {
             task.completedAt = new Date().toISOString();
             this.store.save({ ...task, workspaceId: workspace.id });
             state.pool.release(workspace.id);
-            if (task.callbackUrl) {
-                this.fireWebhook(task.taskId, task.status, task.callbackUrl);
-            }
             // Start next queued task for this project if capacity is now available
             this.tryDequeue(task.projectId, state);
+        }
+
+        // Schedule retry if task failed and retries are configured
+        // (runs after finally — workspace already released back to pool)
+        if (task.status === "failed") {
+            const retryConfig = state.config.errorRetry;
+            if (retryConfig && task.attempt < retryConfig.maxAttempts) {
+                this.scheduleRetry(task, state);
+                return; // webhook will fire only on terminal failure
+            }
+        }
+
+        // Fire webhook on terminal completion (not retrying)
+        if (task.callbackUrl) {
+            this.fireWebhook(task.taskId, task.status, task.callbackUrl);
         }
     }
 }

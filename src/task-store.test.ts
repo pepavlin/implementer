@@ -17,6 +17,7 @@ function makeTask(overrides: Partial<PersistedTask> = {}): PersistedTask {
     completedAt: "2025-01-01T01:00:00.000Z",
     output: "Done",
     workspaceId: 0,
+    attempt: 1,
     ...overrides,
   };
 }

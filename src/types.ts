@@ -44,6 +44,7 @@ export interface ProjectConfig {
     repositories: RepositoryConfig[];
     claudeCode: ClaudeCodeConfig;
     auth?: ProjectAuth;
+    errorRetry?: ErrorRetryConfig;
 }
 
 export interface Config {
@@ -51,7 +52,14 @@ export interface Config {
     projects: Record<string, ProjectConfig>;
 }
 
-export type TaskStatus = "queued" | "running" | "completed" | "failed" | "interrupted";
+export type TaskStatus = "queued" | "running" | "retrying" | "completed" | "failed" | "interrupted";
+
+export interface ErrorRetryConfig {
+    /** Total number of attempts including the first (e.g. 5 = 1 original + 4 retries). */
+    maxAttempts: number;
+    /** Seconds to wait between attempts. */
+    delaySeconds: number;
+}
 
 export interface PullRequest {
     repo: string;
@@ -72,6 +80,8 @@ export interface Task {
     callbackUrl?: string;
     /** Original fromBranch value from the create request, needed when dequeuing. */
     fromBranch?: string;
+    /** Current attempt number (1-indexed). Incremented on each retry. */
+    attempt: number;
 }
 
 export interface PersistedTask extends Task {

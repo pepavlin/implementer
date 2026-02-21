@@ -36,6 +36,7 @@ function makeMockTask(overrides: Partial<Task> = {}): Task {
         startedAt: "2025-01-01T00:00:00.000Z",
         completedAt: null,
         output: "",
+        attempt: 1,
         ...overrides
     };
 }
