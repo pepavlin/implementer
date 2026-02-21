@@ -120,13 +120,16 @@ export class TaskManager {
         );
 
         for (const pt of persisted) {
-            // Mark tasks that were "running" as "interrupted"
-            if (pt.status === "running") {
+            // Mark tasks that were active (running or waiting-to-retry) as interrupted.
+            // "retrying" tasks had a pending setTimeout that is gone after restart — treat
+            // them the same as "running" so resumeInterruptedTasks() re-executes them.
+            if (pt.status === "running" || pt.status === "retrying") {
+                const prev = pt.status;
                 pt.status = "interrupted";
                 pt.output = "";
                 this.store.save(pt);
                 console.log(
-                    `[task-manager] Task ${pt.taskId} marked as interrupted`
+                    `[task-manager] Task ${pt.taskId} marked as interrupted (was ${prev})`
                 );
             }
 

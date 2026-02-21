@@ -186,6 +186,30 @@ describe("TaskManager", () => {
       expect(["running", "failed", "interrupted"]).toContain(onDisk.status);
     });
 
+    it("marks retrying tasks as interrupted on restart", async () => {
+      const { TaskManager } = await import("./task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      // Task was in "retrying" state (waiting for setTimeout) when server died
+      store.save(makePersistedTask({
+        taskId: "retrying-task",
+        status: "retrying" as any,
+        completedAt: null,
+        workspaceId: null,
+        attempt: 2,
+      }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      // After init, should no longer be stuck in "retrying"
+      const onDisk = JSON.parse(
+        readFileSync(join(TMP, "tasks", "retrying-task.json"), "utf-8"),
+      );
+      expect(onDisk.status).not.toBe("retrying");
+    });
+
     it("does not modify completed tasks", async () => {
       const { TaskManager } = await import("./task-manager.js");
       const config = makeConfig();
@@ -393,10 +417,14 @@ describe("TaskManager", () => {
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
-      store.save(makePersistedTask({ taskId: "retry-task", status: "retrying" as any, completedAt: null }));
+      store.save(makePersistedTask({ taskId: "retry-task", status: "completed" }));
 
       const tm = new TaskManager(config);
       await tm.init();
+
+      // Manually flip status to "retrying" in memory to simulate an active auto-retry
+      // @ts-expect-error - accessing private tasks map for testing
+      tm.tasks.get("retry-task").task.status = "retrying";
 
       await expect(tm.retryTask(PROJECT_ID, "retry-task")).rejects.toBeInstanceOf(TaskActiveError);
     });
