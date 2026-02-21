@@ -129,24 +129,29 @@ export class TaskManager {
                 console.log(
                     `[task-manager] Task ${pt.taskId} marked as interrupted (was running)`
                 );
-            // Tasks waiting for an auto-retry delay cannot continue — the setTimeout
-            // is gone after restart. Mark them as failed so they have a clean terminal
-            // state; the user can manually retry if desired.
+            // Tasks waiting for a retry delay — the setTimeout is gone after restart.
+            // Re-queue them so the next attempt runs as soon as capacity is available.
             } else if (pt.status === "retrying") {
-                pt.status = "failed";
-                pt.error = "Server restarted during retry wait";
-                pt.completedAt = new Date().toISOString();
+                pt.status = "queued";
                 this.store.save(pt);
                 console.log(
-                    `[task-manager] Task ${pt.taskId} marked as failed (server restarted during retry wait)`
+                    `[task-manager] Task ${pt.taskId} re-enqueued (was retrying)`
                 );
             }
 
             // Populate in-memory map (no live executor for historical tasks)
+            // For re-queued retrying tasks, preserve the branch as checkoutBranch so
+            // tryDequeue checks out the existing branch instead of creating a new one.
+            const checkoutBranch =
+                pt.status === "queued" && pt.attempt > 1
+                    ? (pt.branch ?? undefined)
+                    : undefined;
+
             this.tasks.set(pt.taskId, {
                 task: pt,
                 executor: null,
-                workspaceId: pt.workspaceId
+                workspaceId: pt.workspaceId,
+                checkoutBranch
             });
 
             // Re-enqueue tasks that were waiting in the queue before restart

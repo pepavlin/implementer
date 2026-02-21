@@ -186,7 +186,7 @@ describe("TaskManager", () => {
       expect(["running", "failed", "interrupted"]).toContain(onDisk.status);
     });
 
-    it("marks retrying tasks as failed on restart", async () => {
+    it("re-enqueues retrying tasks on restart", async () => {
       const { TaskManager } = await import("./task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
@@ -198,22 +198,31 @@ describe("TaskManager", () => {
         completedAt: null,
         workspaceId: null,
         attempt: 2,
+        branch: "impl/test-retrying-task",
       }));
 
       const tm = new TaskManager(config);
+      // Prevent tryDequeue from actually acquiring a workspace (which would trigger git clone)
+      // @ts-expect-error - accessing private projects map for testing
+      const state = tm.projects.get(PROJECT_ID)!;
+      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(false);
+
       await tm.init();
 
-      // After init, task should be "failed" — the retry timer is gone, so it
-      // gets a clean terminal state instead of staying stuck in "retrying"
+      // After init, task should be queued (not stuck in retrying, not failed)
       const task = tm.getTask(PROJECT_ID, "retrying-task");
-      expect(task?.status).toBe("failed");
-      expect(task?.error).toContain("Server restarted");
+      expect(task?.status).toBe("queued");
+      expect(task?.attempt).toBe(2); // attempt counter preserved
 
       const onDisk = JSON.parse(
         readFileSync(join(TMP, "tasks", "retrying-task.json"), "utf-8"),
       );
-      expect(onDisk.status).toBe("failed");
-      expect(onDisk.completedAt).not.toBeNull();
+      expect(onDisk.status).toBe("queued");
+
+      // checkoutBranch should be set so the existing branch is reused on dequeue
+      // @ts-expect-error - accessing private tasks map for testing
+      const entry = tm.tasks.get("retrying-task");
+      expect(entry?.checkoutBranch).toBe("impl/test-retrying-task");
     });
 
     it("does not modify completed tasks", async () => {
