@@ -120,16 +120,25 @@ export class TaskManager {
         );
 
         for (const pt of persisted) {
-            // Mark tasks that were active (running or waiting-to-retry) as interrupted.
-            // "retrying" tasks had a pending setTimeout that is gone after restart — treat
-            // them the same as "running" so resumeInterruptedTasks() re-executes them.
-            if (pt.status === "running" || pt.status === "retrying") {
-                const prev = pt.status;
+            // Tasks that were running when the server stopped are marked as interrupted
+            // so resumeInterruptedTasks() can pick them up and re-run them.
+            if (pt.status === "running") {
                 pt.status = "interrupted";
                 pt.output = "";
                 this.store.save(pt);
                 console.log(
-                    `[task-manager] Task ${pt.taskId} marked as interrupted (was ${prev})`
+                    `[task-manager] Task ${pt.taskId} marked as interrupted (was running)`
+                );
+            // Tasks waiting for an auto-retry delay cannot continue — the setTimeout
+            // is gone after restart. Mark them as failed so they have a clean terminal
+            // state; the user can manually retry if desired.
+            } else if (pt.status === "retrying") {
+                pt.status = "failed";
+                pt.error = "Server restarted during retry wait";
+                pt.completedAt = new Date().toISOString();
+                this.store.save(pt);
+                console.log(
+                    `[task-manager] Task ${pt.taskId} marked as failed (server restarted during retry wait)`
                 );
             }
 

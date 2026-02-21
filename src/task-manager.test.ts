@@ -186,7 +186,7 @@ describe("TaskManager", () => {
       expect(["running", "failed", "interrupted"]).toContain(onDisk.status);
     });
 
-    it("marks retrying tasks as interrupted on restart", async () => {
+    it("marks retrying tasks as failed on restart", async () => {
       const { TaskManager } = await import("./task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
@@ -203,11 +203,17 @@ describe("TaskManager", () => {
       const tm = new TaskManager(config);
       await tm.init();
 
-      // After init, should no longer be stuck in "retrying"
+      // After init, task should be "failed" — the retry timer is gone, so it
+      // gets a clean terminal state instead of staying stuck in "retrying"
+      const task = tm.getTask(PROJECT_ID, "retrying-task");
+      expect(task?.status).toBe("failed");
+      expect(task?.error).toContain("Server restarted");
+
       const onDisk = JSON.parse(
         readFileSync(join(TMP, "tasks", "retrying-task.json"), "utf-8"),
       );
-      expect(onDisk.status).not.toBe("retrying");
+      expect(onDisk.status).toBe("failed");
+      expect(onDisk.completedAt).not.toBeNull();
     });
 
     it("does not modify completed tasks", async () => {
