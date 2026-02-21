@@ -21,6 +21,11 @@ projects:
             # claudeOauthToken: ${CLAUDE_CODE_OAUTH_TOKEN}
             githubToken: ${GITHUB_TOKEN}
         apiKey: demo-webapp-secret
+        # Automatically retry failed tasks (optional)
+        # maxAttempts = total attempts including the first (e.g. 3 = 1 original + 2 retries)
+        # errorRetry:
+        #     maxAttempts: 3
+        #     delaySeconds: 60
         claudeCode:
             command: claude
             model: sonnet
