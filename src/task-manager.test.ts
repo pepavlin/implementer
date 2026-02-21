@@ -48,6 +48,7 @@ describe("TaskManager", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     rmSync(TMP, { recursive: true, force: true });
   });
 
@@ -279,6 +280,76 @@ describe("TaskManager", () => {
       // Task is not accessible via the known project
       const task = tm.getTask(PROJECT_ID, "alien-task");
       expect(task).toBeUndefined();
+    });
+  });
+
+  describe("startTask", () => {
+    it("returns immediately with queued status and null branch (no fromBranch)", async () => {
+      const { TaskManager } = await import("./task-manager.js");
+      const { Executor } = await import("./executor.js");
+      const config = makeConfig();
+      const tm = new TaskManager(config);
+
+      // Slug generation is controlled manually — it will not resolve until we allow it
+      let resolveSlug!: (s: string) => void;
+      vi.spyOn(Executor.prototype, "generateBranchSlug").mockReturnValue(
+        new Promise<string>((r) => { resolveSlug = r; })
+      );
+
+      // @ts-expect-error - private
+      const state = tm.projects.get(PROJECT_ID)!;
+      vi.spyOn(state.pool, "acquire").mockRejectedValue(new Error("no capacity"));
+
+      const task = await tm.startTask(PROJECT_ID, { prompt: "Add a button" });
+
+      // Returned immediately before slug generation completes
+      expect(task.branch).toBeNull();
+      expect(task.status).toBe("queued");
+      expect(task.taskId).toBeDefined();
+      expect(tm.getTask(PROJECT_ID, task.taskId)).toBeDefined();
+
+      // Unblock slug generation and verify branch is set afterwards
+      resolveSlug("add-button");
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(tm.getTask(PROJECT_ID, task.taskId)?.branch).toBe(`impl/add-button-${task.taskId}`);
+    });
+
+    it("uses fromBranch directly — branch is set immediately and never overwritten", async () => {
+      const { TaskManager } = await import("./task-manager.js");
+      const config = makeConfig();
+      const tm = new TaskManager(config);
+
+      // @ts-expect-error - private
+      const state = tm.projects.get(PROJECT_ID)!;
+      vi.spyOn(state.pool, "acquire").mockRejectedValue(new Error("no capacity"));
+
+      const task = await tm.startTask(PROJECT_ID, { prompt: "Add a button", fromBranch: "my-branch" });
+
+      // Branch is set immediately from fromBranch — no impl/ prefix added
+      expect(task.branch).toBe("my-branch");
+      expect(task.status).toBe("queued");
+
+      // Give background a moment to complete
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Branch must stay exactly as provided, not rewritten to an impl/slug-taskId form
+      expect(tm.getTask(PROJECT_ID, task.taskId)?.branch).toBe("my-branch");
+    });
+
+    it("registers the task in memory before slug generation completes", async () => {
+      const { TaskManager } = await import("./task-manager.js");
+      const { Executor } = await import("./executor.js");
+      const config = makeConfig();
+      const tm = new TaskManager(config);
+
+      // Slug never resolves during this test — background stays pending
+      vi.spyOn(Executor.prototype, "generateBranchSlug").mockReturnValue(new Promise(() => {}));
+
+      const task = await tm.startTask(PROJECT_ID, { prompt: "Do something" });
+
+      expect(tm.getTask(PROJECT_ID, task.taskId)).toBeDefined();
+      expect(tm.listTasks(PROJECT_ID)).toHaveLength(1);
     });
   });
 

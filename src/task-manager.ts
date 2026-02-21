@@ -442,8 +442,8 @@ export class TaskManager {
     }
 
     /**
-     * Start a new task for the given project. Always accepts — tasks run in parallel
-     * on isolated workspaces within the project's pool.
+     * Start a new task for the given project. Returns immediately with a queued
+     * task — branch slug generation and workspace acquisition happen in the background.
      */
     async startTask(
         projectId: string,
@@ -459,25 +459,13 @@ export class TaskManager {
 
         const taskId = nanoid(8);
 
-        // Generate branch name before returning response (fast slug call)
-        let branch: string;
-        if (request.fromBranch) {
-            branch = request.fromBranch;
-        } else {
-            console.log(`[${taskId}] Generating branch name...`);
-            const slugExecutor = new Executor(state.config.claudeCode, state.tokenManager);
-            const slug = await slugExecutor.generateBranchSlug(request.prompt, taskId);
-            branch = `impl/${slug}-${taskId}`;
-            console.log(`[${taskId}] Branch: ${branch}`);
-        }
-
         const task: Task = {
             taskId,
             projectId,
-            branch,
+            branch: request.fromBranch ?? null,
             fromBranch: request.fromBranch,
             prompt: request.prompt,
-            status: "running",
+            status: "queued",
             startedAt: new Date().toISOString(),
             completedAt: null,
             output: "",
@@ -485,43 +473,70 @@ export class TaskManager {
             attempt: 1
         };
 
-        // Queue if at capacity
-        if (this.shouldQueue(projectId, state)) {
-            task.status = "queued";
-            this.tasks.set(taskId, { task, executor: null, workspaceId: null });
+        this.tasks.set(taskId, { task, executor: null, workspaceId: null });
+        this.store.save({ ...task, workspaceId: null });
+
+        // Slug generation and workspace acquisition run in the background
+        this.prepareAndRunTask(task, state).catch((err) => {
+            console.error(`[${taskId}] Failed to initialize task:`, err);
+            task.status = "failed";
+            task.error = err instanceof Error ? err.message : String(err);
+            task.completedAt = new Date().toISOString();
             this.store.save({ ...task, workspaceId: null });
+            if (task.callbackUrl) {
+                this.fireWebhook(taskId, task.status, task.callbackUrl);
+            }
+        });
+
+        return task;
+    }
+
+    private async prepareAndRunTask(task: Task, state: ProjectState): Promise<void> {
+        const { taskId, projectId } = task;
+
+        // Generate branch slug asynchronously if no explicit branch was provided
+        if (!task.branch) {
+            console.log(`[${taskId}] Generating branch name...`);
+            const slugExecutor = new Executor(state.config.claudeCode, state.tokenManager);
+            const slug = await slugExecutor.generateBranchSlug(task.prompt, taskId);
+            task.branch = `impl/${slug}-${taskId}`;
+            console.log(`[${taskId}] Branch: ${task.branch}`);
+            this.store.save({ ...task, workspaceId: null });
+        }
+
+        // Queue if at capacity — task will be picked up by tryDequeue when a slot frees
+        if (this.shouldQueue(projectId, state)) {
             this.enqueue(projectId, taskId);
             const queueLen = this.queues.get(projectId)!.length;
             console.log(`[${taskId}] Queued (position ${queueLen} for ${projectId})`);
-            return task;
+            return;
         }
 
-        // Run immediately
+        // Acquire workspace and run immediately
         const executor = new Executor(state.config.claudeCode, state.tokenManager);
-        this.tasks.set(taskId, { task, executor, workspaceId: null });
+        const entry = this.tasks.get(taskId)!;
+        entry.executor = executor;
+        task.status = "running";
 
         let workspace: { id: number; dir: string };
         try {
             workspace = await state.pool.acquire(state.config.repositories, state.config.auth?.githubToken);
-        } catch (err) {
-            // Race condition: another task grabbed the last slot between shouldQueue and acquire
+        } catch (_err) {
+            // Race condition: another task grabbed the last slot — queue and wait
             task.status = "queued";
-            this.tasks.get(taskId)!.executor = null;
+            entry.executor = null;
             this.store.save({ ...task, workspaceId: null });
             this.enqueue(projectId, taskId);
             console.log(`[${taskId}] Queued after acquire race`);
-            return task;
+            return;
         }
 
-        this.tasks.get(taskId)!.workspaceId = workspace.id;
+        entry.workspaceId = workspace.id;
         this.store.save({ ...task, workspaceId: workspace.id });
 
-        // Run async - don't await, let it run in background
         this.executeTask(task, workspace, state).catch((err) => {
             console.error(`Task ${taskId} failed unexpectedly:`, err);
         });
-
-        return task;
     }
 
     /**

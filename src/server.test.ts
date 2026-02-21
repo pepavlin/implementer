@@ -71,8 +71,8 @@ describe("server", () => {
     });
 
     describe("POST /task", () => {
-        it("creates a task and returns taskId", async () => {
-            const task = makeMockTask();
+        it("creates a task and returns taskId with queued status and null branch", async () => {
+            const task = makeMockTask({ status: "queued", branch: null });
             const tm = makeMockTaskManager({
                 startTask: vi.fn().mockResolvedValue(task)
             });
@@ -84,8 +84,8 @@ describe("server", () => {
                 .expect(200);
 
             expect(res.body.taskId).toBe("abc123");
-            expect(res.body.branch).toBe("impl/test-branch-abc123");
-            expect(res.body.status).toBe("running");
+            expect(res.body.branch).toBeNull();
+            expect(res.body.status).toBe("queued");
         });
 
         it("rejects empty prompt", async () => {

@@ -62,12 +62,15 @@ const openApiSpec = {
                     taskId: { type: "string", example: "TVchAThD" },
                     branch: {
                         type: "string",
-                        example: "impl/dark-mode-abc123"
+                        nullable: true,
+                        description:
+                            "Branch name. Null until generated asynchronously — poll GET /task/{taskId} to get the final branch.",
+                        example: null
                     },
                     status: {
                         type: "string",
-                        enum: ["queued", "running"],
-                        example: "running"
+                        enum: ["queued"],
+                        example: "queued"
                     }
                 }
             },
