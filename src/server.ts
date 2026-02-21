@@ -210,19 +210,11 @@ const openApiSpec = {
                         description:
                             "Filter by task status. Repeat to include multiple statuses (e.g. `?status=running&status=queued`).",
                         schema: {
-                            oneOf: [
-                                {
-                                    type: "string",
-                                    enum: ["queued", "running", "retrying", "completed", "failed", "interrupted"]
-                                },
-                                {
-                                    type: "array",
-                                    items: {
-                                        type: "string",
-                                        enum: ["queued", "running", "retrying", "completed", "failed", "interrupted"]
-                                    }
-                                }
-                            ]
+                            type: "array",
+                            items: {
+                                type: "string",
+                                enum: ["queued", "running", "retrying", "completed", "failed", "interrupted"]
+                            }
                         },
                         style: "form",
                         explode: true
