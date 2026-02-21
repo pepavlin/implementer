@@ -1,7 +1,7 @@
 import express from "express";
 import swaggerUi from "swagger-ui-express";
 import { z } from "zod";
-import { TaskManager } from "./task-manager.js";
+import { TaskManager, TaskActiveError } from "./task-manager.js";
 import { UsageLimitError } from "./usage-limiter.js";
 import { extractLastAssistantMessage } from "./executor.js";
 import type { Config } from "./types.js";
@@ -282,6 +282,50 @@ const openApiSpec = {
                     }
                 }
             }
+        },
+        "/task/{taskId}/retry": {
+            post: {
+                summary: "Retry a task",
+                description:
+                    "Re-runs an existing task regardless of its current status (completed, failed, interrupted). The task is re-executed on the same branch so Claude can see previous work. Returns 409 if the task is currently active (queued, running, or retrying).",
+                parameters: [
+                    {
+                        name: "taskId",
+                        in: "path",
+                        required: true,
+                        schema: { type: "string" }
+                    }
+                ],
+                responses: {
+                    "200": {
+                        description: "Task retried",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    $ref: "#/components/schemas/TaskCreateResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": { description: "Unauthorized" },
+                    "404": {
+                        description: "Task not found",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/Error" }
+                            }
+                        }
+                    },
+                    "409": {
+                        description: "Task is currently active and cannot be retried",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/Error" }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 };
@@ -421,6 +465,33 @@ export function createServer(
             error: task.error ?? null,
             pullRequests: task.pullRequests ?? null
         });
+    });
+
+    // POST /task/:taskId/retry - Retry a task regardless of its current status
+    app.post("/task/:taskId/retry", async (req, res) => {
+        const projectId = res.locals.projectId as string;
+        const task = taskManager.getTask(projectId, req.params.taskId);
+        if (!task) {
+            res.status(404).json({ error: "Task not found" });
+            return;
+        }
+
+        try {
+            const retried = await taskManager.retryTask(projectId, req.params.taskId);
+            res.json({
+                taskId: retried.taskId,
+                branch: retried.branch,
+                status: retried.status
+            });
+        } catch (err) {
+            if (err instanceof TaskActiveError) {
+                res.status(409).json({ error: err.message });
+                return;
+            }
+            res.status(500).json({
+                error: err instanceof Error ? err.message : "Internal server error"
+            });
+        }
     });
 
     // GET /task/:taskId/log - Get specific task output log

@@ -37,6 +37,15 @@ interface TaskEntry {
     task: Task;
     executor: Executor | null;
     workspaceId: number | null;
+    /** Branch to check out when this task is dequeued (used for retried tasks). */
+    checkoutBranch?: string;
+}
+
+export class TaskActiveError extends Error {
+    constructor(status: string) {
+        super(`Cannot retry task with status: ${status}`);
+        this.name = "TaskActiveError";
+    }
 }
 
 export class TaskManager {
@@ -349,7 +358,7 @@ export class TaskManager {
             .then((workspace) => {
                 entry.workspaceId = workspace.id;
                 this.store.save({ ...task, workspaceId: workspace.id });
-                return this.executeTask(task, workspace, state);
+                return this.executeTask(task, workspace, state, entry.checkoutBranch);
             })
             .catch((err) => {
                 console.error(`[${taskId}] Dequeue/acquire failed:`, err);
@@ -510,6 +519,85 @@ export class TaskManager {
         // Run async - don't await, let it run in background
         this.executeTask(task, workspace, state).catch((err) => {
             console.error(`Task ${taskId} failed unexpectedly:`, err);
+        });
+
+        return task;
+    }
+
+    /**
+     * Retry an existing task regardless of its terminal status (completed, failed, interrupted).
+     * Resets the task state and re-runs it, continuing from the same branch if one exists.
+     */
+    async retryTask(projectId: string, taskId: string): Promise<Task> {
+        const state = this.projects.get(projectId);
+        if (!state) throw new Error(`Unknown project: ${projectId}`);
+
+        const entry = this.tasks.get(taskId);
+        if (!entry || entry.task.projectId !== projectId) {
+            throw new Error(`Task not found: ${taskId}`);
+        }
+
+        const task = entry.task;
+
+        if (task.status === "queued" || task.status === "running" || task.status === "retrying") {
+            throw new TaskActiveError(task.status);
+        }
+
+        // If branch was cleaned up (no commits), regenerate a name so executeTask can create a fresh one
+        if (!task.branch) {
+            const slugExecutor = new Executor(state.config.claudeCode, state.tokenManager);
+            const slug = await slugExecutor.generateBranchSlug(task.prompt, taskId);
+            task.branch = `impl/${slug}-${taskId}`;
+        }
+
+        // Continue from the existing branch; if branch was just regenerated, checkoutBranch stays undefined
+        // so executeTask creates it fresh rather than trying to checkout a non-existent branch.
+        const checkoutBranch: string | undefined = task.branch !== null ? task.branch : undefined;
+
+        // Reset task state
+        task.status = "running";
+        task.error = undefined;
+        task.output = "";
+        task.pullRequests = undefined;
+        task.completedAt = null;
+        task.startedAt = new Date().toISOString();
+        task.attempt = 1;
+
+        console.log(`[${taskId}] Manual retry requested — branch: ${task.branch}`);
+
+        if (this.shouldQueue(projectId, state)) {
+            task.status = "queued";
+            entry.executor = null;
+            entry.workspaceId = null;
+            entry.checkoutBranch = checkoutBranch;
+            this.store.save({ ...task, workspaceId: null });
+            this.enqueue(projectId, taskId);
+            console.log(`[${taskId}] Retry queued`);
+            return task;
+        }
+
+        const executor = new Executor(state.config.claudeCode, state.tokenManager);
+        entry.executor = executor;
+        entry.checkoutBranch = checkoutBranch;
+
+        let workspace: { id: number; dir: string };
+        try {
+            workspace = await state.pool.acquire(state.config.repositories, state.config.auth?.githubToken);
+        } catch (_err) {
+            task.status = "queued";
+            entry.executor = null;
+            entry.workspaceId = null;
+            this.store.save({ ...task, workspaceId: null });
+            this.enqueue(projectId, taskId);
+            console.log(`[${taskId}] Retry queued after acquire race`);
+            return task;
+        }
+
+        entry.workspaceId = workspace.id;
+        this.store.save({ ...task, workspaceId: workspace.id });
+
+        this.executeTask(task, workspace, state, checkoutBranch).catch((err) => {
+            console.error(`Task ${taskId} retry failed unexpectedly:`, err);
         });
 
         return task;

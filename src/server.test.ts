@@ -4,6 +4,7 @@ import { createServer } from "./server.js";
 import type { TaskManager } from "./task-manager.js";
 import type { Config, Task } from "./types.js";
 import { UsageLimitError } from "./usage-limiter.js";
+import { TaskActiveError } from "./task-manager.js";
 
 const PROJECT_ID = "test-project";
 
@@ -47,6 +48,7 @@ function makeMockTaskManager(overrides: Partial<TaskManager> = {}) {
         getTask: vi.fn(),
         listTasks: vi.fn().mockReturnValue([]),
         getOutput: vi.fn().mockReturnValue(""),
+        retryTask: vi.fn(),
         ...overrides
     } as unknown as TaskManager;
 }
@@ -283,6 +285,70 @@ describe("server", () => {
             const app = createServer(tm, makeConfig());
 
             await request(app).get("/task/nonexistent/log").expect(404);
+        });
+    });
+
+    describe("POST /task/:taskId/retry", () => {
+        it("returns task info on successful retry", async () => {
+            const task = makeMockTask({ status: "failed", error: "previous error" });
+            const retried = makeMockTask({ status: "running", error: undefined });
+            const tm = makeMockTaskManager({
+                getTask: vi.fn().mockReturnValue(task),
+                retryTask: vi.fn().mockResolvedValue(retried)
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app).post("/task/abc123/retry").expect(200);
+            expect(res.body.taskId).toBe("abc123");
+            expect(res.body.branch).toBe("impl/test-branch-abc123");
+            expect(res.body.status).toBe("running");
+        });
+
+        it("returns queued status when at capacity", async () => {
+            const task = makeMockTask({ status: "completed" });
+            const retried = makeMockTask({ status: "queued" });
+            const tm = makeMockTaskManager({
+                getTask: vi.fn().mockReturnValue(task),
+                retryTask: vi.fn().mockResolvedValue(retried)
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app).post("/task/abc123/retry").expect(200);
+            expect(res.body.status).toBe("queued");
+        });
+
+        it("returns 404 when task not found", async () => {
+            const tm = makeMockTaskManager({
+                getTask: vi.fn().mockReturnValue(undefined)
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app).post("/task/nonexistent/retry").expect(404);
+            expect(res.body.error).toBe("Task not found");
+        });
+
+        it("returns 409 when task is currently active", async () => {
+            const task = makeMockTask({ status: "running" });
+            const tm = makeMockTaskManager({
+                getTask: vi.fn().mockReturnValue(task),
+                retryTask: vi.fn().mockRejectedValue(new TaskActiveError("running"))
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app).post("/task/abc123/retry").expect(409);
+            expect(res.body.error).toContain("running");
+        });
+
+        it("returns 500 on unexpected error", async () => {
+            const task = makeMockTask({ status: "failed" });
+            const tm = makeMockTaskManager({
+                getTask: vi.fn().mockReturnValue(task),
+                retryTask: vi.fn().mockRejectedValue(new Error("unexpected"))
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app).post("/task/abc123/retry").expect(500);
+            expect(res.body.error).toBe("unexpected");
         });
     });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Config, PersistedTask } from "./types.js";
@@ -279,6 +279,151 @@ describe("TaskManager", () => {
       // Task is not accessible via the known project
       const task = tm.getTask(PROJECT_ID, "alien-task");
       expect(task).toBeUndefined();
+    });
+  });
+
+  describe("retryTask", () => {
+    it("throws TaskActiveError when task is running", async () => {
+      const { TaskManager, TaskActiveError } = await import("./task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "run-task", status: "running", completedAt: null }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      // Manually set status to running in memory (init may have changed it)
+      // @ts-expect-error - accessing private tasks map for testing
+      tm.tasks.get("run-task").task.status = "running";
+
+      await expect(tm.retryTask(PROJECT_ID, "run-task")).rejects.toBeInstanceOf(TaskActiveError);
+    });
+
+    it("throws TaskActiveError when task is queued", async () => {
+      const { TaskManager, TaskActiveError } = await import("./task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "queued-task", status: "completed" }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      // Manually flip status to "queued" in memory to simulate a queued task
+      // @ts-expect-error - accessing private tasks map for testing
+      tm.tasks.get("queued-task").task.status = "queued";
+
+      await expect(tm.retryTask(PROJECT_ID, "queued-task")).rejects.toBeInstanceOf(TaskActiveError);
+    });
+
+    it("throws TaskActiveError when task is retrying", async () => {
+      const { TaskManager, TaskActiveError } = await import("./task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "retry-task", status: "retrying" as any, completedAt: null }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      await expect(tm.retryTask(PROJECT_ID, "retry-task")).rejects.toBeInstanceOf(TaskActiveError);
+    });
+
+    it("throws error for unknown task", async () => {
+      const { TaskManager } = await import("./task-manager.js");
+      const tm = new TaskManager(makeConfig());
+
+      await expect(tm.retryTask(PROJECT_ID, "nonexistent")).rejects.toThrow("Task not found");
+    });
+
+    it("throws error for task belonging to another project", async () => {
+      const { TaskManager } = await import("./task-manager.js");
+      const config: Config = {
+        server: { workspaceDir: TMP },
+        projects: {
+          [PROJECT_ID]: {
+            repositories: [{ name: "my-repo", url: "https://github.com/test/repo.git", defaultBranch: "main" }],
+            claudeCode: { command: "claude" },
+          },
+          "other-project": {
+            repositories: [{ name: "other-repo", url: "https://github.com/test/other.git", defaultBranch: "main" }],
+            claudeCode: { command: "claude" },
+          },
+        },
+      };
+      const store = new TaskStore(TMP);
+      store.save(makePersistedTask({ taskId: "other-task", projectId: PROJECT_ID, status: "failed" }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      // "other-task" belongs to PROJECT_ID, so "other-project" cannot access it
+      await expect(tm.retryTask("other-project", "other-task")).rejects.toThrow("Task not found");
+    });
+
+    it("resets task state and keeps branch when retrying a failed task", async () => {
+      const { TaskManager } = await import("./task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({
+        taskId: "fail-task",
+        status: "failed",
+        error: "Claude Code exited with code 1",
+        branch: "impl/test-fail-task",
+        output: "partial output",
+        attempt: 3,
+      }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      // Spy on pool.acquire to prevent actual workspace acquisition
+      // @ts-expect-error - accessing private projects map for testing
+      const state = tm.projects.get(PROJECT_ID)!;
+      vi.spyOn(state.pool, "acquire").mockRejectedValue(new Error("no capacity"));
+
+      // retryTask will queue due to acquire failing
+      const result = await tm.retryTask(PROJECT_ID, "fail-task");
+
+      expect(result.taskId).toBe("fail-task");
+      expect(result.branch).toBe("impl/test-fail-task");
+      expect(result.error).toBeUndefined();
+      expect(result.output).toBe("");
+      expect(result.attempt).toBe(1);
+      expect(result.completedAt).toBeNull();
+      expect(result.status).toBe("queued");
+    });
+
+    it("resets task state when retrying a completed task", async () => {
+      const { TaskManager } = await import("./task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({
+        taskId: "done-task",
+        status: "completed",
+        branch: "impl/done-done-task",
+        output: "All done",
+        completedAt: "2025-01-01T01:00:00.000Z",
+        attempt: 1,
+      }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      // @ts-expect-error - accessing private projects map for testing
+      const state = tm.projects.get(PROJECT_ID)!;
+      vi.spyOn(state.pool, "acquire").mockRejectedValue(new Error("no capacity"));
+
+      const result = await tm.retryTask(PROJECT_ID, "done-task");
+
+      expect(result.status).toBe("queued");
+      expect(result.output).toBe("");
+      expect(result.error).toBeUndefined();
+      expect(result.completedAt).toBeNull();
+      expect(result.attempt).toBe(1);
     });
   });
 
