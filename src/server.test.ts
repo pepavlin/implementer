@@ -167,6 +167,65 @@ describe("server", () => {
             expect(res.body.tasks[0].status).toBe("completed");
             expect(res.body.tasks[0].durationSeconds).toBe(3600);
         });
+
+        it("filters tasks by single status", async () => {
+            const running = makeMockTask({ taskId: "t1", status: "running" });
+            const completed = makeMockTask({
+                taskId: "t2",
+                status: "completed",
+                completedAt: "2025-01-01T01:00:00.000Z"
+            });
+            const tm = makeMockTaskManager({
+                listTasks: vi.fn().mockReturnValue([running, completed])
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app).get("/tasks?status=running").expect(200);
+            expect(res.body.tasks).toHaveLength(1);
+            expect(res.body.tasks[0].taskId).toBe("t1");
+            expect(res.body.tasks[0].status).toBe("running");
+        });
+
+        it("filters tasks by multiple statuses", async () => {
+            const running = makeMockTask({ taskId: "t1", status: "running" });
+            const queued = makeMockTask({ taskId: "t2", status: "queued" });
+            const completed = makeMockTask({
+                taskId: "t3",
+                status: "completed",
+                completedAt: "2025-01-01T01:00:00.000Z"
+            });
+            const tm = makeMockTaskManager({
+                listTasks: vi.fn().mockReturnValue([running, queued, completed])
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app)
+                .get("/tasks?status=running&status=queued")
+                .expect(200);
+            expect(res.body.tasks).toHaveLength(2);
+            expect(res.body.tasks.map((t: { taskId: string }) => t.taskId)).toEqual(["t1", "t2"]);
+        });
+
+        it("returns empty list when no tasks match the status filter", async () => {
+            const completed = makeMockTask({
+                taskId: "t1",
+                status: "completed",
+                completedAt: "2025-01-01T01:00:00.000Z"
+            });
+            const tm = makeMockTaskManager({
+                listTasks: vi.fn().mockReturnValue([completed])
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app).get("/tasks?status=running").expect(200);
+            expect(res.body.tasks).toEqual([]);
+        });
+
+        it("returns 400 for invalid status value", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfig());
+            const res = await request(app).get("/tasks?status=invalid").expect(400);
+            expect(res.body.error).toBe("Invalid status value");
+        });
     });
 
     describe("GET /task/:taskId", () => {

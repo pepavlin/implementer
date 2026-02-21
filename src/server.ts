@@ -4,12 +4,20 @@ import { z } from "zod";
 import { TaskManager, TaskActiveError } from "./task-manager.js";
 import { UsageLimitError } from "./usage-limiter.js";
 import { extractLastAssistantMessage } from "./executor.js";
-import type { Config } from "./types.js";
+import type { Config, TaskStatus } from "./types.js";
 
 const TaskCreateSchema = z.object({
     prompt: z.string().min(1),
     fromBranch: z.string().optional(),
     callbackUrl: z.string().url().optional()
+});
+
+const TASK_STATUSES = ["queued", "running", "retrying", "completed", "failed", "interrupted"] as const;
+
+const TaskStatusEnum = z.enum(TASK_STATUSES);
+
+const TaskListQuerySchema = z.object({
+    status: z.union([TaskStatusEnum, z.array(TaskStatusEnum)]).optional()
 });
 
 const MAX_LOG_SIZE = 1024 * 1024; // 1MB
@@ -193,7 +201,33 @@ const openApiSpec = {
             get: {
                 summary: "List all tasks",
                 description:
-                    "Returns all tasks for the authenticated project (running, completed, and failed).",
+                    "Returns all tasks for the authenticated project (running, completed, and failed). Optionally filter by one or more statuses using the `status` query parameter.",
+                parameters: [
+                    {
+                        name: "status",
+                        in: "query",
+                        required: false,
+                        description:
+                            "Filter by task status. Repeat to include multiple statuses (e.g. `?status=running&status=queued`).",
+                        schema: {
+                            oneOf: [
+                                {
+                                    type: "string",
+                                    enum: ["queued", "running", "retrying", "completed", "failed", "interrupted"]
+                                },
+                                {
+                                    type: "array",
+                                    items: {
+                                        type: "string",
+                                        enum: ["queued", "running", "retrying", "completed", "failed", "interrupted"]
+                                    }
+                                }
+                            ]
+                        },
+                        style: "form",
+                        explode: true
+                    }
+                ],
                 responses: {
                     "200": {
                         description: "Task list",
@@ -210,6 +244,14 @@ const openApiSpec = {
                                         }
                                     }
                                 }
+                            }
+                        }
+                    },
+                    "400": {
+                        description: "Invalid status value",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/Error" }
                             }
                         }
                     },
@@ -431,15 +473,33 @@ export function createServer(
     // GET /tasks - List all tasks for the authenticated project
     app.get("/tasks", (req, res) => {
         const projectId = res.locals.projectId as string;
-        const tasks = taskManager.listTasks(projectId).map((task) => ({
-            taskId: task.taskId,
-            branch: task.branch,
-            prompt: task.prompt,
-            status: task.status,
-            startedAt: task.startedAt,
-            completedAt: task.completedAt,
-            durationSeconds: getDurationSeconds(task)
-        }));
+
+        const parsed = TaskListQuerySchema.safeParse(req.query);
+        if (!parsed.success) {
+            res.status(400).json({ error: "Invalid status value" });
+            return;
+        }
+
+        const statusFilter = parsed.data.status
+            ? new Set<TaskStatus>(
+                  Array.isArray(parsed.data.status)
+                      ? parsed.data.status
+                      : [parsed.data.status]
+              )
+            : null;
+
+        const tasks = taskManager
+            .listTasks(projectId)
+            .filter((task) => !statusFilter || statusFilter.has(task.status))
+            .map((task) => ({
+                taskId: task.taskId,
+                branch: task.branch,
+                prompt: task.prompt,
+                status: task.status,
+                startedAt: task.startedAt,
+                completedAt: task.completedAt,
+                durationSeconds: getDurationSeconds(task)
+            }));
         res.json({ tasks });
     });
 
