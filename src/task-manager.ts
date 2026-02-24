@@ -15,14 +15,18 @@ import { TokenManager } from "./auth.js";
 import { UsageLimiter } from "./usage-limiter.js";
 
 
-function buildSystemInstructions(repos: { name: string }[]): string {
+function buildSystemInstructions(repos: { name: string }[], protectedPaths?: string[]): string {
     const repoList = repos.map((r) => r.name).join(", ");
+    const protectedRule =
+        protectedPaths && protectedPaths.length > 0
+            ? `\n- The following paths are PROTECTED and must NEVER be modified, created, or deleted: ${protectedPaths.join(", ")}. Do not make any changes to files matching these patterns under any circumstances.`
+            : "";
     return `
 
 IMPORTANT WORKSPACE RULES:
 - Your workspace contains the following git repositories: ${repoList}. Always work INSIDE the repository directory (e.g. cd ${repos[0]?.name ?? "repo"} first). Do NOT create new git repositories or run git init.
 - After making all changes, you MUST commit them using git. Stage your changes with "git add" and commit with "git commit". Write clear and descriptive commit messages using conventional commits format (e.g. "feat: add animated hero section with cat image", "fix: resolve navigation hover styles"). Each commit should be a logical unit of work with a message that explains what was done and why. Do NOT push — only commit.
-- When you need to visually inspect a web application, ALWAYS start the dev server locally first (e.g. npm start, npm run dev) and use Playwright on the local URL (http://localhost:...). NEVER screenshot external/production URLs — you must test against the local code in your workspace so your changes are reflected.
+- When you need to visually inspect a web application, ALWAYS start the dev server locally first (e.g. npm start, npm run dev) and use Playwright on the local URL (http://localhost:...). NEVER screenshot external/production URLs — you must test against the local code in your workspace so your changes are reflected.${protectedRule}
 - At the very end of your response, write a concise 2-3 sentence summary of what you implemented or changed. Do not repeat the full details — just the key outcome.`;
 }
 
@@ -700,7 +704,7 @@ export class TaskManager {
             const systemPrompt = state.config.claudeCode.systemPrompt ?? "";
             const fullPrompt =
                 task.prompt +
-                buildSystemInstructions(repos) +
+                buildSystemInstructions(repos, state.config.protectedPaths) +
                 (systemPrompt ? `\n\n${systemPrompt}` : "");
             const result = await executor.run(
                 fullPrompt,
@@ -729,7 +733,20 @@ export class TaskManager {
                 );
             }
 
-            // Step 6: Ensure our branch points to HEAD (handles Claude switching branches)
+            // Step 6: Revert any changes to protected paths before creating the PR.
+            // This handles both committed and uncommitted changes — enforces the hard boundary
+            // regardless of what Claude did. Runs even if no changes were made (no-op then).
+            const protectedPaths = state.config.protectedPaths ?? [];
+            if (protectedPaths.length > 0) {
+                console.log(`[${task.taskId}] Reverting protected path changes...`);
+                await this.gitManager.revertProtectedPathsAll(
+                    workspace.dir,
+                    repos,
+                    protectedPaths
+                );
+            }
+
+            // Step 7: Ensure our branch points to HEAD (handles Claude switching branches)
             const hasCommits = await this.gitManager.ensureBranchAtHeadAll(
                 workspace.dir,
                 repos,
@@ -737,7 +754,7 @@ export class TaskManager {
                 preRunHeads
             );
 
-            // Step 7: Rebase on latest default branch to avoid conflicts in PR
+            // Step 8: Rebase on latest default branch to avoid conflicts in PR
             if (hasCommits) {
                 console.log(
                     `[${task.taskId}] Rebasing on latest default branch...`

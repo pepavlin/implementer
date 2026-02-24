@@ -311,6 +311,170 @@ describe("GitManager", () => {
     });
   });
 
+  describe("revertProtectedPathsAll", () => {
+    it("is a no-op when protectedPaths is empty", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+      await shell("git checkout -b impl/feature", repoDir);
+      await shell("echo changed > file.txt && git add . && git commit -m 'change'", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      await gm.revertProtectedPathsAll(workDir, repos, []);
+
+      // No cleanup commit should be created
+      const log = await shell("git log --oneline", repoDir);
+      expect(log).not.toContain("revert changes to protected paths");
+    });
+
+    it("reverts a committed change to a protected file", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Create a "Dockerfile" in main (simulates a protected file already in base)
+      await shell("echo 'FROM node:20' > Dockerfile && git add . && git commit -m 'add Dockerfile' && git push origin main", repoDir);
+
+      // Create feature branch and modify the protected file
+      await shell("git checkout -b impl/feature", repoDir);
+      await shell("echo 'FROM python:3.11' > Dockerfile && git add . && git commit -m 'feat: change Dockerfile'", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      await gm.revertProtectedPathsAll(workDir, repos, ["Dockerfile"]);
+
+      // Dockerfile should be restored to base version
+      const content = await shell("cat Dockerfile", repoDir);
+      expect(content).toBe("FROM node:20");
+
+      // A cleanup commit should have been created
+      const log = await shell("git log --oneline", repoDir);
+      expect(log).toContain("revert changes to protected paths");
+    });
+
+    it("removes a protected file that was added by Claude", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Feature branch: add a new protected file that doesn't exist in base
+      await shell("git checkout -b impl/feature", repoDir);
+      await shell("mkdir -p .github/workflows && echo 'on: push' > .github/workflows/ci.yml && git add . && git commit -m 'feat: add CI workflow'", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      await gm.revertProtectedPathsAll(workDir, repos, [".github"]);
+
+      // The .github directory should be gone
+      const status = await shell("git status --porcelain", repoDir);
+      expect(status).toBe("");
+      const files = await shell("git ls-files .github", repoDir);
+      expect(files.trim()).toBe("");
+
+      // A cleanup commit should have been created
+      const log = await shell("git log --oneline", repoDir);
+      expect(log).toContain("revert changes to protected paths");
+    });
+
+    it("restores a protected file that was deleted by Claude", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Add Dockerfile to main
+      await shell("echo 'FROM node:20' > Dockerfile && git add . && git commit -m 'add Dockerfile' && git push origin main", repoDir);
+
+      // Feature branch: delete the protected file
+      await shell("git checkout -b impl/feature", repoDir);
+      await shell("git rm Dockerfile && git commit -m 'feat: remove Dockerfile'", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      await gm.revertProtectedPathsAll(workDir, repos, ["Dockerfile"]);
+
+      // Dockerfile should be back
+      const content = await shell("cat Dockerfile", repoDir);
+      expect(content).toBe("FROM node:20");
+
+      const log = await shell("git log --oneline", repoDir);
+      expect(log).toContain("revert changes to protected paths");
+    });
+
+    it("reverts uncommitted (staged) changes to protected files", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      await shell("echo 'FROM node:20' > Dockerfile && git add . && git commit -m 'add Dockerfile' && git push origin main", repoDir);
+      await shell("git checkout -b impl/feature", repoDir);
+
+      // Stage a change but do not commit it
+      await shell("echo 'FROM python:3' > Dockerfile && git add Dockerfile", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      await gm.revertProtectedPathsAll(workDir, repos, ["Dockerfile"]);
+
+      const content = await shell("cat Dockerfile", repoDir);
+      expect(content).toBe("FROM node:20");
+    });
+
+    it("skips repos on the default branch", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Stay on main — no branch checkout
+      await shell("echo 'FROM python' > Dockerfile && git add . && git commit -m 'change'", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      // Should skip silently — we're on main
+      await gm.revertProtectedPathsAll(workDir, repos, ["Dockerfile"]);
+
+      // No cleanup commit (the original commit is still there, not cleaned up)
+      const log = await shell("git log --oneline", repoDir);
+      expect(log).not.toContain("revert changes to protected paths");
+    });
+
+    it("leaves non-protected files untouched", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      await shell("git checkout -b impl/feature", repoDir);
+      // Modify a non-protected file and also add a protected file
+      await shell("echo 'app code' > src.js && echo 'FROM python' > Dockerfile && git add . && git commit -m 'feat: changes'", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      await gm.revertProtectedPathsAll(workDir, repos, ["Dockerfile"]);
+
+      // src.js should still have the change
+      const srcContent = await shell("cat src.js", repoDir);
+      expect(srcContent).toBe("app code");
+
+      // Dockerfile should be gone (it was added; base had none)
+      const files = await shell("git ls-files Dockerfile", repoDir);
+      expect(files.trim()).toBe("");
+    });
+  });
+
   describe("commentOnPullRequestAll", () => {
     it("logs error when gh fails and does not throw", async () => {
       const workDir = join(TMP, "workspace");

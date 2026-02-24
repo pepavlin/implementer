@@ -301,6 +301,97 @@ export class GitManager {
   }
 
   /**
+   * Revert any changes to protected paths so they never appear in a PR.
+   * Handles committed changes (creates a cleanup commit) and uncommitted changes.
+   * Skips repos that are on the default branch.
+   */
+  async revertProtectedPathsAll(
+    baseDir: string,
+    repos: RepositoryConfig[],
+    protectedPaths: string[],
+  ): Promise<void> {
+    if (protectedPaths.length === 0) return;
+
+    for (const repo of repos) {
+      const repoDir = this.getRepoDir(baseDir, repo.name);
+
+      let currentBranch: string;
+      try {
+        currentBranch = await git(["rev-parse", "--abbrev-ref", "HEAD"], repoDir);
+      } catch {
+        continue;
+      }
+      // Only enforce on feature branches — never on the default branch itself
+      if (currentBranch === repo.defaultBranch) continue;
+
+      const base = `origin/${repo.defaultBranch}`;
+      const revertedFiles: string[] = [];
+
+      for (const pattern of protectedPaths) {
+        // Collect all changed files for this pattern across committed, staged, and unstaged
+        const changedFiles = new Set<string>();
+
+        // Committed changes vs base branch
+        try {
+          const output = await git(["diff", "--name-only", base, "HEAD", "--", pattern], repoDir);
+          for (const f of output.split("\n").filter((f) => f.trim())) changedFiles.add(f);
+        } catch { /* ignore */ }
+
+        // Staged (indexed) changes not yet committed
+        try {
+          const output = await git(["diff", "--cached", "--name-only", "--", pattern], repoDir);
+          for (const f of output.split("\n").filter((f) => f.trim())) changedFiles.add(f);
+        } catch { /* ignore */ }
+
+        // Unstaged working-tree changes
+        try {
+          const output = await git(["diff", "--name-only", "--", pattern], repoDir);
+          for (const f of output.split("\n").filter((f) => f.trim())) changedFiles.add(f);
+        } catch { /* ignore */ }
+
+        for (const file of changedFiles) {
+          // Determine whether the file exists in the base branch
+          const existsInBase = await git(["cat-file", "-e", `${base}:${file}`], repoDir)
+            .then(() => true)
+            .catch(() => false);
+
+          if (existsInBase) {
+            // Restore to base version (stages the restored content, updates working tree)
+            try {
+              await git(["checkout", base, "--", file], repoDir);
+              revertedFiles.push(file);
+            } catch { /* ignore */ }
+          } else {
+            // File was added by Claude — remove it entirely
+            try {
+              await git(["rm", "--force", "-r", "--cached", file], repoDir);
+              // Remove from working tree too (best-effort)
+              const { rm } = await import("node:fs/promises");
+              await rm(join(repoDir, file), { recursive: true, force: true }).catch(() => {});
+              revertedFiles.push(file);
+            } catch { /* ignore */ }
+          }
+        }
+      }
+
+      if (revertedFiles.length === 0) continue;
+
+      // Commit staged restorations (if any files were reverted from committed history)
+      const staged = await git(["diff", "--cached", "--name-only"], repoDir).catch(() => "");
+      if (staged.trim()) {
+        await git(
+          ["commit", "-m", "chore: revert changes to protected paths"],
+          repoDir,
+        );
+      }
+
+      console.log(
+        `[git-manager] Reverted protected path(s) in ${repo.name}: ${revertedFiles.join(", ")}`,
+      );
+    }
+  }
+
+  /**
    * Post a comment on each pull request. Best-effort: logs errors, doesn't throw.
    */
   async commentOnPullRequestAll(

@@ -359,6 +359,46 @@ projects:
         delete process.env.TEST_API_KEY;
     });
 
+    it("loads protectedPaths when provided", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+    protectedPaths:
+      - .github
+      - Dockerfile
+      - docker-compose.yml
+`
+        );
+
+        const config = loadConfig(path);
+        expect(config.projects["my-project"].protectedPaths).toEqual([
+            ".github",
+            "Dockerfile",
+            "docker-compose.yml"
+        ]);
+    });
+
+    it("sets protectedPaths to undefined when not provided", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+`
+        );
+
+        const config = loadConfig(path);
+        expect(config.projects["my-project"].protectedPaths).toBeUndefined();
+    });
+
     it("interpolates ${VAR} references in claudeOauthToken field", () => {
         process.env.TEST_CLAUDE_OAUTH_TOKEN = "oauth-from-env";
 

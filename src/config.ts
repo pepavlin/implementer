@@ -72,7 +72,8 @@ const ProjectSchema = z
         repositories: z.array(RepositorySchema).min(1),
         claudeCode: ClaudeCodeSchema.default({}),
         auth: ProjectAuthSchema.optional(),
-        errorRetry: ErrorRetrySchema.optional()
+        errorRetry: ErrorRetrySchema.optional(),
+        protectedPaths: z.array(z.string()).optional()
     })
     .strict();
 

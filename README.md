@@ -38,9 +38,27 @@ projects:
         claudeCode:
             command: claude # path to claude CLI binary
             model: sonnet # optional model override
+        # protectedPaths:  # optional — paths Claude must not modify
+        #     - .github
+        #     - Dockerfile
+        #     - docker-compose.yml
 ```
 
 You can define multiple projects and multiple repositories per project.
+
+### Protected paths
+
+Use `protectedPaths` to prevent Claude from modifying sensitive files or directories. Changes to these paths are reverted at the git level before any PR is created, regardless of what Claude did. Supports exact filenames, directories, and git pathspec glob patterns:
+
+```yaml
+projects:
+    my-project:
+        protectedPaths:
+            - .github          # entire .github/ directory
+            - Dockerfile
+            - docker-compose.yml
+            - docker-compose*.yml  # glob pattern
+```
 
 `apiKey` is configured per project (`projects.<projectId>.apiKey`), not as a single global top-level config field.
 

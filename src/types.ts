@@ -45,6 +45,8 @@ export interface ProjectConfig {
     claudeCode: ClaudeCodeConfig;
     auth?: ProjectAuth;
     errorRetry?: ErrorRetryConfig;
+    /** Paths (files or directories) that Claude must not modify. Changes to these paths are reverted before PR creation. Supports git pathspec patterns (e.g. ".github", "Dockerfile", "docker-compose*.yml"). */
+    protectedPaths?: string[];
 }
 
 export interface Config {

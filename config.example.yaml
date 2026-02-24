@@ -26,6 +26,12 @@ projects:
         # errorRetry:
         #     maxAttempts: 3
         #     delaySeconds: 60
+        # Paths Claude must not modify — changes are reverted before PR creation (optional)
+        # Supports exact filenames, directories, and git pathspec patterns
+        # protectedPaths:
+        #     - .github
+        #     - Dockerfile
+        #     - docker-compose.yml
         claudeCode:
             command: claude
             model: sonnet
