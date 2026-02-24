@@ -3,7 +3,7 @@ name: ${INSTANCE_NAME:-implementer}
 services:
     implementer:
         restart: unless-stopped
-        cpus: 1
+        cpus: 0.5
         build:
             context: .
             dockerfile: Dockerfile
