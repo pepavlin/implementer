@@ -98,6 +98,11 @@ const openApiSpec = {
                     taskId: { type: "string" },
                     branch: { type: "string", nullable: true },
                     prompt: { type: "string" },
+                    title: {
+                        type: "string",
+                        nullable: true,
+                        description: "Auto-generated short title for the task (null until generated)"
+                    },
                     status: {
                         type: "string",
                         enum: ["queued", "running", "retrying", "completed", "failed", "interrupted"]
@@ -487,6 +492,7 @@ export function createServer(
                 taskId: task.taskId,
                 branch: task.branch,
                 prompt: task.prompt,
+                title: task.title ?? null,
                 status: task.status,
                 startedAt: task.startedAt,
                 completedAt: task.completedAt,
@@ -508,6 +514,7 @@ export function createServer(
             taskId: task.taskId,
             branch: task.branch,
             prompt: task.prompt,
+            title: task.title ?? null,
             status: task.status,
             attempt: task.attempt,
             startedAt: task.startedAt,

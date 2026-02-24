@@ -103,6 +103,54 @@ export class Executor {
   }
 
   /**
+   * Generate a short human-readable title from the task prompt.
+   * Runs a quick Claude call with no tools.
+   */
+  async generateTitle(prompt: string, taskId?: string): Promise<string> {
+    const creds = await this.tokenManager.getCredentials();
+
+    const claudeArgs = [
+      "-p",
+      `Generate a short, human-readable title (max 60 chars) for this task. Reply with ONLY the title, nothing else.\n\nTask: ${prompt}`,
+      "--output-format",
+      "text",
+      "--model",
+      "haiku",
+      "--tools",
+      "",
+    ];
+
+    const dockerArgs = [
+      "run",
+      "--rm",
+      "--name", `${process.env.INSTANCE_NAME || "implementer"}-title-${taskId ?? Date.now()}`,
+      "--cpus=0.5",
+      "-e", `${creds.envName}=${creds.value}`,
+      this.sandboxImage,
+      ...claudeArgs,
+    ];
+
+    return new Promise((resolve) => {
+      let output = "";
+      const proc = spawn("docker", dockerArgs, {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      proc.stdout?.on("data", (data: Buffer) => { output += data.toString(); });
+      proc.stderr?.on("data", (data: Buffer) => { output += data.toString(); });
+
+      proc.on("error", () => resolve(""));
+      proc.on("close", (code) => {
+        if (code !== 0) {
+          resolve("");
+          return;
+        }
+        resolve(output.trim().slice(0, 60) || "");
+      });
+    });
+  }
+
+  /**
    * Run Claude Code CLI inside a Docker container with the workspace mounted.
    */
   async run(prompt: string, volumeMount: string, workdir = "/workspace", taskId?: string): Promise<ExecutorResult> {

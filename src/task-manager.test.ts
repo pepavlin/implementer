@@ -334,6 +334,8 @@ describe("TaskManager", () => {
       vi.spyOn(Executor.prototype, "generateBranchSlug").mockReturnValue(
         new Promise<string>((r) => { resolveSlug = r; })
       );
+      // Title generation resolves immediately (not the focus of this test)
+      vi.spyOn(Executor.prototype, "generateTitle").mockResolvedValue("Add a Button");
 
       // @ts-expect-error - private
       const state = tm.projects.get(PROJECT_ID)!;
@@ -384,6 +386,7 @@ describe("TaskManager", () => {
 
       // Slug never resolves during this test — background stays pending
       vi.spyOn(Executor.prototype, "generateBranchSlug").mockReturnValue(new Promise(() => {}));
+      vi.spyOn(Executor.prototype, "generateTitle").mockReturnValue(new Promise(() => {}));
 
       const task = await tm.startTask(PROJECT_ID, { prompt: "Do something" });
 

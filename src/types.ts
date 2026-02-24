@@ -73,6 +73,7 @@ export interface Task {
     projectId: string;
     branch: string | null;
     prompt: string;
+    title?: string;
     status: TaskStatus;
     startedAt: string;
     completedAt: string | null;

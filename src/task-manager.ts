@@ -515,13 +515,17 @@ export class TaskManager {
     private async prepareAndRunTask(task: Task, state: ProjectState): Promise<void> {
         const { taskId, projectId } = task;
 
-        // Generate branch slug asynchronously if no explicit branch was provided
+        // Generate branch slug and title asynchronously if no explicit branch was provided
         if (!task.branch) {
-            console.log(`[${taskId}] Generating branch name...`);
+            console.log(`[${taskId}] Generating branch name and title...`);
             const slugExecutor = new Executor(state.config.claudeCode, state.tokenManager);
-            const slug = await slugExecutor.generateBranchSlug(task.prompt, taskId);
+            const [slug, title] = await Promise.all([
+                slugExecutor.generateBranchSlug(task.prompt, taskId),
+                slugExecutor.generateTitle(task.prompt, taskId),
+            ]);
             task.branch = `impl/${slug}-${taskId}`;
-            console.log(`[${taskId}] Branch: ${task.branch}`);
+            if (title) task.title = title;
+            console.log(`[${taskId}] Branch: ${task.branch}, Title: ${task.title}`);
             this.store.save({ ...task, workspaceId: null });
         }
 

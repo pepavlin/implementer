@@ -212,6 +212,85 @@ describe("Executor", () => {
     });
   });
 
+  describe("generateTitle", () => {
+    it("returns trimmed title from docker output", async () => {
+      const proc = makeFakeProc(0, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const promise = executor.generateTitle("Add dark mode toggle to the navbar", "title-1");
+
+      await new Promise((r) => setTimeout(r, 5));
+
+      proc.stdout!.emit("data", Buffer.from("  Add Dark Mode Toggle  "));
+      proc.emit("close", 0);
+
+      const title = await promise;
+      expect(title).toBe("Add Dark Mode Toggle");
+    });
+
+    it("uses haiku model and no --privileged flag", async () => {
+      const proc = makeFakeProc(0, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const promise = executor.generateTitle("Some task", "title-2");
+
+      await new Promise((r) => setTimeout(r, 5));
+      proc.stdout!.emit("data", Buffer.from("Some Task"));
+      proc.emit("close", 0);
+
+      await promise;
+
+      const args = spawnMock.mock.calls[0][1] as string[];
+      expect(args).not.toContain("--privileged");
+      expect(args).toContain("haiku");
+    });
+
+    it("returns empty string on non-zero exit code", async () => {
+      const proc = makeFakeProc(1, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const promise = executor.generateTitle("Some task", "title-3");
+
+      await new Promise((r) => setTimeout(r, 5));
+      proc.emit("close", 1);
+
+      const title = await promise;
+      expect(title).toBe("");
+    });
+
+    it("returns empty string on spawn error", async () => {
+      const proc = new EventEmitter() as child_process.ChildProcess;
+      const stdout = new EventEmitter();
+      const stderr = new EventEmitter();
+      Object.assign(proc, { stdout, stderr, stdin: null, stdio: [null, stdout, stderr], pid: 123, kill: vi.fn() });
+      setTimeout(() => proc.emit("error", new Error("docker not found")), 10);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const title = await executor.generateTitle("Some task", "title-4");
+      expect(title).toBe("");
+    });
+
+    it("truncates title to 60 characters", async () => {
+      const proc = makeFakeProc(0, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const promise = executor.generateTitle("Some very long task description here", "title-5");
+
+      await new Promise((r) => setTimeout(r, 5));
+      const longTitle = "A".repeat(80);
+      proc.stdout!.emit("data", Buffer.from(longTitle));
+      proc.emit("close", 0);
+
+      const title = await promise;
+      expect(title).toHaveLength(60);
+    });
+  });
+
   describe("kill", () => {
     it("sends SIGTERM to running process", async () => {
       const proc = makeFakeProc(0, false);
