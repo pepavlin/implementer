@@ -70,7 +70,7 @@ export class Executor {
       "run",
       "--rm",
       "--name", `${process.env.INSTANCE_NAME || "implementer"}-slug-${taskId ?? Date.now()}`,
-      "--cpus=0.5",
+      "--cpus=0.4",
       "-e", `${creds.envName}=${creds.value}`,
       this.sandboxImage,
       ...claudeArgs,
@@ -103,6 +103,66 @@ export class Executor {
   }
 
   /**
+   * Generate branch slug and title in a single Docker call to avoid spawning two containers.
+   * Uses Claude Haiku with a two-line output format: line 1 = slug, line 2 = title.
+   */
+  async generateTaskMetadata(prompt: string, taskId?: string): Promise<{ slug: string; title: string }> {
+    const creds = await this.tokenManager.getCredentials();
+
+    const claudeArgs = [
+      "-p",
+      `Reply with EXACTLY two lines and nothing else:
+Line 1: a git branch slug (lowercase, hyphens only, max 40 chars)
+Line 2: a short human-readable title (max 60 chars)
+
+Task: ${prompt}`,
+      "--output-format",
+      "text",
+      "--model",
+      "haiku",
+      "--tools",
+      "",
+    ];
+
+    const dockerArgs = [
+      "run",
+      "--rm",
+      "--name", `${process.env.INSTANCE_NAME || "implementer"}-meta-${taskId ?? Date.now()}`,
+      "--cpus=0.4",
+      "-e", `${creds.envName}=${creds.value}`,
+      this.sandboxImage,
+      ...claudeArgs,
+    ];
+
+    return new Promise((resolve) => {
+      let output = "";
+      const proc = spawn("docker", dockerArgs, {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      proc.stdout?.on("data", (data: Buffer) => { output += data.toString(); });
+      proc.stderr?.on("data", (data: Buffer) => { output += data.toString(); });
+
+      proc.on("error", () => resolve({ slug: "task", title: "" }));
+      proc.on("close", (code) => {
+        if (code !== 0) {
+          resolve({ slug: "task", title: "" });
+          return;
+        }
+        const lines = output.trim().split("\n");
+        const slug = (lines[0] ?? "")
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 40) || "task";
+        const title = (lines[1] ?? "").trim().slice(0, 60);
+        resolve({ slug, title });
+      });
+    });
+  }
+
+  /**
    * Generate a short human-readable title from the task prompt.
    * Runs a quick Claude call with no tools.
    */
@@ -124,7 +184,7 @@ export class Executor {
       "run",
       "--rm",
       "--name", `${process.env.INSTANCE_NAME || "implementer"}-title-${taskId ?? Date.now()}`,
-      "--cpus=0.5",
+      "--cpus=0.4",
       "-e", `${creds.envName}=${creds.value}`,
       this.sandboxImage,
       ...claudeArgs,
@@ -178,7 +238,7 @@ export class Executor {
       "--rm",
       "--privileged",
       "--name", containerName,
-      "--cpus=0.5",
+      "--cpus=0.4",
       "-v", volumeMount,
       "-w", workdir,
       "-e", `${creds.envName}=${creds.value}`,

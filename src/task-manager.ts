@@ -515,14 +515,11 @@ export class TaskManager {
     private async prepareAndRunTask(task: Task, state: ProjectState): Promise<void> {
         const { taskId, projectId } = task;
 
-        // Generate branch slug and title asynchronously if no explicit branch was provided
+        // Generate branch slug and title in a single Docker call to minimise container overhead
         if (!task.branch) {
             console.log(`[${taskId}] Generating branch name and title...`);
-            const slugExecutor = new Executor(state.config.claudeCode, state.tokenManager);
-            const [slug, title] = await Promise.all([
-                slugExecutor.generateBranchSlug(task.prompt, taskId),
-                slugExecutor.generateTitle(task.prompt, taskId),
-            ]);
+            const metaExecutor = new Executor(state.config.claudeCode, state.tokenManager);
+            const { slug, title } = await metaExecutor.generateTaskMetadata(task.prompt, taskId);
             task.branch = `impl/${slug}-${taskId}`;
             if (title) task.title = title;
             console.log(`[${taskId}] Branch: ${task.branch}, Title: ${task.title}`);

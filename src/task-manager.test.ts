@@ -329,13 +329,11 @@ describe("TaskManager", () => {
       const config = makeConfig();
       const tm = new TaskManager(config);
 
-      // Slug generation is controlled manually — it will not resolve until we allow it
-      let resolveSlug!: (s: string) => void;
-      vi.spyOn(Executor.prototype, "generateBranchSlug").mockReturnValue(
-        new Promise<string>((r) => { resolveSlug = r; })
+      // Metadata generation is controlled manually — it will not resolve until we allow it
+      let resolveMetadata!: (v: { slug: string; title: string }) => void;
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockReturnValue(
+        new Promise<{ slug: string; title: string }>((r) => { resolveMetadata = r; })
       );
-      // Title generation resolves immediately (not the focus of this test)
-      vi.spyOn(Executor.prototype, "generateTitle").mockResolvedValue("Add a Button");
 
       // @ts-expect-error - private
       const state = tm.projects.get(PROJECT_ID)!;
@@ -343,17 +341,18 @@ describe("TaskManager", () => {
 
       const task = await tm.startTask(PROJECT_ID, { prompt: "Add a button" });
 
-      // Returned immediately before slug generation completes
+      // Returned immediately before metadata generation completes
       expect(task.branch).toBeNull();
       expect(task.status).toBe("queued");
       expect(task.taskId).toBeDefined();
       expect(tm.getTask(PROJECT_ID, task.taskId)).toBeDefined();
 
-      // Unblock slug generation and verify branch is set afterwards
-      resolveSlug("add-button");
+      // Unblock metadata generation and verify branch and title are set afterwards
+      resolveMetadata({ slug: "add-button", title: "Add a Button" });
       await new Promise((r) => setTimeout(r, 50));
 
       expect(tm.getTask(PROJECT_ID, task.taskId)?.branch).toBe(`impl/add-button-${task.taskId}`);
+      expect(tm.getTask(PROJECT_ID, task.taskId)?.title).toBe("Add a Button");
     });
 
     it("uses fromBranch directly — branch is set immediately and never overwritten", async () => {
@@ -384,9 +383,8 @@ describe("TaskManager", () => {
       const config = makeConfig();
       const tm = new TaskManager(config);
 
-      // Slug never resolves during this test — background stays pending
-      vi.spyOn(Executor.prototype, "generateBranchSlug").mockReturnValue(new Promise(() => {}));
-      vi.spyOn(Executor.prototype, "generateTitle").mockReturnValue(new Promise(() => {}));
+      // Metadata generation never resolves during this test — background stays pending
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockReturnValue(new Promise(() => {}));
 
       const task = await tm.startTask(PROJECT_ID, { prompt: "Do something" });
 

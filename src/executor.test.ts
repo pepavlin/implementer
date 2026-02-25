@@ -128,7 +128,7 @@ describe("Executor", () => {
       await executor.run("test prompt", "myvol:/workspace", "/workspace", "task-2");
 
       const args = spawnMock.mock.calls[0][1] as string[];
-      expect(args).toContain("--cpus=0.5");
+      expect(args).toContain("--cpus=0.4");
       expect(args).toContain("myvol:/workspace");
       expect(args).toContain("/workspace");
     });
@@ -209,6 +209,103 @@ describe("Executor", () => {
 
       const args = spawnMock.mock.calls[0][1] as string[];
       expect(args).not.toContain("--privileged");
+    });
+  });
+
+  describe("generateTaskMetadata", () => {
+    it("parses slug from line 1 and title from line 2", async () => {
+      const proc = makeFakeProc(0, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const promise = executor.generateTaskMetadata("Add dark mode toggle", "meta-1");
+
+      await new Promise((r) => setTimeout(r, 5));
+      proc.stdout!.emit("data", Buffer.from("add-dark-mode-toggle\nAdd Dark Mode Toggle"));
+      proc.emit("close", 0);
+
+      const { slug, title } = await promise;
+      expect(slug).toBe("add-dark-mode-toggle");
+      expect(title).toBe("Add Dark Mode Toggle");
+    });
+
+    it("sanitises slug to lowercase hyphens", async () => {
+      const proc = makeFakeProc(0, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const promise = executor.generateTaskMetadata("Some task", "meta-2");
+
+      await new Promise((r) => setTimeout(r, 5));
+      proc.stdout!.emit("data", Buffer.from("Add_Feature_123\nAdd Feature 123"));
+      proc.emit("close", 0);
+
+      const { slug } = await promise;
+      expect(slug).toBe("add-feature-123");
+    });
+
+    it("uses haiku model and single container (no --privileged)", async () => {
+      const proc = makeFakeProc(0, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const promise = executor.generateTaskMetadata("Some task", "meta-3");
+
+      await new Promise((r) => setTimeout(r, 5));
+      proc.stdout!.emit("data", Buffer.from("some-task\nSome Task"));
+      proc.emit("close", 0);
+      await promise;
+
+      // Exactly ONE container spawned
+      expect(spawnMock).toHaveBeenCalledOnce();
+      const args = spawnMock.mock.calls[0][1] as string[];
+      expect(args).not.toContain("--privileged");
+      expect(args).toContain("haiku");
+    });
+
+    it("returns fallback slug and empty title on non-zero exit", async () => {
+      const proc = makeFakeProc(1, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const promise = executor.generateTaskMetadata("Some task", "meta-4");
+
+      await new Promise((r) => setTimeout(r, 5));
+      proc.emit("close", 1);
+
+      const { slug, title } = await promise;
+      expect(slug).toBe("task");
+      expect(title).toBe("");
+    });
+
+    it("returns fallback on spawn error", async () => {
+      const proc = new EventEmitter() as child_process.ChildProcess;
+      const stdout = new EventEmitter();
+      const stderr = new EventEmitter();
+      Object.assign(proc, { stdout, stderr, stdin: null, stdio: [null, stdout, stderr], pid: 123, kill: vi.fn() });
+      setTimeout(() => proc.emit("error", new Error("docker not found")), 10);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const { slug, title } = await executor.generateTaskMetadata("Some task", "meta-5");
+      expect(slug).toBe("task");
+      expect(title).toBe("");
+    });
+
+    it("truncates slug to 40 chars and title to 60 chars", async () => {
+      const proc = makeFakeProc(0, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const promise = executor.generateTaskMetadata("Some task", "meta-6");
+
+      await new Promise((r) => setTimeout(r, 5));
+      proc.stdout!.emit("data", Buffer.from(`${"a".repeat(60)}\n${"B".repeat(80)}`));
+      proc.emit("close", 0);
+
+      const { slug, title } = await promise;
+      expect(slug.length).toBeLessThanOrEqual(40);
+      expect(title).toHaveLength(60);
     });
   });
 
