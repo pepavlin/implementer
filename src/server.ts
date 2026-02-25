@@ -496,7 +496,8 @@ export function createServer(
                 status: task.status,
                 startedAt: task.startedAt,
                 completedAt: task.completedAt,
-                durationSeconds: getDurationSeconds(task)
+                durationSeconds: getDurationSeconds(task),
+                pullRequests: task.pullRequests ?? null
             }));
         res.json({ tasks });
     });
