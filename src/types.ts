@@ -81,8 +81,8 @@ export interface Task {
     error?: string;
     pullRequests?: PullRequest[];
     callbackUrl?: string;
-    /** Original fromBranch value from the create request, needed when dequeuing. */
-    fromBranch?: string;
+    /** Pull request number to continue work on. Tasks with the same PR number run serially. */
+    pullRequestNumber?: number;
     /** Current attempt number (1-indexed). Incremented on each retry. */
     attempt: number;
 }
@@ -93,6 +93,7 @@ export interface PersistedTask extends Task {
 
 export interface TaskCreateRequest {
     prompt: string;
-    fromBranch?: string;
+    /** Pull request number to continue work on. Tasks with the same PR number run serially. */
+    pullRequestNumber?: number;
     callbackUrl?: string;
 }

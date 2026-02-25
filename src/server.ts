@@ -8,7 +8,7 @@ import type { Config, TaskStatus } from "./types.js";
 
 const TaskCreateSchema = z.object({
     prompt: z.string().min(1),
-    fromBranch: z.string().optional(),
+    pullRequestNumber: z.number().int().positive().optional(),
     callbackUrl: z.string().url().optional()
 });
 
@@ -49,11 +49,11 @@ const openApiSpec = {
                         description: "What to implement",
                         example: "Add a dark mode toggle to the navbar"
                     },
-                    fromBranch: {
-                        type: "string",
+                    pullRequestNumber: {
+                        type: "integer",
                         description:
-                            "Continue from an existing branch instead of creating a new one",
-                        example: "impl/dark-mode-abc123"
+                            "Continue work on an existing pull request. Tasks with the same PR number run sequentially.",
+                        example: 42
                     },
                     callbackUrl: {
                         type: "string",
@@ -102,6 +102,11 @@ const openApiSpec = {
                         type: "string",
                         nullable: true,
                         description: "Auto-generated short title for the task (null until generated)"
+                    },
+                    pullRequestNumber: {
+                        type: "integer",
+                        nullable: true,
+                        description: "Pull request number this task is linked to (null for standalone tasks)"
                     },
                     status: {
                         type: "string",
@@ -493,6 +498,7 @@ export function createServer(
                 branch: task.branch,
                 prompt: task.prompt,
                 title: task.title ?? null,
+                pullRequestNumber: task.pullRequestNumber ?? null,
                 status: task.status,
                 startedAt: task.startedAt,
                 completedAt: task.completedAt,
@@ -516,6 +522,7 @@ export function createServer(
             branch: task.branch,
             prompt: task.prompt,
             title: task.title ?? null,
+            pullRequestNumber: task.pullRequestNumber ?? null,
             status: task.status,
             attempt: task.attempt,
             startedAt: task.startedAt,

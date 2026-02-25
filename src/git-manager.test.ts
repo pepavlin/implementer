@@ -572,4 +572,30 @@ describe("GitManager", () => {
       expect(results).toEqual([]);
     });
   });
+
+  describe("getPullRequestBranch", () => {
+    it("throws when gh fails (e.g. PR does not exist or no GitHub auth)", async () => {
+      const workDir = join(TMP, "workspace");
+      mkdirSync(workDir, { recursive: true });
+
+      const repoConfig = { name: "my-repo", url: "https://github.com/nonexistent-org/nonexistent-repo.git", defaultBranch: "main" };
+      // gh pr view will fail in the test environment — verify the error is propagated
+      await expect(gm.getPullRequestBranch(999, repoConfig, workDir)).rejects.toThrow();
+    });
+
+    it("includes the correct owner/repo in the gh error message", async () => {
+      const workDir = join(TMP, "workspace");
+      mkdirSync(workDir, { recursive: true });
+
+      const repoConfig = { name: "my-repo", url: "https://github.com/myorg/myrepo.git", defaultBranch: "main" };
+      let caughtError: unknown;
+      try {
+        await gm.getPullRequestBranch(42, repoConfig, workDir);
+      } catch (err) {
+        caughtError = err;
+      }
+      // The gh error should reference the parsed owner/repo (not the full .git URL)
+      expect(String(caughtError)).toContain("myorg/myrepo");
+    });
+  });
 });

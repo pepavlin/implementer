@@ -392,6 +392,24 @@ export class GitManager {
   }
 
   /**
+   * Resolve the head branch name of a pull request by its number.
+   * Uses the gh CLI with --repo so it works from any working directory.
+   * The repo URL is expected to be a GitHub HTTPS URL (https://github.com/owner/repo.git).
+   */
+  async getPullRequestBranch(prNumber: number, repoConfig: RepositoryConfig, cwd: string, githubToken?: string): Promise<string> {
+    const repoPath = repoConfig.url
+      .replace(/^.*github\.com\//, "")
+      .replace(/\.git$/, "");
+    const branch = await gh(
+      ["pr", "view", String(prNumber), "--repo", repoPath, "--json", "headRefName", "--jq", ".headRefName"],
+      cwd,
+      githubToken
+    );
+    if (!branch) throw new Error(`PR #${prNumber} not found in ${repoPath}`);
+    return branch;
+  }
+
+  /**
    * Post a comment on each pull request. Best-effort: logs errors, doesn't throw.
    */
   async commentOnPullRequestAll(

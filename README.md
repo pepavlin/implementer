@@ -2,7 +2,7 @@
 
 AI Code Task Execution Service — receives coding tasks via REST API, executes them using Claude Code CLI in a Docker sandbox on configured git repositories, and provides status monitoring.
 
-Supports parallel task execution. Each task gets an isolated workspace instance, so multiple tasks can run concurrently without interfering with each other. Idle workspace instances are automatically reused.
+Supports parallel task execution. Each task gets an isolated workspace instance, so multiple tasks can run concurrently without interfering with each other. Idle workspace instances are automatically reused. Tasks linked to the same pull request number always run sequentially — the next task waits until the previous one finishes.
 
 ## Setup
 
@@ -197,18 +197,22 @@ The branch name is generated automatically by AI based on the prompt.
 
 Multiple tasks can run simultaneously — each gets its own isolated workspace instance.
 
-### Continue on an existing branch
+### Continue work on an existing pull request
 
-To send a follow-up task that continues from a previous branch:
+To send a follow-up task that adds more commits to an existing PR:
 
 ```bash
 curl -X POST http://localhost:3000/task \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "Add form validation to the login page",
-    "fromBranch": "impl/login-page-email-password-a1b2c3d4"
+    "pullRequestNumber": 42
   }'
 ```
+
+The service fetches the PR's head branch from GitHub and continues work there. Multiple tasks with the same `pullRequestNumber` are automatically queued and run **sequentially** — the next task starts only after the previous one finishes, so commits are never interleaved.
+
+This also applies to retried tasks: calling `POST /task/:taskId/retry` on a PR-linked task queues it if the same PR is currently being worked on.
 
 ### List all tasks
 
@@ -297,16 +301,24 @@ When a task starts, the service either reuses a free workspace (resetting repos 
 
 ## Git workflow
 
-When a new task starts (no `fromBranch`), the service:
+### New task (no `pullRequestNumber`)
 
 1. Acquires a workspace instance (reuses idle or clones fresh)
 2. Checks out and pulls the default branch in each repo
 3. Creates a new branch `impl/{ai-generated-slug}-{taskId}` in all repos
 4. Runs Claude Code CLI in the workspace (access to all repos)
-5. Pushes the branch to remote in all repos that have changes
+5. Pushes the branch and creates a pull request
 6. Releases the workspace instance back to the pool
 
-When continuing (`fromBranch` provided), the service checks out that branch in all repos and runs Claude Code on it.
+### PR task (`pullRequestNumber` provided)
+
+1. Fetches the head branch of the given PR from GitHub
+2. Acquires a workspace instance and checks out that branch
+3. Runs Claude Code CLI on top of the existing PR commits
+4. Force-pushes the updated branch — the open PR is updated automatically
+5. Releases the workspace instance back to the pool
+
+Tasks for the same PR are always serialised: a second task waits in the queue until the first one completes.
 
 ## n8n integration
 

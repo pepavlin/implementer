@@ -142,6 +142,40 @@ describe("server", () => {
 
             expect(res.body.error).toBe("boom");
         });
+
+        it("accepts pullRequestNumber as integer and passes it to startTask", async () => {
+            const task = makeMockTask({ status: "queued", branch: null, pullRequestNumber: 42 });
+            const startTask = vi.fn().mockResolvedValue(task);
+            const tm = makeMockTaskManager({ startTask });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app)
+                .post("/task")
+                .send({ prompt: "Fix bug", pullRequestNumber: 42 })
+                .expect(200);
+
+            expect(res.body.taskId).toBe("abc123");
+            expect(startTask).toHaveBeenCalledWith(expect.any(String), {
+                prompt: "Fix bug",
+                pullRequestNumber: 42
+            });
+        });
+
+        it("rejects non-integer pullRequestNumber", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfig());
+            await request(app)
+                .post("/task")
+                .send({ prompt: "Fix bug", pullRequestNumber: "not-a-number" })
+                .expect(400);
+        });
+
+        it("rejects negative pullRequestNumber", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfig());
+            await request(app)
+                .post("/task")
+                .send({ prompt: "Fix bug", pullRequestNumber: -1 })
+                .expect(400);
+        });
     });
 
     describe("GET /tasks", () => {
@@ -226,6 +260,35 @@ describe("server", () => {
             const res = await request(app).get("/tasks?status=invalid").expect(400);
             expect(res.body.error).toBe("Invalid status value");
         });
+
+        it("includes pullRequestNumber in task list items", async () => {
+            const task = makeMockTask({
+                status: "completed",
+                completedAt: "2025-01-01T01:00:00.000Z",
+                pullRequestNumber: 42
+            });
+            const tm = makeMockTaskManager({
+                listTasks: vi.fn().mockReturnValue([task])
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app).get("/tasks").expect(200);
+            expect(res.body.tasks[0].pullRequestNumber).toBe(42);
+        });
+
+        it("returns null pullRequestNumber for tasks without one", async () => {
+            const task = makeMockTask({
+                status: "completed",
+                completedAt: "2025-01-01T01:00:00.000Z"
+            });
+            const tm = makeMockTaskManager({
+                listTasks: vi.fn().mockReturnValue([task])
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app).get("/tasks").expect(200);
+            expect(res.body.tasks[0].pullRequestNumber).toBeNull();
+        });
     });
 
     describe("GET /task/:taskId", () => {
@@ -243,6 +306,35 @@ describe("server", () => {
             expect(res.body.taskId).toBe("abc123");
             expect(res.body.prompt).toBe("Add a button");
             expect(res.body.durationSeconds).toBe(300);
+        });
+
+        it("returns pullRequestNumber when present", async () => {
+            const task = makeMockTask({
+                status: "completed",
+                completedAt: "2025-01-01T00:05:00.000Z",
+                pullRequestNumber: 42
+            });
+            const tm = makeMockTaskManager({
+                getTask: vi.fn().mockReturnValue(task)
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app).get("/task/abc123").expect(200);
+            expect(res.body.pullRequestNumber).toBe(42);
+        });
+
+        it("returns null pullRequestNumber when not present", async () => {
+            const task = makeMockTask({
+                status: "completed",
+                completedAt: "2025-01-01T00:05:00.000Z"
+            });
+            const tm = makeMockTaskManager({
+                getTask: vi.fn().mockReturnValue(task)
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app).get("/task/abc123").expect(200);
+            expect(res.body.pullRequestNumber).toBeNull();
         });
 
         it("returns pullRequests when present", async () => {

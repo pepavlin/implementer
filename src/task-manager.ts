@@ -61,6 +61,8 @@ export class TaskManager {
     private tasks: Map<string, TaskEntry> = new Map();
     /** Per-project FIFO queues of taskIds waiting to run. */
     private queues: Map<string, string[]> = new Map();
+    /** Per-project set of PR numbers that have a task currently running. */
+    private activePrNumbers: Map<string, Set<number>> = new Map();
 
     constructor(config: Config) {
         this.serverWorkspaceDir = config.server.workspaceDir;
@@ -213,6 +215,11 @@ export class TaskManager {
                 entry.task.status = "running";
                 entry.task.output = "";
 
+                // Mark PR as active before resuming so tryDequeue respects the serial constraint
+                if (entry.task.pullRequestNumber !== undefined) {
+                    this.markPrActive(entry.task.projectId, entry.task.pullRequestNumber);
+                }
+
                 const persistedTask: PersistedTask = {
                     ...entry.task,
                     workspaceId: entry.workspaceId
@@ -354,20 +361,49 @@ export class TaskManager {
         this.queues.get(projectId)!.push(taskId);
     }
 
+    private markPrActive(projectId: string, prNumber: number): void {
+        if (!this.activePrNumbers.has(projectId)) this.activePrNumbers.set(projectId, new Set());
+        this.activePrNumbers.get(projectId)!.add(prNumber);
+    }
+
+    private unmarkPrActive(projectId: string, prNumber: number): void {
+        this.activePrNumbers.get(projectId)?.delete(prNumber);
+    }
+
+    private isPrActive(projectId: string, prNumber: number): boolean {
+        return this.activePrNumbers.get(projectId)?.has(prNumber) ?? false;
+    }
+
     private tryDequeue(projectId: string, state: ProjectState): void {
         const queue = this.queues.get(projectId);
         if (!queue || queue.length === 0) return;
         if (this.shouldQueue(projectId, state)) return;
 
-        const taskId = queue.shift()!;
+        // Find the first task whose PR is not currently active (or has no PR).
+        const idx = queue.findIndex((tid) => {
+            const e = this.tasks.get(tid);
+            if (!e) return true; // stale entry — will be cleaned up below
+            const prNum = e.task.pullRequestNumber;
+            return prNum === undefined || !this.isPrActive(projectId, prNum);
+        });
+
+        if (idx === -1) return; // All queued tasks are waiting for their PR to free up
+
+        const taskId = queue.splice(idx, 1)[0];
         const entry = this.tasks.get(taskId);
         if (!entry) {
-            // Task was somehow removed — try the next one
+            // Stale entry — try again
             this.tryDequeue(projectId, state);
             return;
         }
 
         const task = entry.task;
+
+        // Mark PR as active immediately (synchronously) before any async work
+        if (task.pullRequestNumber !== undefined) {
+            this.markPrActive(projectId, task.pullRequestNumber);
+        }
+
         const executor = new Executor(state.config.claudeCode, state.tokenManager);
         entry.executor = executor;
         task.status = "running";
@@ -387,6 +423,10 @@ export class TaskManager {
                 task.error = err instanceof Error ? err.message : String(err);
                 task.completedAt = new Date().toISOString();
                 this.store.save({ ...task, workspaceId: entry.workspaceId });
+                // Release PR lock on failure
+                if (task.pullRequestNumber !== undefined) {
+                    this.unmarkPrActive(projectId, task.pullRequestNumber);
+                }
                 if (task.callbackUrl) {
                     this.fireWebhook(task.taskId, task.status, task.callbackUrl);
                 }
@@ -409,6 +449,16 @@ export class TaskManager {
         );
 
         setTimeout(async () => {
+            // If PR is active (another task for the same PR is running), queue and wait
+            if (task.pullRequestNumber !== undefined && this.isPrActive(task.projectId, task.pullRequestNumber)) {
+                task.status = "queued";
+                this.enqueue(task.projectId, task.taskId);
+                const entry = this.tasks.get(task.taskId);
+                if (entry) this.store.save({ ...task, workspaceId: entry.workspaceId });
+                console.log(`[${task.taskId}] Retry queued — PR #${task.pullRequestNumber} is already active`);
+                return;
+            }
+
             if (this.shouldQueue(task.projectId, state)) {
                 // No capacity right now — put in queue and wait
                 task.status = "queued";
@@ -417,6 +467,11 @@ export class TaskManager {
                 if (entry) this.store.save({ ...task, workspaceId: entry.workspaceId });
                 console.log(`[${task.taskId}] Retry queued (no capacity)`);
                 return;
+            }
+
+            // Mark PR as active before running
+            if (task.pullRequestNumber !== undefined) {
+                this.markPrActive(task.projectId, task.pullRequestNumber);
             }
 
             task.status = "running";
@@ -429,7 +484,10 @@ export class TaskManager {
                     state.config.auth?.githubToken
                 );
             } catch (err) {
-                // Pool full despite check — queue it
+                // Pool full despite check — queue it; unmark PR first
+                if (task.pullRequestNumber !== undefined) {
+                    this.unmarkPrActive(task.projectId, task.pullRequestNumber);
+                }
                 task.status = "queued";
                 this.enqueue(task.projectId, task.taskId);
                 const entry = this.tasks.get(task.taskId);
@@ -483,8 +541,8 @@ export class TaskManager {
         const task: Task = {
             taskId,
             projectId,
-            branch: request.fromBranch ?? null,
-            fromBranch: request.fromBranch,
+            branch: null,
+            pullRequestNumber: request.pullRequestNumber,
             prompt: request.prompt,
             status: "queued",
             startedAt: new Date().toISOString(),
@@ -515,8 +573,27 @@ export class TaskManager {
     private async prepareAndRunTask(task: Task, state: ProjectState): Promise<void> {
         const { taskId, projectId } = task;
 
-        // Generate branch slug and title in a single Docker call to minimise container overhead
-        if (!task.branch) {
+        // Resolve branch and title based on task type
+        if (task.pullRequestNumber !== undefined && !task.branch) {
+            // PR task: fetch the PR's head branch from GitHub
+            console.log(`[${taskId}] Fetching branch for PR #${task.pullRequestNumber}...`);
+            const primaryRepo = state.config.repositories[0];
+            const prBranch = await this.gitManager.getPullRequestBranch(
+                task.pullRequestNumber,
+                primaryRepo,
+                this.serverWorkspaceDir,
+                state.config.auth?.githubToken
+            );
+            task.branch = prBranch;
+            if (!task.title) {
+                const metaExecutor = new Executor(state.config.claudeCode, state.tokenManager);
+                const { title } = await metaExecutor.generateTaskMetadata(task.prompt, taskId);
+                if (title) task.title = title;
+            }
+            console.log(`[${taskId}] Branch: ${task.branch}, Title: ${task.title}`);
+            this.store.save({ ...task, workspaceId: null });
+        } else if (!task.branch) {
+            // Normal task: generate branch slug and title
             console.log(`[${taskId}] Generating branch name and title...`);
             const metaExecutor = new Executor(state.config.claudeCode, state.tokenManager);
             const { slug, title } = await metaExecutor.generateTaskMetadata(task.prompt, taskId);
@@ -525,7 +602,7 @@ export class TaskManager {
             console.log(`[${taskId}] Branch: ${task.branch}, Title: ${task.title}`);
             this.store.save({ ...task, workspaceId: null });
         } else if (!task.title) {
-            // Branch already set (fromBranch), but title not yet generated
+            // Branch already set (e.g., after restart), but title not yet generated
             console.log(`[${taskId}] Generating title...`);
             const metaExecutor = new Executor(state.config.claudeCode, state.tokenManager);
             const { title } = await metaExecutor.generateTaskMetadata(task.prompt, taskId);
@@ -534,12 +611,25 @@ export class TaskManager {
             this.store.save({ ...task, workspaceId: null });
         }
 
+        // If the PR is already active (another task for the same PR is running), queue and wait
+        if (task.pullRequestNumber !== undefined && this.isPrActive(projectId, task.pullRequestNumber)) {
+            this.enqueue(projectId, taskId);
+            const queueLen = this.queues.get(projectId)!.length;
+            console.log(`[${taskId}] Queued — PR #${task.pullRequestNumber} is already active (position ${queueLen} for ${projectId})`);
+            return;
+        }
+
         // Queue if at capacity — task will be picked up by tryDequeue when a slot frees
         if (this.shouldQueue(projectId, state)) {
             this.enqueue(projectId, taskId);
             const queueLen = this.queues.get(projectId)!.length;
             console.log(`[${taskId}] Queued (position ${queueLen} for ${projectId})`);
             return;
+        }
+
+        // Mark PR as active immediately before any async work
+        if (task.pullRequestNumber !== undefined) {
+            this.markPrActive(projectId, task.pullRequestNumber);
         }
 
         // Acquire workspace and run immediately
@@ -552,7 +642,11 @@ export class TaskManager {
         try {
             workspace = await state.pool.acquire(state.config.repositories, state.config.auth?.githubToken);
         } catch (_err) {
-            // Race condition: another task grabbed the last slot — queue and wait
+            // Race condition: another task grabbed the last slot — queue and wait.
+            // Unmark PR so tryDequeue can re-pick it up correctly.
+            if (task.pullRequestNumber !== undefined) {
+                this.unmarkPrActive(projectId, task.pullRequestNumber);
+            }
             task.status = "queued";
             entry.executor = null;
             this.store.save({ ...task, workspaceId: null });
@@ -588,8 +682,10 @@ export class TaskManager {
             throw new TaskActiveError(task.status);
         }
 
-        // If branch was cleaned up (no commits), regenerate a name so executeTask can create a fresh one
-        if (!task.branch) {
+        // For normal tasks: if branch was cleaned up (no commits), regenerate a slug so
+        // executeTask creates a fresh branch. For PR tasks the branch is never nulled out,
+        // so this only triggers for non-PR tasks.
+        if (!task.branch && task.pullRequestNumber === undefined) {
             const slugExecutor = new Executor(state.config.claudeCode, state.tokenManager);
             const slug = await slugExecutor.generateBranchSlug(task.prompt, taskId);
             task.branch = `impl/${slug}-${taskId}`;
@@ -610,6 +706,18 @@ export class TaskManager {
 
         console.log(`[${taskId}] Manual retry requested — branch: ${task.branch}`);
 
+        // If the PR is already active, queue the retry instead of running immediately
+        if (task.pullRequestNumber !== undefined && this.isPrActive(projectId, task.pullRequestNumber)) {
+            task.status = "queued";
+            entry.executor = null;
+            entry.workspaceId = null;
+            entry.checkoutBranch = checkoutBranch;
+            this.store.save({ ...task, workspaceId: null });
+            this.enqueue(projectId, taskId);
+            console.log(`[${taskId}] Retry queued — PR #${task.pullRequestNumber} is already active`);
+            return task;
+        }
+
         if (this.shouldQueue(projectId, state)) {
             task.status = "queued";
             entry.executor = null;
@@ -621,6 +729,11 @@ export class TaskManager {
             return task;
         }
 
+        // Mark PR as active immediately before any async work
+        if (task.pullRequestNumber !== undefined) {
+            this.markPrActive(projectId, task.pullRequestNumber);
+        }
+
         const executor = new Executor(state.config.claudeCode, state.tokenManager);
         entry.executor = executor;
         entry.checkoutBranch = checkoutBranch;
@@ -629,6 +742,10 @@ export class TaskManager {
         try {
             workspace = await state.pool.acquire(state.config.repositories, state.config.auth?.githubToken);
         } catch (_err) {
+            // Unmark PR before re-queuing so tryDequeue can pick it up correctly
+            if (task.pullRequestNumber !== undefined) {
+                this.unmarkPrActive(projectId, task.pullRequestNumber);
+            }
             task.status = "queued";
             entry.executor = null;
             entry.workspaceId = null;
@@ -652,7 +769,7 @@ export class TaskManager {
         task: Task,
         workspace: { id: number; dir: string },
         state: ProjectState,
-        /** Override which branch to checkout. Defaults to task.fromBranch. Used for resume after restart. */
+        /** Override which branch to checkout. Used for resume/retry. For PR tasks defaults to task.branch. */
         checkoutBranch?: string
     ): Promise<void> {
         const repos = state.config.repositories;
@@ -660,7 +777,8 @@ export class TaskManager {
         const executor = entry.executor!;
         const branchName = task.branch!;
         const githubToken = state.config.auth?.githubToken;
-        const fromBranch = checkoutBranch ?? task.fromBranch;
+        // PR tasks always check out their existing branch; normal tasks create a new one.
+        const fromBranch = checkoutBranch ?? (task.pullRequestNumber !== undefined ? task.branch! : undefined);
 
         try {
             // Step 1: Prepare branch in all repos
@@ -867,17 +985,21 @@ export class TaskManager {
                         `[${task.taskId}] Completed and pushed successfully.`
                     );
                 } else {
-                    // Success with no commits: delete remote branch and clear branch ref
-                    console.log(
-                        `[${task.taskId}] No new commits — cleaning up remote branch.`
-                    );
-                    await this.gitManager.deleteRemoteBranchAll(
-                        workspace.dir,
-                        repos,
-                        branchName,
-                        githubToken
-                    );
-                    task.branch = null;
+                    // Success with no commits
+                    if (task.pullRequestNumber !== undefined) {
+                        // PR task: keep the branch — the PR already exists on GitHub
+                        console.log(`[${task.taskId}] No new commits on PR branch — leaving branch intact.`);
+                    } else {
+                        // Normal task: delete remote branch and clear branch ref
+                        console.log(`[${task.taskId}] No new commits — cleaning up remote branch.`);
+                        await this.gitManager.deleteRemoteBranchAll(
+                            workspace.dir,
+                            repos,
+                            branchName,
+                            githubToken
+                        );
+                        task.branch = null;
+                    }
                     task.status = "completed";
                 }
             } else {
@@ -948,17 +1070,21 @@ export class TaskManager {
                         );
                     }
                 } else {
-                    // Failure with no commits: delete remote branch
-                    console.log(
-                        `[${task.taskId}] Failed with no commits — cleaning up remote branch.`
-                    );
-                    await this.gitManager.deleteRemoteBranchAll(
-                        workspace.dir,
-                        repos,
-                        branchName,
-                        githubToken
-                    );
-                    task.branch = null;
+                    // Failure with no commits
+                    if (task.pullRequestNumber !== undefined) {
+                        // PR task: keep the branch — the PR already exists on GitHub
+                        console.log(`[${task.taskId}] Failed with no commits on PR branch — leaving branch intact.`);
+                    } else {
+                        // Normal task: delete remote branch
+                        console.log(`[${task.taskId}] Failed with no commits — cleaning up remote branch.`);
+                        await this.gitManager.deleteRemoteBranchAll(
+                            workspace.dir,
+                            repos,
+                            branchName,
+                            githubToken
+                        );
+                        task.branch = null;
+                    }
                 }
 
                 task.status = "failed";
@@ -975,6 +1101,10 @@ export class TaskManager {
         } finally {
             task.completedAt = new Date().toISOString();
             this.store.save({ ...task, workspaceId: workspace.id });
+            // Release PR lock so the next task for this PR can be dequeued
+            if (task.pullRequestNumber !== undefined) {
+                this.unmarkPrActive(task.projectId, task.pullRequestNumber);
+            }
             state.pool.release(workspace.id);
             // Start next queued task for this project if capacity is now available
             this.tryDequeue(task.projectId, state);
