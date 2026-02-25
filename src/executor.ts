@@ -149,7 +149,7 @@ Task: ${prompt}`,
           resolve({ slug: "task", title: "" });
           return;
         }
-        const lines = output.trim().split("\n");
+        const lines = output.trim().split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
         const slug = (lines[0] ?? "")
           .trim()
           .toLowerCase()

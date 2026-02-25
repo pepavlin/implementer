@@ -524,6 +524,14 @@ export class TaskManager {
             if (title) task.title = title;
             console.log(`[${taskId}] Branch: ${task.branch}, Title: ${task.title}`);
             this.store.save({ ...task, workspaceId: null });
+        } else if (!task.title) {
+            // Branch already set (fromBranch), but title not yet generated
+            console.log(`[${taskId}] Generating title...`);
+            const metaExecutor = new Executor(state.config.claudeCode, state.tokenManager);
+            const { title } = await metaExecutor.generateTaskMetadata(task.prompt, taskId);
+            if (title) task.title = title;
+            console.log(`[${taskId}] Title: ${task.title}`);
+            this.store.save({ ...task, workspaceId: null });
         }
 
         // Queue if at capacity — task will be picked up by tryDequeue when a slot frees
