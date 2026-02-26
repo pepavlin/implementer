@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { nanoid } from "nanoid";
-import type { PersistedTask, ProjectId, Task, TaskCreateRequest } from "../types.js";
+import type { ChainId, PersistedTask, ProjectId, Task, TaskCreateRequest, TaskId } from "../types.js";
 import { GitManager } from "../git-manager.js";
 import { Executor } from "../executor.js";
 import { WorkspacePool } from "../workspace-pool.js";
@@ -31,11 +31,11 @@ export class TaskManager {
     private gitManager: GitManager;
     private store: TaskStore;
 
-    private tasks: Map<string, TaskEntry> = new Map();
+    private tasks: Map<TaskId, TaskEntry> = new Map();
     /** Per-project FIFO queues of taskIds waiting to run. */
-    private queues: Map<ProjectId, string[]> = new Map();
+    private queues: Map<ProjectId, TaskId[]> = new Map();
     /** Per-project set of chain IDs that have a task currently running. */
-    private activeChains: Map<ProjectId, Set<string>> = new Map();
+    private activeChains: Map<ProjectId, Set<ChainId>> = new Map();
 
     constructor(config: Config) {
         this.serverWorkspaceDir = config.server.workspaceDir;
@@ -247,22 +247,23 @@ export class TaskManager {
         }
     }
 
-    getTask(projectId: ProjectId, taskId: string): Task | undefined {
+    getTask(projectId: ProjectId, taskId: TaskId): Task | undefined {
         const entry = this.tasks.get(taskId);
         if (!entry || entry.task.projectId !== projectId) return undefined;
         return entry.task;
     }
 
-    listTasks(projectId: ProjectId, filters?: { chainId?: string }): Task[] {
+    listTasks(projectId: ProjectId, filters?: { chainId?: ChainId }): Task[] {
         return Array.from(this.tasks.values())
             .filter((entry) => {
                 if (entry.task.projectId !== projectId) return false;
                 if (filters?.chainId) {
                     const cid = filters.chainId;
                     // Match tasks in the chain or the root task itself
+                    // (root task's taskId serves as the chainId for children)
                     return (
                         entry.task.chainId === cid ||
-                        entry.task.taskId === cid
+                        (entry.task.taskId as string) === (cid as string)
                     );
                 }
                 return true;
@@ -293,7 +294,7 @@ export class TaskManager {
             );
     }
 
-    getOutput(projectId: ProjectId, taskId: string): string {
+    getOutput(projectId: ProjectId, taskId: TaskId): string {
         const entry = this.tasks.get(taskId);
         if (!entry || entry.task.projectId !== projectId) return "";
         if (entry.task.status === "running" && entry.executor) {
@@ -315,28 +316,28 @@ export class TaskManager {
         return !state.pool.hasFreeSlot();
     }
 
-    private enqueue(projectId: ProjectId, taskId: string): void {
+    private enqueue(projectId: ProjectId, taskId: TaskId): void {
         if (!this.queues.has(projectId)) this.queues.set(projectId, []);
         this.queues.get(projectId)!.push(taskId);
     }
 
-    private markChainActive(projectId: ProjectId, chainId: string): void {
+    private markChainActive(projectId: ProjectId, chainId: ChainId): void {
         if (!this.activeChains.has(projectId))
             this.activeChains.set(projectId, new Set());
         this.activeChains.get(projectId)!.add(chainId);
     }
 
-    private unmarkChainActive(projectId: ProjectId, chainId: string): void {
+    private unmarkChainActive(projectId: ProjectId, chainId: ChainId): void {
         this.activeChains.get(projectId)?.delete(chainId);
     }
 
-    private isChainActive(projectId: ProjectId, chainId: string): boolean {
+    private isChainActive(projectId: ProjectId, chainId: ChainId): boolean {
         return this.activeChains.get(projectId)?.has(chainId) ?? false;
     }
 
     /** Walk parentTaskId links to find the leaf (latest) task in a chain. */
-    private findChainTip(taskId: string): string {
-        const childIndex = new Map<string, string>();
+    private findChainTip(taskId: TaskId): TaskId {
+        const childIndex = new Map<TaskId, TaskId>();
         for (const [tid, entry] of this.tasks) {
             if (entry.task.parentTaskId) {
                 childIndex.set(entry.task.parentTaskId, tid);
@@ -430,11 +431,11 @@ export class TaskManager {
         const state = this.projects.get(projectId);
         if (!state) throw new Error(`Unknown project: ${projectId}`);
 
-        const taskId = nanoid(8);
+        const taskId = nanoid(8) as TaskId;
 
         // Resolve chain continuation fields
-        let parentTaskId: string | undefined;
-        let chainId: string | undefined;
+        let parentTaskId: TaskId | undefined;
+        let chainId: ChainId | undefined;
         let inheritedBranch: string | null = null;
 
         if (request.continueTaskId) {
@@ -459,7 +460,7 @@ export class TaskManager {
             }
             parentTaskId = request.continueTaskId;
             chainId =
-                parentEntry.task.chainId ?? parentEntry.task.taskId;
+                parentEntry.task.chainId ?? (parentEntry.task.taskId as unknown as ChainId);
             inheritedBranch = parentEntry.task.branch;
         }
 
@@ -500,7 +501,7 @@ export class TaskManager {
      * Retry an existing task regardless of its terminal status (completed, failed, interrupted).
      * Resets the task state and re-runs it, continuing from the same branch if one exists.
      */
-    async retryTask(projectId: ProjectId, taskId: string): Promise<Task> {
+    async retryTask(projectId: ProjectId, taskId: TaskId): Promise<Task> {
         const state = this.projects.get(projectId);
         if (!state) throw new Error(`Unknown project: ${projectId}`);
 
@@ -631,7 +632,7 @@ export class TaskManager {
      * - Retrying: the pending retry timer is cleared, task is marked as cancelled.
      * Throws TaskCancelError if the task is already in a terminal state.
      */
-    cancelTask(projectId: ProjectId, taskId: string): Task {
+    cancelTask(projectId: ProjectId, taskId: TaskId): Task {
         const state = this.projects.get(projectId);
         if (!state) throw new Error(`Unknown project: ${projectId}`);
 
@@ -698,7 +699,7 @@ export class TaskManager {
      * The title is cleared so it can be regenerated when the task eventually runs.
      * Throws TaskEditError if the task cannot be edited.
      */
-    editTask(projectId: ProjectId, taskId: string, newPrompt: string): Task {
+    editTask(projectId: ProjectId, taskId: TaskId, newPrompt: string): Task {
         const state = this.projects.get(projectId);
         if (!state) throw new Error(`Unknown project: ${projectId}`);
 

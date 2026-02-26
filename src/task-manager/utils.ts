@@ -1,3 +1,5 @@
+import type { TaskId } from "../types.js";
+
 export function buildSystemInstructions(
     repos: { name: string }[],
     protectedPaths?: string[]
@@ -70,7 +72,7 @@ export function getDockerMount(
     };
 }
 
-export function fireWebhook(taskId: string, status: string, url: string): void {
+export function fireWebhook(taskId: TaskId, status: string, url: string): void {
     fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

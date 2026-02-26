@@ -9,7 +9,7 @@ import {
 import { UsageLimitError } from "./usage-limiter.js";
 import { extractLastAssistantMessage } from "./executor.js";
 import type { Config } from "./config/config.js";
-import type { ProjectId } from "./types.js";
+import type { ProjectId, TaskId } from "./types.js";
 
 // ── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -841,7 +841,7 @@ export function registerDashboardRoutes(
         try {
             const task = await taskManager.startTask(projectId as ProjectId, {
                 prompt: prompt.trim(),
-                continueTaskId: contId
+                continueTaskId: contId as TaskId | undefined
             });
             res.json({
                 taskId: task.taskId,

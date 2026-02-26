@@ -1,6 +1,6 @@
 import { Executor, extractLastAssistantMessage } from "../executor.js";
 import { chownRecursive } from "../workspace-pool.js";
-import type { ProjectId, Task } from "../types.js";
+import type { ChainId, ProjectId, Task, TaskId } from "../types.js";
 import type { GitManager } from "../git-manager.js";
 import type { TaskStore } from "../task-store.js";
 import type { ProjectState, TaskEntry } from "./types.js";
@@ -12,16 +12,16 @@ import {
 } from "./utils.js";
 
 export interface TaskRunnerContext {
-    tasks: Map<string, TaskEntry>;
-    queues: Map<ProjectId, string[]>;
+    tasks: Map<TaskId, TaskEntry>;
+    queues: Map<ProjectId, TaskId[]>;
     gitManager: GitManager;
     store: TaskStore;
     serverWorkspaceDir: string;
-    isChainActive(projectId: ProjectId, chainId: string): boolean;
-    markChainActive(projectId: ProjectId, chainId: string): void;
-    unmarkChainActive(projectId: ProjectId, chainId: string): void;
+    isChainActive(projectId: ProjectId, chainId: ChainId): boolean;
+    markChainActive(projectId: ProjectId, chainId: ChainId): void;
+    unmarkChainActive(projectId: ProjectId, chainId: ChainId): void;
     shouldQueue(projectId: ProjectId, state: ProjectState): boolean;
-    enqueue(projectId: ProjectId, taskId: string): void;
+    enqueue(projectId: ProjectId, taskId: TaskId): void;
     tryDequeue(projectId: ProjectId, state: ProjectState): void;
     scheduleRetry(task: Task, state: ProjectState, delayOverrideSeconds?: number): void;
 }

@@ -1,4 +1,6 @@
 export type ProjectId = string & { readonly _brand: unique symbol };
+export type TaskId = string & { readonly _brand: unique symbol };
+export type ChainId = string & { readonly _brand: unique symbol };
 
 export type TaskStatus =
     | "queued"
@@ -15,7 +17,7 @@ export interface PullRequest {
 }
 
 export interface Task {
-    taskId: string;
+    taskId: TaskId;
     projectId: ProjectId;
     branch: string | null;
     prompt: string;
@@ -28,9 +30,9 @@ export interface Task {
     pullRequests?: PullRequest[];
     callbackUrl?: string;
     /** Direct parent in chain (the task this one continues from). */
-    parentTaskId?: string;
+    parentTaskId?: TaskId;
     /** Root task ID of the chain (first task in the lineage). */
-    chainId?: string;
+    chainId?: ChainId;
     /** Current attempt number (1-indexed). Incremented on each retry. */
     attempt: number;
 }
@@ -42,6 +44,6 @@ export interface PersistedTask extends Task {
 export interface TaskCreateRequest {
     prompt: string;
     /** Task ID to continue from (inherits branch and chain). */
-    continueTaskId?: string;
+    continueTaskId?: TaskId;
     callbackUrl?: string;
 }

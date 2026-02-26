@@ -13,7 +13,7 @@ import {
     UnauthorizedError,
     asyncRoute
 } from "./errors.js";
-import type { ProjectId, TaskStatus } from "./types.js";
+import type { ChainId, ProjectId, TaskId, TaskStatus } from "./types.js";
 import { Config } from "./config/config.js";
 
 const TaskCreateSchema = z.object({
@@ -105,7 +105,10 @@ export function createServer(
             }
             const task = await taskManager.startTask(
                 getProjectId(res),
-                parsed.data
+                {
+                    ...parsed.data,
+                    continueTaskId: parsed.data.continueTaskId as TaskId | undefined
+                }
             );
             res.status(200).json({
                 taskId: task.taskId,
@@ -130,7 +133,7 @@ export function createServer(
                       : [parsed.data.status]
               )
             : null;
-        const { chainId } = parsed.data;
+        const chainId = parsed.data.chainId as ChainId | undefined;
         const tasks = taskManager
             .listTasks(getProjectId(res), chainId ? { chainId } : undefined)
             .filter((task) => !statusFilter || statusFilter.has(task.status))
@@ -152,7 +155,7 @@ export function createServer(
 
     // GET /task/:taskId - Get specific task status
     app.get("/task/:taskId", (req, res) => {
-        const task = taskManager.getTask(getProjectId(res), req.params.taskId);
+        const task = taskManager.getTask(getProjectId(res), req.params.taskId as TaskId);
         if (!task) throw new NotFoundError("Task not found");
         res.json({
             taskId: task.taskId,
@@ -180,11 +183,12 @@ export function createServer(
 
     // POST /task/:taskId/cancel - Cancel a queued, running, or retrying task
     app.post("/task/:taskId/cancel", (req, res) => {
-        const task = taskManager.getTask(getProjectId(res), req.params.taskId);
+        const taskId = req.params.taskId as TaskId;
+        const task = taskManager.getTask(getProjectId(res), taskId);
         if (!task) throw new NotFoundError("Task not found");
         const cancelled = taskManager.cancelTask(
             getProjectId(res),
-            req.params.taskId
+            taskId
         );
         res.json({
             taskId: cancelled.taskId,
@@ -198,11 +202,12 @@ export function createServer(
         "/task/:taskId/retry",
         asyncRoute(async (req, res) => {
             const projectId = res.locals.projectId as ProjectId;
-            const task = taskManager.getTask(projectId, req.params.taskId);
+            const taskId = req.params.taskId as TaskId;
+            const task = taskManager.getTask(projectId, taskId);
             if (!task) throw new NotFoundError("Task not found");
             const retried = await taskManager.retryTask(
                 projectId,
-                req.params.taskId
+                taskId
             );
             res.json({
                 taskId: retried.taskId,
@@ -215,9 +220,10 @@ export function createServer(
     // GET /task/:taskId/log - Get specific task output log
     app.get("/task/:taskId/log", (req, res) => {
         const projectId = res.locals.projectId as ProjectId;
-        const task = taskManager.getTask(projectId, req.params.taskId);
+        const taskId = req.params.taskId as TaskId;
+        const task = taskManager.getTask(projectId, taskId);
         if (!task) throw new NotFoundError("Task not found");
-        const fullOutput = taskManager.getOutput(projectId, req.params.taskId);
+        const fullOutput = taskManager.getOutput(projectId, taskId);
         const truncated = fullOutput.length > MAX_LOG_SIZE;
         res.json({
             taskId: task.taskId,
