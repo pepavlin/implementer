@@ -2,74 +2,27 @@ import { join } from "node:path";
 import { nanoid } from "nanoid";
 import type { PersistedTask, Task, TaskCreateRequest } from "../types.js";
 import { GitManager } from "../git-manager.js";
-import { Executor, extractLastAssistantMessage } from "../executor.js";
-import { WorkspacePool, chownRecursive } from "../workspace-pool.js";
+import { Executor } from "../executor.js";
+import { WorkspacePool } from "../workspace-pool.js";
 import { TaskStore } from "../task-store.js";
 import { TokenManager } from "../auth.js";
 import { UsageLimiter } from "../usage-limiter.js";
-import { ProjectConfig } from "../config/config-types.js";
 import { Config } from "../config/config.js";
+import { ProjectState, TaskEntry } from "./types.js";
+import {
+    TaskActiveError,
+    TaskCancelError,
+    TaskEditError
+} from "./errors.js";
+import { fireWebhook } from "./utils.js";
+import {
+    TaskRunnerContext,
+    executeTask,
+    scheduleRetry,
+    prepareAndRunTask
+} from "./task-runner.js";
 
-function buildSystemInstructions(
-    repos: { name: string }[],
-    protectedPaths?: string[]
-): string {
-    const repoList = repos.map((r) => r.name).join(", ");
-    const protectedRule =
-        protectedPaths && protectedPaths.length > 0
-            ? `\n- The following paths are PROTECTED and must NEVER be modified, created, or deleted: ${protectedPaths.join(", ")}. Do not make any changes to files matching these patterns under any circumstances.`
-            : "";
-    return `
-
-IMPORTANT WORKSPACE RULES:
-- Your workspace contains the following git repositories: ${repoList}. Always work INSIDE the repository directory (e.g. cd ${repos[0]?.name ?? "repo"} first). Do NOT create new git repositories or run git init.
-- After making all changes, you MUST commit them using git. Stage your changes with "git add" and commit with "git commit". Write clear and descriptive commit messages using conventional commits format (e.g. "feat: add animated hero section with cat image", "fix: resolve navigation hover styles"). Each commit should be a logical unit of work with a message that explains what was done and why. Do NOT push — only commit.
-- When you need to visually inspect a web application, ALWAYS start the dev server locally first (e.g. npm start, npm run dev) and use Playwright on the local URL (http://localhost:...). NEVER screenshot external/production URLs — you must test against the local code in your workspace so your changes are reflected.${protectedRule}
-- At the very end of your response, write a concise 2-3 sentence summary of what you implemented or changed. Do not repeat the full details — just the key outcome.`;
-}
-
-interface ProjectState {
-    config: ProjectConfig;
-    pool: WorkspacePool;
-    tokenManager: TokenManager;
-    usageLimiter: UsageLimiter | null;
-}
-
-interface TaskEntry {
-    task: Task;
-    executor: Executor | null;
-    workspaceId: number | null;
-    /** Branch to check out when this task is dequeued (used for retried tasks). */
-    checkoutBranch?: string;
-    /** True when this task was just resumed after a server restart. Causes the first post-restart
-     *  failure to retry immediately (delay=0) instead of waiting the full errorRetry.delaySeconds. */
-    resumedFromRestart?: boolean;
-    /** True when cancelTask() was called on a running task. Prevents executeTask from overwriting cancelled status. */
-    cancelled?: boolean;
-    /** setTimeout handle for scheduled retries — cleared on cancelTask to abort pending retry. */
-    retryTimeoutId?: ReturnType<typeof setTimeout>;
-}
-
-export class TaskActiveError extends Error {
-    constructor(status: string) {
-        super(`Cannot retry task with status: ${status}`);
-        this.name = "TaskActiveError";
-    }
-}
-
-export class TaskCancelError extends Error {
-    constructor(status: string) {
-        super(`Cannot cancel task with status: ${status}`);
-        this.name = "TaskCancelError";
-    }
-}
-
-export class TaskEditError extends Error {
-    constructor(message: string) {
-        super(message);
-        this.name = "TaskEditError";
-    }
-}
+export { TaskActiveError, TaskCancelError, TaskEditError };
 
 export class TaskManager {
     private serverWorkspaceDir: string;
@@ -126,6 +79,25 @@ export class TaskManager {
                 `Docker bind mode: mapping ${config.server.workspaceDir} → ${process.env.WORKSPACE_HOST_DIR} for sandbox mounts`
             );
         }
+    }
+
+    /** Build a context object exposing the internal state and callbacks needed by task-runner functions. */
+    private get ctx(): TaskRunnerContext {
+        return {
+            tasks: this.tasks,
+            queues: this.queues,
+            gitManager: this.gitManager,
+            store: this.store,
+            serverWorkspaceDir: this.serverWorkspaceDir,
+            isPrActive: (pid, pr) => this.isPrActive(pid, pr),
+            markPrActive: (pid, pr) => this.markPrActive(pid, pr),
+            unmarkPrActive: (pid, pr) => this.unmarkPrActive(pid, pr),
+            shouldQueue: (pid, s) => this.shouldQueue(pid, s),
+            enqueue: (pid, tid) => this.enqueue(pid, tid),
+            tryDequeue: (pid, s) => this.tryDequeue(pid, s),
+            scheduleRetry: (task, state, delay) =>
+                this.scheduleRetry(task, state, delay)
+        };
     }
 
     /**
@@ -256,10 +228,11 @@ export class TaskManager {
                 entry.resumedFromRestart = true;
 
                 // Fire in background — resume by checking out the existing branch
-                this.executeTask(
+                executeTask(
                     entry.task,
                     workspace,
                     state,
+                    this.ctx,
                     entry.task.branch ?? undefined
                 ).catch((err) => {
                     console.error(
@@ -282,69 +255,6 @@ export class TaskManager {
                 this.store.save(persistedTask);
             }
         }
-    }
-
-    /**
-     * Compute the Docker -v mount and -w workdir for a sandbox container.
-     *
-     * Three modes:
-     * - Volume mode (WORKSPACE_VOLUME set): mount named volume, workdir = subpath inside it
-     * - Bind mount mode (WORKSPACE_HOST_DIR set): bind mount host path
-     * - Native mode (neither set): bind mount local path directly
-     */
-    private getDockerMount(workspaceDir: string): {
-        volumeMount: string;
-        workdir: string;
-    } {
-        const volume = process.env.WORKSPACE_VOLUME;
-        if (volume) {
-            const relativePath = workspaceDir.replace(
-                this.serverWorkspaceDir,
-                ""
-            );
-            return {
-                volumeMount: `${volume}:/workspace`,
-                workdir: `/workspace${relativePath}`
-            };
-        }
-
-        const hostDir = process.env.WORKSPACE_HOST_DIR;
-        if (hostDir) {
-            const hostPath = workspaceDir.replace(
-                this.serverWorkspaceDir,
-                hostDir
-            );
-            return {
-                volumeMount: `${hostPath}:/workspace`,
-                workdir: "/workspace"
-            };
-        }
-
-        return {
-            volumeMount: `${workspaceDir}:/workspace`,
-            workdir: "/workspace"
-        };
-    }
-
-    /**
-     * Build a PR body from Claude's last message and commit logs.
-     */
-    private buildPrBody(
-        assistantMessage: string,
-        commitLogs: Map<string, string>
-    ): string {
-        const parts: string[] = [];
-
-        if (assistantMessage) {
-            parts.push(`## Summary\n\n${assistantMessage}`);
-        }
-
-        if (commitLogs.size > 0) {
-            const commitLines = Array.from(commitLogs.values()).join("\n");
-            parts.push(`## Commits\n\n${commitLines}`);
-        }
-
-        return parts.join("\n\n") || "No summary available.";
     }
 
     getTask(projectId: string, taskId: string): Task | undefined {
@@ -469,10 +379,11 @@ export class TaskManager {
             .then((workspace) => {
                 entry.workspaceId = workspace.id;
                 this.store.save({ ...task, workspaceId: workspace.id });
-                return this.executeTask(
+                return executeTask(
                     task,
                     workspace,
                     state,
+                    this.ctx,
                     entry.checkoutBranch
                 );
             })
@@ -487,139 +398,9 @@ export class TaskManager {
                     this.unmarkPrActive(projectId, task.pullRequestNumber);
                 }
                 if (task.callbackUrl) {
-                    this.fireWebhook(
-                        task.taskId,
-                        task.status,
-                        task.callbackUrl
-                    );
+                    fireWebhook(task.taskId, task.status, task.callbackUrl);
                 }
             });
-    }
-
-    private scheduleRetry(
-        task: Task,
-        state: ProjectState,
-        delayOverrideSeconds?: number
-    ): void {
-        const retryConfig = state.config.errorRetry!;
-        const delaySeconds = delayOverrideSeconds ?? retryConfig.delaySeconds;
-        task.attempt += 1;
-        task.status = "retrying";
-        task.completedAt = null;
-
-        const entry = this.tasks.get(task.taskId);
-        if (entry) {
-            this.store.save({ ...task, workspaceId: entry.workspaceId });
-        }
-
-        console.log(
-            `[${task.taskId}] Retrying in ${delaySeconds}s (attempt ${task.attempt}/${retryConfig.maxAttempts})`
-        );
-
-        const timeoutId = setTimeout(async () => {
-            const entryForTimer = this.tasks.get(task.taskId);
-            if (entryForTimer) entryForTimer.retryTimeoutId = undefined;
-            // If PR is active (another task for the same PR is running), queue and wait
-            if (
-                task.pullRequestNumber !== undefined &&
-                this.isPrActive(task.projectId, task.pullRequestNumber)
-            ) {
-                task.status = "queued";
-                this.enqueue(task.projectId, task.taskId);
-                const entry = this.tasks.get(task.taskId);
-                if (entry)
-                    this.store.save({
-                        ...task,
-                        workspaceId: entry.workspaceId
-                    });
-                console.log(
-                    `[${task.taskId}] Retry queued — PR #${task.pullRequestNumber} is already active`
-                );
-                return;
-            }
-
-            if (this.shouldQueue(task.projectId, state)) {
-                // No capacity right now — put in queue and wait
-                task.status = "queued";
-                this.enqueue(task.projectId, task.taskId);
-                const entry = this.tasks.get(task.taskId);
-                if (entry)
-                    this.store.save({
-                        ...task,
-                        workspaceId: entry.workspaceId
-                    });
-                console.log(`[${task.taskId}] Retry queued (no capacity)`);
-                return;
-            }
-
-            // Mark PR as active before running
-            if (task.pullRequestNumber !== undefined) {
-                this.markPrActive(task.projectId, task.pullRequestNumber);
-            }
-
-            task.status = "running";
-            task.error = undefined;
-
-            let workspace: { id: number; dir: string };
-            try {
-                workspace = await state.pool.acquire(
-                    state.config.repositories,
-                    state.config.auth?.githubToken
-                );
-            } catch (err) {
-                // Pool full despite check — queue it; unmark PR first
-                if (task.pullRequestNumber !== undefined) {
-                    this.unmarkPrActive(task.projectId, task.pullRequestNumber);
-                }
-                task.status = "queued";
-                this.enqueue(task.projectId, task.taskId);
-                const entry = this.tasks.get(task.taskId);
-                if (entry)
-                    this.store.save({
-                        ...task,
-                        workspaceId: entry.workspaceId
-                    });
-                console.log(`[${task.taskId}] Retry queued after acquire race`);
-                return;
-            }
-
-            const entry = this.tasks.get(task.taskId);
-            if (entry) {
-                entry.workspaceId = workspace.id;
-                entry.executor = new Executor(
-                    state.config.claudeCode,
-                    state.tokenManager
-                );
-            }
-            this.store.save({ ...task, workspaceId: workspace.id });
-
-            // Retry on the same branch — Claude can see previous partial work
-            this.executeTask(
-                task,
-                workspace,
-                state,
-                task.branch ?? undefined
-            ).catch((err) => {
-                console.error(`[${task.taskId}] Retry execution failed:`, err);
-            });
-        }, delaySeconds * 1000);
-
-        // Store timeout ID so it can be cancelled
-        const entryForTimeout = this.tasks.get(task.taskId);
-        if (entryForTimeout) entryForTimeout.retryTimeoutId = timeoutId;
-    }
-
-    private fireWebhook(taskId: string, status: string, url: string): void {
-        fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ taskId, status })
-        }).catch((err) => {
-            console.error(
-                `[${taskId}] Webhook POST to ${url} failed:`,
-                err instanceof Error ? err.message : String(err)
-            );
-        });
     }
 
     /**
@@ -658,151 +439,18 @@ export class TaskManager {
         this.store.save({ ...task, workspaceId: null });
 
         // Slug generation and workspace acquisition run in the background
-        this.prepareAndRunTask(task, state).catch((err) => {
+        prepareAndRunTask(task, state, this.ctx).catch((err) => {
             console.error(`[${taskId}] Failed to initialize task:`, err);
             task.status = "failed";
             task.error = err instanceof Error ? err.message : String(err);
             task.completedAt = new Date().toISOString();
             this.store.save({ ...task, workspaceId: null });
             if (task.callbackUrl) {
-                this.fireWebhook(taskId, task.status, task.callbackUrl);
+                fireWebhook(taskId, task.status, task.callbackUrl);
             }
         });
 
         return task;
-    }
-
-    private async prepareAndRunTask(
-        task: Task,
-        state: ProjectState
-    ): Promise<void> {
-        const { taskId, projectId } = task;
-
-        // Resolve branch and title based on task type
-        if (task.pullRequestNumber !== undefined && !task.branch) {
-            // PR task: fetch the PR's head branch from GitHub
-            console.log(
-                `[${taskId}] Fetching branch for PR #${task.pullRequestNumber}...`
-            );
-            const primaryRepo = state.config.repositories[0];
-            const prBranch = await this.gitManager.getPullRequestBranch(
-                task.pullRequestNumber,
-                primaryRepo,
-                this.serverWorkspaceDir,
-                state.config.auth?.githubToken
-            );
-            task.branch = prBranch;
-            if (!task.title) {
-                const metaExecutor = new Executor(
-                    state.config.claudeCode,
-                    state.tokenManager
-                );
-                const { title } = await metaExecutor.generateTaskMetadata(
-                    task.prompt,
-                    taskId
-                );
-                if (title) task.title = title;
-            }
-            console.log(
-                `[${taskId}] Branch: ${task.branch}, Title: ${task.title}`
-            );
-            this.store.save({ ...task, workspaceId: null });
-        } else if (!task.branch) {
-            // Normal task: generate branch slug and title
-            console.log(`[${taskId}] Generating branch name and title...`);
-            const metaExecutor = new Executor(
-                state.config.claudeCode,
-                state.tokenManager
-            );
-            const { slug, title } = await metaExecutor.generateTaskMetadata(
-                task.prompt,
-                taskId
-            );
-            task.branch = `impl/${slug}-${taskId}`;
-            if (title) task.title = title;
-            console.log(
-                `[${taskId}] Branch: ${task.branch}, Title: ${task.title}`
-            );
-            this.store.save({ ...task, workspaceId: null });
-        } else if (!task.title) {
-            // Branch already set (e.g., after restart), but title not yet generated
-            console.log(`[${taskId}] Generating title...`);
-            const metaExecutor = new Executor(
-                state.config.claudeCode,
-                state.tokenManager
-            );
-            const { title } = await metaExecutor.generateTaskMetadata(
-                task.prompt,
-                taskId
-            );
-            if (title) task.title = title;
-            console.log(`[${taskId}] Title: ${task.title}`);
-            this.store.save({ ...task, workspaceId: null });
-        }
-
-        // If the PR is already active (another task for the same PR is running), queue and wait
-        if (
-            task.pullRequestNumber !== undefined &&
-            this.isPrActive(projectId, task.pullRequestNumber)
-        ) {
-            this.enqueue(projectId, taskId);
-            const queueLen = this.queues.get(projectId)!.length;
-            console.log(
-                `[${taskId}] Queued — PR #${task.pullRequestNumber} is already active (position ${queueLen} for ${projectId})`
-            );
-            return;
-        }
-
-        // Queue if at capacity — task will be picked up by tryDequeue when a slot frees
-        if (this.shouldQueue(projectId, state)) {
-            this.enqueue(projectId, taskId);
-            const queueLen = this.queues.get(projectId)!.length;
-            console.log(
-                `[${taskId}] Queued (position ${queueLen} for ${projectId})`
-            );
-            return;
-        }
-
-        // Mark PR as active immediately before any async work
-        if (task.pullRequestNumber !== undefined) {
-            this.markPrActive(projectId, task.pullRequestNumber);
-        }
-
-        // Acquire workspace and run immediately
-        const executor = new Executor(
-            state.config.claudeCode,
-            state.tokenManager
-        );
-        const entry = this.tasks.get(taskId)!;
-        entry.executor = executor;
-        task.status = "running";
-
-        let workspace: { id: number; dir: string };
-        try {
-            workspace = await state.pool.acquire(
-                state.config.repositories,
-                state.config.auth?.githubToken
-            );
-        } catch (_err) {
-            // Race condition: another task grabbed the last slot — queue and wait.
-            // Unmark PR so tryDequeue can re-pick it up correctly.
-            if (task.pullRequestNumber !== undefined) {
-                this.unmarkPrActive(projectId, task.pullRequestNumber);
-            }
-            task.status = "queued";
-            entry.executor = null;
-            this.store.save({ ...task, workspaceId: null });
-            this.enqueue(projectId, taskId);
-            console.log(`[${taskId}] Queued after acquire race`);
-            return;
-        }
-
-        entry.workspaceId = workspace.id;
-        this.store.save({ ...task, workspaceId: workspace.id });
-
-        this.executeTask(task, workspace, state).catch((err) => {
-            console.error(`Task ${taskId} failed unexpectedly:`, err);
-        });
     }
 
     /**
@@ -924,414 +572,13 @@ export class TaskManager {
         entry.workspaceId = workspace.id;
         this.store.save({ ...task, workspaceId: workspace.id });
 
-        this.executeTask(task, workspace, state, checkoutBranch).catch(
+        executeTask(task, workspace, state, this.ctx, checkoutBranch).catch(
             (err) => {
                 console.error(`Task ${taskId} retry failed unexpectedly:`, err);
             }
         );
 
         return task;
-    }
-
-    private async executeTask(
-        task: Task,
-        workspace: { id: number; dir: string },
-        state: ProjectState,
-        /** Override which branch to checkout. Used for resume/retry. For PR tasks defaults to task.branch. */
-        checkoutBranch?: string
-    ): Promise<void> {
-        const repos = state.config.repositories;
-        const entry = this.tasks.get(task.taskId)!;
-        const executor = entry.executor!;
-        const branchName = task.branch!;
-        const githubToken = state.config.auth?.githubToken;
-        // PR tasks always check out their existing branch; normal tasks create a new one.
-        const fromBranch =
-            checkoutBranch ??
-            (task.pullRequestNumber !== undefined ? task.branch! : undefined);
-
-        try {
-            // Step 1: Prepare branch in all repos
-            if (fromBranch) {
-                console.log(
-                    `[${task.taskId}] Checking out continuation branch: ${fromBranch}`
-                );
-                await this.gitManager.checkoutBranchAll(
-                    workspace.dir,
-                    repos,
-                    fromBranch,
-                    githubToken
-                );
-            } else {
-                console.log(
-                    `[${task.taskId}] Creating new branch: ${branchName}`
-                );
-                await this.gitManager.prepareNewBranchAll(
-                    workspace.dir,
-                    repos,
-                    branchName,
-                    githubToken
-                );
-            }
-
-            // Step 2: Push branch to remote immediately so it's visible in GitHub
-            console.log(`[${task.taskId}] Pushing branch to remote...`);
-            await this.gitManager.pushBranchAll(
-                workspace.dir,
-                repos,
-                branchName,
-                false,
-                githubToken
-            );
-
-            // Rechown after branch creation (new refs are owned by root)
-            await chownRecursive(workspace.dir);
-
-            // Step 3: Save pre-run HEAD hashes to detect new commits later
-            const preRunHeads = await this.gitManager.getHeadAll(
-                workspace.dir,
-                repos
-            );
-
-            // Step 4: Run Claude Code in workspace dir
-            const { volumeMount, workdir } = this.getDockerMount(workspace.dir);
-            console.log(
-                `[${task.taskId}] Running Claude Code in workspace ${workspace.id}...`
-            );
-            const systemPrompt = state.config.claudeCode.systemPrompt ?? "";
-            const fullPrompt =
-                task.prompt +
-                buildSystemInstructions(repos, state.config.protectedPaths) +
-                (systemPrompt ? `\n\n${systemPrompt}` : "");
-            const result = await executor.run(
-                fullPrompt,
-                volumeMount,
-                workdir,
-                task.taskId
-            );
-
-            task.output = result.output;
-
-            // Step 5: Check for uncommitted changes and ask Claude to commit if needed
-            const hasUncommitted = await this.gitManager.hasUncommittedChanges(
-                workspace.dir,
-                repos
-            );
-            if (hasUncommitted) {
-                console.log(
-                    `[${task.taskId}] Uncommitted changes detected, asking Claude to commit...`
-                );
-                const commitPrompt = `You have uncommitted changes in the workspace. Stage all changes with "git add" and commit them with a clear conventional commit message. Do NOT push.`;
-                await executor.run(
-                    commitPrompt,
-                    volumeMount,
-                    workdir,
-                    task.taskId
-                );
-            }
-
-            // Step 6: Revert any changes to protected paths before creating the PR.
-            // This handles both committed and uncommitted changes — enforces the hard boundary
-            // regardless of what Claude did. Runs even if no changes were made (no-op then).
-            const protectedPaths = state.config.protectedPaths ?? [];
-            if (protectedPaths.length > 0) {
-                console.log(
-                    `[${task.taskId}] Reverting protected path changes...`
-                );
-                await this.gitManager.revertProtectedPathsAll(
-                    workspace.dir,
-                    repos,
-                    protectedPaths
-                );
-            }
-
-            // Step 7: Ensure our branch points to HEAD (handles Claude switching branches)
-            const hasCommits = await this.gitManager.ensureBranchAtHeadAll(
-                workspace.dir,
-                repos,
-                branchName,
-                preRunHeads
-            );
-
-            // Step 8: Rebase on latest default branch to avoid conflicts in PR
-            if (hasCommits) {
-                console.log(
-                    `[${task.taskId}] Rebasing on latest default branch...`
-                );
-                const { conflicted } = await this.gitManager.rebaseOnDefaultAll(
-                    workspace.dir,
-                    repos,
-                    branchName,
-                    githubToken
-                );
-
-                if (conflicted.length > 0) {
-                    // Rechown after fetch/rebase so sandbox container (UID 1000) can write git objects
-                    await chownRecursive(workspace.dir);
-
-                    const repoInstructions = conflicted
-                        .map(
-                            (r) =>
-                                `- cd ${r.name} && git rebase origin/${r.defaultBranch} — resolve all conflicts, then git add the resolved files and git rebase --continue. Repeat until rebase completes.`
-                        )
-                        .join("\n");
-                    console.log(
-                        `[${task.taskId}] Rebase conflicts in ${conflicted.map((r) => r.name).join(", ")} — asking Claude to resolve...`
-                    );
-                    const rebasePrompt = `Some repositories need rebasing with conflict resolution:\n${repoInstructions}\nResolve every conflict by keeping the intent of your changes while incorporating the upstream updates. Do NOT push.`;
-                    await executor.run(
-                        rebasePrompt,
-                        volumeMount,
-                        workdir,
-                        task.taskId
-                    );
-                }
-            }
-
-            // If the task was cancelled while running, respect that status
-            if (this.tasks.get(task.taskId)?.cancelled) {
-                task.status = "cancelled";
-                console.log(`[${task.taskId}] Task was cancelled.`);
-                return;
-            }
-
-            if (result.exitCode === 0) {
-                if (hasCommits) {
-                    // Success with commits: force-push (rebase rewrites history) and create ready PR
-                    console.log(`[${task.taskId}] Pushing branches...`);
-                    await this.gitManager.pushBranchAll(
-                        workspace.dir,
-                        repos,
-                        branchName,
-                        true,
-                        githubToken
-                    );
-
-                    // Build PR body from Claude's summary + commit log
-                    const assistantMessage = extractLastAssistantMessage(
-                        task.output
-                    );
-                    const commitLogs = await this.gitManager.getCommitLogAll(
-                        workspace.dir,
-                        repos,
-                        branchName,
-                        preRunHeads
-                    );
-                    const prBody = this.buildPrBody(
-                        assistantMessage,
-                        commitLogs
-                    );
-
-                    console.log(`[${task.taskId}] Creating pull request(s)...`);
-                    const prTitle = task.prompt.split("\n")[0].slice(0, 120);
-                    try {
-                        const pullRequests =
-                            await this.gitManager.createPullRequestAll(
-                                workspace.dir,
-                                repos,
-                                branchName,
-                                prTitle,
-                                prBody,
-                                false,
-                                githubToken
-                            );
-                        if (pullRequests.length > 0) {
-                            task.pullRequests = pullRequests;
-                            console.log(
-                                `[${task.taskId}] Created ${pullRequests.length} PR(s): ${pullRequests.map((pr) => pr.url).join(", ")}`
-                            );
-
-                            // Post original task prompt as a comment
-                            const taskComment = `## Task\n\n${task.prompt}`;
-                            await this.gitManager.commentOnPullRequestAll(
-                                workspace.dir,
-                                pullRequests,
-                                taskComment,
-                                githubToken
-                            );
-                        }
-                    } catch (prErr) {
-                        console.error(
-                            `[${task.taskId}] PR creation failed:`,
-                            prErr instanceof Error
-                                ? prErr.message
-                                : String(prErr)
-                        );
-                    }
-
-                    task.status = "completed";
-                    console.log(
-                        `[${task.taskId}] Completed and pushed successfully.`
-                    );
-                } else {
-                    // Success with no commits
-                    if (task.pullRequestNumber !== undefined) {
-                        // PR task: keep the branch — the PR already exists on GitHub
-                        console.log(
-                            `[${task.taskId}] No new commits on PR branch — leaving branch intact.`
-                        );
-                    } else {
-                        // Normal task: delete remote branch and clear branch ref
-                        console.log(
-                            `[${task.taskId}] No new commits — cleaning up remote branch.`
-                        );
-                        await this.gitManager.deleteRemoteBranchAll(
-                            workspace.dir,
-                            repos,
-                            branchName,
-                            githubToken
-                        );
-                        task.branch = null;
-                    }
-                    task.status = "completed";
-                }
-            } else {
-                if (hasCommits) {
-                    // Failure with commits: force-push partial work and create draft PR
-                    console.log(
-                        `[${task.taskId}] Failed but has commits — pushing partial work...`
-                    );
-                    await this.gitManager.pushBranchAll(
-                        workspace.dir,
-                        repos,
-                        branchName,
-                        true,
-                        githubToken
-                    );
-
-                    // Build PR body from Claude's summary + commit log
-                    const assistantMessage = extractLastAssistantMessage(
-                        task.output
-                    );
-                    const commitLogs = await this.gitManager.getCommitLogAll(
-                        workspace.dir,
-                        repos,
-                        branchName,
-                        preRunHeads
-                    );
-                    const prBody = this.buildPrBody(
-                        assistantMessage,
-                        commitLogs
-                    );
-
-                    console.log(
-                        `[${task.taskId}] Creating draft pull request(s)...`
-                    );
-                    const prTitle = task.prompt.split("\n")[0].slice(0, 120);
-                    try {
-                        const pullRequests =
-                            await this.gitManager.createPullRequestAll(
-                                workspace.dir,
-                                repos,
-                                branchName,
-                                prTitle,
-                                prBody,
-                                true,
-                                githubToken
-                            );
-                        if (pullRequests.length > 0) {
-                            task.pullRequests = pullRequests;
-                            console.log(
-                                `[${task.taskId}] Created ${pullRequests.length} draft PR(s): ${pullRequests.map((pr) => pr.url).join(", ")}`
-                            );
-
-                            // Post original task prompt as a comment
-                            const taskComment = `## Task\n\n${task.prompt}`;
-                            await this.gitManager.commentOnPullRequestAll(
-                                workspace.dir,
-                                pullRequests,
-                                taskComment,
-                                githubToken
-                            );
-                        }
-                    } catch (prErr) {
-                        console.error(
-                            `[${task.taskId}] Draft PR creation failed:`,
-                            prErr instanceof Error
-                                ? prErr.message
-                                : String(prErr)
-                        );
-                    }
-                } else {
-                    // Failure with no commits
-                    if (task.pullRequestNumber !== undefined) {
-                        // PR task: keep the branch — the PR already exists on GitHub
-                        console.log(
-                            `[${task.taskId}] Failed with no commits on PR branch — leaving branch intact.`
-                        );
-                    } else {
-                        // Normal task: delete remote branch
-                        console.log(
-                            `[${task.taskId}] Failed with no commits — cleaning up remote branch.`
-                        );
-                        await this.gitManager.deleteRemoteBranchAll(
-                            workspace.dir,
-                            repos,
-                            branchName,
-                            githubToken
-                        );
-                        task.branch = null;
-                    }
-                }
-
-                task.status = "failed";
-                task.error = `Claude Code exited with code ${result.exitCode}`;
-                console.log(
-                    `[${task.taskId}] Failed with exit code ${result.exitCode}.`
-                );
-            }
-        } catch (err) {
-            // If cancelled, preserve the cancelled status (don't overwrite with failed)
-            if (!this.tasks.get(task.taskId)?.cancelled) {
-                task.status = "failed";
-                task.error = err instanceof Error ? err.message : String(err);
-                task.output = executor.getOutput();
-                console.error(`[${task.taskId}] Error:`, task.error);
-            } else {
-                console.log(
-                    `[${task.taskId}] Task was cancelled (caught during execution).`
-                );
-            }
-        } finally {
-            // Preserve completedAt if already set by cancelTask
-            if (!task.completedAt) {
-                task.completedAt = new Date().toISOString();
-            }
-            this.store.save({ ...task, workspaceId: workspace.id });
-            // Release PR lock so the next task for this PR can be dequeued
-            if (task.pullRequestNumber !== undefined) {
-                this.unmarkPrActive(task.projectId, task.pullRequestNumber);
-            }
-            state.pool.release(workspace.id);
-            // Start next queued task for this project if capacity is now available
-            this.tryDequeue(task.projectId, state);
-        }
-
-        // Schedule retry if task failed and retries are configured
-        // (runs after finally — workspace already released back to pool)
-        if (task.status === "failed") {
-            const retryConfig = state.config.errorRetry;
-            if (retryConfig && task.attempt < retryConfig.maxAttempts) {
-                // Tasks resumed after a server restart skip the normal retry delay on their
-                // first failure so they get back to work immediately rather than waiting the
-                // full delaySeconds. Subsequent retries still use the configured delay.
-                const entry = this.tasks.get(task.taskId);
-                const wasResumedFromRestart =
-                    entry?.resumedFromRestart ?? false;
-                if (entry) entry.resumedFromRestart = false;
-                this.scheduleRetry(
-                    task,
-                    state,
-                    wasResumedFromRestart ? 0 : undefined
-                );
-                return; // webhook will fire only on terminal failure
-            }
-        }
-
-        // Fire webhook on terminal completion (not retrying)
-        if (task.callbackUrl) {
-            this.fireWebhook(task.taskId, task.status, task.callbackUrl);
-        }
     }
 
     /**
@@ -1369,7 +616,6 @@ export class TaskManager {
                 const idx = queue.indexOf(taskId);
                 if (idx !== -1) queue.splice(idx, 1);
             }
-            // Release PR lock if it was held (queued tasks don't hold the PR lock, but check anyway)
             task.status = "cancelled";
             task.completedAt = new Date().toISOString();
             this.store.save({ ...task, workspaceId: entry.workspaceId });
@@ -1397,7 +643,7 @@ export class TaskManager {
         }
 
         if (task.callbackUrl) {
-            this.fireWebhook(taskId, task.status, task.callbackUrl);
+            fireWebhook(taskId, task.status, task.callbackUrl);
         }
 
         return task;
@@ -1438,5 +684,14 @@ export class TaskManager {
         console.log(`[${taskId}] Prompt updated`);
 
         return task;
+    }
+
+    /** Schedule a retry for a failed task. Thin wrapper used by tests and internal callers. */
+    scheduleRetry(
+        task: Task,
+        state: ProjectState,
+        delayOverrideSeconds?: number
+    ): void {
+        scheduleRetry(task, state, this.ctx, delayOverrideSeconds);
     }
 }

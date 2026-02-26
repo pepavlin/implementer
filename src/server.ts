@@ -12,7 +12,12 @@ import { UsageLimitError } from "./usage-limiter.js";
 import { extractLastAssistantMessage } from "./executor.js";
 import { openApiSpec } from "./openapi.js";
 import { registerDashboardRoutes } from "./dashboard.js";
-import { HttpError, NotFoundError, asyncRoute } from "./errors.js";
+import {
+    HttpError,
+    NotFoundError,
+    UnauthorizedError,
+    asyncRoute
+} from "./errors.js";
 import type { TaskStatus } from "./types.js";
 import { Config } from "./config/config.js";
 
@@ -72,8 +77,13 @@ export function createServer(
             return next();
 
         const token = req.headers.authorization?.replace("Bearer ", "") ?? "";
-        const project = config.getProjectIdByToken(token);
-        res.locals.projectId = project;
+        const projectId = config.getProjectIdByToken(token);
+        if (!projectId) {
+            throw new UnauthorizedError(
+                "Project not found for the provided API key"
+            );
+        }
+        res.locals.projectId = projectId;
         next();
     });
 
