@@ -493,8 +493,8 @@ export class TaskManager {
         );
 
         const timeoutId = setTimeout(async () => {
-            const entry = this.tasks.get(task.taskId);
-            if (entry) entry.retryTimeoutId = undefined;
+            const entryForTimer = this.tasks.get(task.taskId);
+            if (entryForTimer) entryForTimer.retryTimeoutId = undefined;
             // If PR is active (another task for the same PR is running), queue and wait
             if (task.pullRequestNumber !== undefined && this.isPrActive(task.projectId, task.pullRequestNumber)) {
                 task.status = "queued";

@@ -758,9 +758,9 @@ function dashboardHtml(hasPassword: boolean): string {
   </div>
 
   <script>
-    var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null;
+    var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null;
     function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-    function badge(s){var m={running:['b-running','Running'],queued:['b-queued','Queued'],retrying:['b-retrying','Retrying'],completed:['b-completed','Completed'],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
+    function badge(s){var m={running:['b-running','Running'],queued:['b-queued','Queued'],retrying:['b-retrying','Retrying'],completed:['b-completed','Completed'],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
     function dur(s){if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
     function fmtDate(d){try{return new Date(d).toLocaleString();}catch(e){return String(d);}}
     function setFilter(f){
@@ -829,17 +829,23 @@ function dashboardHtml(hasPassword: boolean): string {
     }
     function openTask(taskId,projectId){
       currentTaskId=taskId;
+      currentTaskData=null;
       document.getElementById('task-ttl').textContent='Task '+taskId;
       document.getElementById('task-badge').innerHTML='';
       document.getElementById('task-bd').innerHTML='<div class="muted" style="text-align:center;padding:32px">Loading\u2026</div>';
       document.getElementById('task-retry').style.display='none';
+      document.getElementById('task-cancel').style.display='none';
+      document.getElementById('task-edit').style.display='none';
       document.getElementById('task-overlay').style.display='flex';
       fetch('/dashboard/api/task/'+encodeURIComponent(taskId))
         .then(function(r){return r.json();})
         .then(function(t){
+          currentTaskData=t;
           document.getElementById('task-badge').innerHTML=badge(t.status);
           var active=['queued','running','retrying'];
           document.getElementById('task-retry').style.display=active.includes(t.status)?'none':'';
+          document.getElementById('task-cancel').style.display=active.includes(t.status)?'':'none';
+          document.getElementById('task-edit').style.display=t.status==='queued'?'':'none';
           var prsHtml='None';
           if(t.pullRequests&&t.pullRequests.length){
             prsHtml=t.pullRequests.map(function(pr){
@@ -866,6 +872,47 @@ function dashboardHtml(hasPassword: boolean): string {
     function closeTask(){
       document.getElementById('task-overlay').style.display='none';
       currentTaskId=null;
+      currentTaskData=null;
+    }
+    function cancelTask(){
+      if(!currentTaskId)return;
+      if(!confirm('Cancel task '+currentTaskId+'?'))return;
+      var btn=document.getElementById('task-cancel');
+      btn.disabled=true;
+      fetch('/dashboard/api/task/'+encodeURIComponent(currentTaskId)+'/cancel',{method:'POST',headers:{'Content-Type':'application/json'}})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          btn.disabled=false;
+          if(d.error){alert('Error: '+d.error);return;}
+          closeTask();
+        })
+        .catch(function(){btn.disabled=false;alert('Failed to cancel task');});
+    }
+    function openEditTask(){
+      if(!currentTaskData)return;
+      document.getElementById('et-prompt').value=currentTaskData.prompt;
+      document.getElementById('et-err').style.display='none';
+      document.getElementById('et-submit').disabled=false;
+      document.getElementById('et-overlay').style.display='flex';
+      setTimeout(function(){document.getElementById('et-prompt').focus();},50);
+    }
+    function closeEditTask(){document.getElementById('et-overlay').style.display='none';}
+    function submitEditTask(){
+      var prompt=document.getElementById('et-prompt').value.trim();
+      var errEl=document.getElementById('et-err');
+      errEl.style.display='none';
+      if(!prompt){errEl.textContent='Prompt is required.';errEl.style.display='block';return;}
+      var btn=document.getElementById('et-submit');
+      btn.disabled=true;
+      fetch('/dashboard/api/task/'+encodeURIComponent(currentTaskId),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:prompt})})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          btn.disabled=false;
+          if(d.error){errEl.textContent='Error: '+d.error;errEl.style.display='block';return;}
+          closeEditTask();
+          openTask(currentTaskId);
+        })
+        .catch(function(){btn.disabled=false;errEl.textContent='Failed to update task.';errEl.style.display='block';});
     }
     function retryTask(){
       if(!currentTaskId)return;
@@ -929,7 +976,8 @@ function dashboardHtml(hasPassword: boolean): string {
     }
     document.addEventListener('keydown',function(e){
       if(e.key==='Escape'){
-        if(document.getElementById('task-overlay').style.display!=='none')closeTask();
+        if(document.getElementById('et-overlay').style.display!=='none')closeEditTask();
+        else if(document.getElementById('task-overlay').style.display!=='none')closeTask();
         else if(document.getElementById('nt-overlay').style.display!=='none')closeNewTask();
       }
     });
