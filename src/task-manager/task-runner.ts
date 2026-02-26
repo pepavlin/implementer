@@ -1,41 +1,25 @@
 import { Executor, extractLastAssistantMessage } from "../executor.js";
 import { chownRecursive } from "../workspace-pool.js";
-import type { ChainId, ProjectId, Task, TaskId } from "../types.js";
-import type { GitManager } from "../git-manager.js";
-import type { TaskStore } from "../task-store.js";
-import type { ProjectState, TaskEntry } from "./types.js";
+import type { Task } from "../types.js";
+import type { ProjectState } from "./types.js";
 import {
     buildSystemInstructions,
     buildPrBody,
     getDockerMount,
     fireWebhook
 } from "./utils.js";
-
-export interface TaskRunnerContext {
-    tasks: Map<TaskId, TaskEntry>;
-    queues: Map<ProjectId, TaskId[]>;
-    gitManager: GitManager;
-    store: TaskStore;
-    serverWorkspaceDir: string;
-    isChainActive(projectId: ProjectId, chainId: ChainId): boolean;
-    markChainActive(projectId: ProjectId, chainId: ChainId): void;
-    unmarkChainActive(projectId: ProjectId, chainId: ChainId): void;
-    shouldQueue(projectId: ProjectId, state: ProjectState): boolean;
-    enqueue(projectId: ProjectId, taskId: TaskId): void;
-    tryDequeue(projectId: ProjectId, state: ProjectState): void;
-    scheduleRetry(task: Task, state: ProjectState, delayOverrideSeconds?: number): void;
-}
+import type { TaskManager } from "./task-manager.js";
 
 export async function executeTask(
     task: Task,
     workspace: { id: number; dir: string },
     state: ProjectState,
-    ctx: TaskRunnerContext,
+    tm: TaskManager,
     /** Override which branch to checkout. Used for resume/retry. For chain tasks defaults to task.branch. */
     checkoutBranch?: string
 ): Promise<void> {
     const repos = state.config.repositories;
-    const entry = ctx.tasks.get(task.taskId)!;
+    const entry = tm.tasks.get(task.taskId)!;
     const executor = entry.executor!;
     const branchName = task.branch!;
     const githubToken = state.config.auth?.githubToken;
@@ -50,7 +34,7 @@ export async function executeTask(
             console.log(
                 `[${task.taskId}] Checking out continuation branch: ${fromBranch}`
             );
-            await ctx.gitManager.checkoutBranchAll(
+            await tm.gitManager.checkoutBranchAll(
                 workspace.dir,
                 repos,
                 fromBranch,
@@ -60,7 +44,7 @@ export async function executeTask(
             console.log(
                 `[${task.taskId}] Creating new branch: ${branchName}`
             );
-            await ctx.gitManager.prepareNewBranchAll(
+            await tm.gitManager.prepareNewBranchAll(
                 workspace.dir,
                 repos,
                 branchName,
@@ -70,7 +54,7 @@ export async function executeTask(
 
         // Step 2: Push branch to remote immediately so it's visible in GitHub
         console.log(`[${task.taskId}] Pushing branch to remote...`);
-        await ctx.gitManager.pushBranchAll(
+        await tm.gitManager.pushBranchAll(
             workspace.dir,
             repos,
             branchName,
@@ -82,7 +66,7 @@ export async function executeTask(
         await chownRecursive(workspace.dir);
 
         // Step 3: Save pre-run HEAD hashes to detect new commits later
-        const preRunHeads = await ctx.gitManager.getHeadAll(
+        const preRunHeads = await tm.gitManager.getHeadAll(
             workspace.dir,
             repos
         );
@@ -90,7 +74,7 @@ export async function executeTask(
         // Step 4: Run Claude Code in workspace dir
         const { volumeMount, workdir } = getDockerMount(
             workspace.dir,
-            ctx.serverWorkspaceDir
+            tm.serverWorkspaceDir
         );
         console.log(
             `[${task.taskId}] Running Claude Code in workspace ${workspace.id}...`
@@ -110,7 +94,7 @@ export async function executeTask(
         task.output = result.output;
 
         // Step 5: Check for uncommitted changes and ask Claude to commit if needed
-        const hasUncommitted = await ctx.gitManager.hasUncommittedChanges(
+        const hasUncommitted = await tm.gitManager.hasUncommittedChanges(
             workspace.dir,
             repos
         );
@@ -130,7 +114,7 @@ export async function executeTask(
             console.log(
                 `[${task.taskId}] Reverting protected path changes...`
             );
-            await ctx.gitManager.revertProtectedPathsAll(
+            await tm.gitManager.revertProtectedPathsAll(
                 workspace.dir,
                 repos,
                 protectedPaths
@@ -138,7 +122,7 @@ export async function executeTask(
         }
 
         // Step 7: Ensure our branch points to HEAD (handles Claude switching branches)
-        const hasCommits = await ctx.gitManager.ensureBranchAtHeadAll(
+        const hasCommits = await tm.gitManager.ensureBranchAtHeadAll(
             workspace.dir,
             repos,
             branchName,
@@ -150,7 +134,7 @@ export async function executeTask(
             console.log(
                 `[${task.taskId}] Rebasing on latest default branch...`
             );
-            const { conflicted } = await ctx.gitManager.rebaseOnDefaultAll(
+            const { conflicted } = await tm.gitManager.rebaseOnDefaultAll(
                 workspace.dir,
                 repos,
                 branchName,
@@ -181,7 +165,7 @@ export async function executeTask(
         }
 
         // If the task was cancelled while running, respect that status
-        if (ctx.tasks.get(task.taskId)?.cancelled) {
+        if (tm.tasks.get(task.taskId)?.cancelled) {
             task.status = "cancelled";
             console.log(`[${task.taskId}] Task was cancelled.`);
             return;
@@ -191,7 +175,7 @@ export async function executeTask(
             if (hasCommits) {
                 // Success with commits: force-push (rebase rewrites history) and create ready PR
                 console.log(`[${task.taskId}] Pushing branches...`);
-                await ctx.gitManager.pushBranchAll(
+                await tm.gitManager.pushBranchAll(
                     workspace.dir,
                     repos,
                     branchName,
@@ -203,7 +187,7 @@ export async function executeTask(
                 const assistantMessage = extractLastAssistantMessage(
                     task.output
                 );
-                const commitLogs = await ctx.gitManager.getCommitLogAll(
+                const commitLogs = await tm.gitManager.getCommitLogAll(
                     workspace.dir,
                     repos,
                     branchName,
@@ -215,7 +199,7 @@ export async function executeTask(
                 const prTitle = task.prompt.split("\n")[0].slice(0, 120);
                 try {
                     const pullRequests =
-                        await ctx.gitManager.createPullRequestAll(
+                        await tm.gitManager.createPullRequestAll(
                             workspace.dir,
                             repos,
                             branchName,
@@ -232,7 +216,7 @@ export async function executeTask(
 
                         // Post original task prompt as a comment
                         const taskComment = `## Task\n\n${task.prompt}`;
-                        await ctx.gitManager.commentOnPullRequestAll(
+                        await tm.gitManager.commentOnPullRequestAll(
                             workspace.dir,
                             pullRequests,
                             taskComment,
@@ -262,7 +246,7 @@ export async function executeTask(
                     console.log(
                         `[${task.taskId}] No new commits — cleaning up remote branch.`
                     );
-                    await ctx.gitManager.deleteRemoteBranchAll(
+                    await tm.gitManager.deleteRemoteBranchAll(
                         workspace.dir,
                         repos,
                         branchName,
@@ -278,7 +262,7 @@ export async function executeTask(
                 console.log(
                     `[${task.taskId}] Failed but has commits — pushing partial work...`
                 );
-                await ctx.gitManager.pushBranchAll(
+                await tm.gitManager.pushBranchAll(
                     workspace.dir,
                     repos,
                     branchName,
@@ -290,7 +274,7 @@ export async function executeTask(
                 const assistantMessage = extractLastAssistantMessage(
                     task.output
                 );
-                const commitLogs = await ctx.gitManager.getCommitLogAll(
+                const commitLogs = await tm.gitManager.getCommitLogAll(
                     workspace.dir,
                     repos,
                     branchName,
@@ -304,7 +288,7 @@ export async function executeTask(
                 const prTitle = task.prompt.split("\n")[0].slice(0, 120);
                 try {
                     const pullRequests =
-                        await ctx.gitManager.createPullRequestAll(
+                        await tm.gitManager.createPullRequestAll(
                             workspace.dir,
                             repos,
                             branchName,
@@ -321,7 +305,7 @@ export async function executeTask(
 
                         // Post original task prompt as a comment
                         const taskComment = `## Task\n\n${task.prompt}`;
-                        await ctx.gitManager.commentOnPullRequestAll(
+                        await tm.gitManager.commentOnPullRequestAll(
                             workspace.dir,
                             pullRequests,
                             taskComment,
@@ -346,7 +330,7 @@ export async function executeTask(
                     console.log(
                         `[${task.taskId}] Failed with no commits — cleaning up remote branch.`
                     );
-                    await ctx.gitManager.deleteRemoteBranchAll(
+                    await tm.gitManager.deleteRemoteBranchAll(
                         workspace.dir,
                         repos,
                         branchName,
@@ -364,7 +348,7 @@ export async function executeTask(
         }
     } catch (err) {
         // If cancelled, preserve the cancelled status (don't overwrite with failed)
-        if (!ctx.tasks.get(task.taskId)?.cancelled) {
+        if (!tm.tasks.get(task.taskId)?.cancelled) {
             task.status = "failed";
             task.error = err instanceof Error ? err.message : String(err);
             task.output = executor.getOutput();
@@ -379,14 +363,14 @@ export async function executeTask(
         if (!task.completedAt) {
             task.completedAt = new Date().toISOString();
         }
-        ctx.store.save({ ...task, workspaceId: workspace.id });
+        tm.store.save({ ...task, workspaceId: workspace.id });
         // Release chain lock so the next task in the chain can be dequeued
         if (task.chainId !== undefined) {
-            ctx.unmarkChainActive(task.projectId, task.chainId);
+            tm.unmarkChainActive(task.projectId, task.chainId);
         }
         state.pool.release(workspace.id);
         // Start next queued task for this project if capacity is now available
-        ctx.tryDequeue(task.projectId, state);
+        tm.tryDequeue(task.projectId, state);
     }
 
     // Schedule retry if task failed and retries are configured
@@ -397,10 +381,10 @@ export async function executeTask(
             // Tasks resumed after a server restart skip the normal retry delay on their
             // first failure so they get back to work immediately rather than waiting the
             // full delaySeconds. Subsequent retries still use the configured delay.
-            const entry = ctx.tasks.get(task.taskId);
+            const entry = tm.tasks.get(task.taskId);
             const wasResumedFromRestart = entry?.resumedFromRestart ?? false;
             if (entry) entry.resumedFromRestart = false;
-            ctx.scheduleRetry(task, state, wasResumedFromRestart ? 0 : undefined);
+            tm.scheduleRetry(task, state, wasResumedFromRestart ? 0 : undefined);
             return; // webhook will fire only on terminal failure
         }
     }
@@ -414,7 +398,7 @@ export async function executeTask(
 export function scheduleRetry(
     task: Task,
     state: ProjectState,
-    ctx: TaskRunnerContext,
+    tm: TaskManager,
     delayOverrideSeconds?: number
 ): void {
     const retryConfig = state.config.errorRetry!;
@@ -423,9 +407,9 @@ export function scheduleRetry(
     task.status = "retrying";
     task.completedAt = null;
 
-    const entry = ctx.tasks.get(task.taskId);
+    const entry = tm.tasks.get(task.taskId);
     if (entry) {
-        ctx.store.save({ ...task, workspaceId: entry.workspaceId });
+        tm.store.save({ ...task, workspaceId: entry.workspaceId });
     }
 
     console.log(
@@ -433,18 +417,18 @@ export function scheduleRetry(
     );
 
     const timeoutId = setTimeout(async () => {
-        const entryForTimer = ctx.tasks.get(task.taskId);
+        const entryForTimer = tm.tasks.get(task.taskId);
         if (entryForTimer) entryForTimer.retryTimeoutId = undefined;
         // If chain is active (another task in the same chain is running), queue and wait
         if (
             task.chainId !== undefined &&
-            ctx.isChainActive(task.projectId, task.chainId)
+            tm.isChainActive(task.projectId, task.chainId)
         ) {
             task.status = "queued";
-            ctx.enqueue(task.projectId, task.taskId);
-            const entry = ctx.tasks.get(task.taskId);
+            tm.enqueue(task.projectId, task.taskId);
+            const entry = tm.tasks.get(task.taskId);
             if (entry)
-                ctx.store.save({
+                tm.store.save({
                     ...task,
                     workspaceId: entry.workspaceId
                 });
@@ -454,13 +438,13 @@ export function scheduleRetry(
             return;
         }
 
-        if (ctx.shouldQueue(task.projectId, state)) {
+        if (tm.shouldQueue(task.projectId, state)) {
             // No capacity right now — put in queue and wait
             task.status = "queued";
-            ctx.enqueue(task.projectId, task.taskId);
-            const entry = ctx.tasks.get(task.taskId);
+            tm.enqueue(task.projectId, task.taskId);
+            const entry = tm.tasks.get(task.taskId);
             if (entry)
-                ctx.store.save({
+                tm.store.save({
                     ...task,
                     workspaceId: entry.workspaceId
                 });
@@ -470,7 +454,7 @@ export function scheduleRetry(
 
         // Mark chain as active before running
         if (task.chainId !== undefined) {
-            ctx.markChainActive(task.projectId, task.chainId);
+            tm.markChainActive(task.projectId, task.chainId);
         }
 
         task.status = "running";
@@ -485,13 +469,13 @@ export function scheduleRetry(
         } catch (err) {
             // Pool full despite check — queue it; unmark chain first
             if (task.chainId !== undefined) {
-                ctx.unmarkChainActive(task.projectId, task.chainId);
+                tm.unmarkChainActive(task.projectId, task.chainId);
             }
             task.status = "queued";
-            ctx.enqueue(task.projectId, task.taskId);
-            const entry = ctx.tasks.get(task.taskId);
+            tm.enqueue(task.projectId, task.taskId);
+            const entry = tm.tasks.get(task.taskId);
             if (entry)
-                ctx.store.save({
+                tm.store.save({
                     ...task,
                     workspaceId: entry.workspaceId
                 });
@@ -499,7 +483,7 @@ export function scheduleRetry(
             return;
         }
 
-        const entry = ctx.tasks.get(task.taskId);
+        const entry = tm.tasks.get(task.taskId);
         if (entry) {
             entry.workspaceId = workspace.id;
             entry.executor = new Executor(
@@ -507,10 +491,10 @@ export function scheduleRetry(
                 state.tokenManager
             );
         }
-        ctx.store.save({ ...task, workspaceId: workspace.id });
+        tm.store.save({ ...task, workspaceId: workspace.id });
 
         // Retry on the same branch — Claude can see previous partial work
-        executeTask(task, workspace, state, ctx, task.branch ?? undefined).catch(
+        executeTask(task, workspace, state, tm, task.branch ?? undefined).catch(
             (err) => {
                 console.error(`[${task.taskId}] Retry execution failed:`, err);
             }
@@ -518,14 +502,14 @@ export function scheduleRetry(
     }, delaySeconds * 1000);
 
     // Store timeout ID so it can be cancelled
-    const entryForTimeout = ctx.tasks.get(task.taskId);
+    const entryForTimeout = tm.tasks.get(task.taskId);
     if (entryForTimeout) entryForTimeout.retryTimeoutId = timeoutId;
 }
 
 export async function prepareAndRunTask(
     task: Task,
     state: ProjectState,
-    ctx: TaskRunnerContext
+    tm: TaskManager
 ): Promise<void> {
     const { taskId, projectId } = task;
 
@@ -546,7 +530,7 @@ export async function prepareAndRunTask(
         console.log(
             `[${taskId}] Branch: ${task.branch}, Title: ${task.title}`
         );
-        ctx.store.save({ ...task, workspaceId: null });
+        tm.store.save({ ...task, workspaceId: null });
     } else if (!task.title) {
         // Branch already set (e.g., after restart), but title not yet generated
         console.log(`[${taskId}] Generating title...`);
@@ -560,16 +544,16 @@ export async function prepareAndRunTask(
         );
         if (title) task.title = title;
         console.log(`[${taskId}] Title: ${task.title}`);
-        ctx.store.save({ ...task, workspaceId: null });
+        tm.store.save({ ...task, workspaceId: null });
     }
 
     // If the chain is already active (another task in the same chain is running), queue and wait
     if (
         task.chainId !== undefined &&
-        ctx.isChainActive(projectId, task.chainId)
+        tm.isChainActive(projectId, task.chainId)
     ) {
-        ctx.enqueue(projectId, taskId);
-        const queueLen = ctx.queues.get(projectId)?.length ?? 0;
+        tm.enqueue(projectId, taskId);
+        const queueLen = tm.queues.get(projectId)?.length ?? 0;
         console.log(
             `[${taskId}] Queued — chain ${task.chainId} is already active (position ${queueLen} for ${projectId})`
         );
@@ -577,9 +561,9 @@ export async function prepareAndRunTask(
     }
 
     // Queue if at capacity — task will be picked up by tryDequeue when a slot frees
-    if (ctx.shouldQueue(projectId, state)) {
-        ctx.enqueue(projectId, taskId);
-        const queueLen = ctx.queues.get(projectId)?.length ?? 0;
+    if (tm.shouldQueue(projectId, state)) {
+        tm.enqueue(projectId, taskId);
+        const queueLen = tm.queues.get(projectId)?.length ?? 0;
         console.log(
             `[${taskId}] Queued (position ${queueLen} for ${projectId})`
         );
@@ -588,7 +572,7 @@ export async function prepareAndRunTask(
 
     // Mark chain as active immediately before any async work
     if (task.chainId !== undefined) {
-        ctx.markChainActive(projectId, task.chainId);
+        tm.markChainActive(projectId, task.chainId);
     }
 
     // Acquire workspace and run immediately
@@ -596,7 +580,7 @@ export async function prepareAndRunTask(
         state.config.claudeCode,
         state.tokenManager
     );
-    const entry = ctx.tasks.get(taskId)!;
+    const entry = tm.tasks.get(taskId)!;
     entry.executor = executor;
     task.status = "running";
 
@@ -610,20 +594,20 @@ export async function prepareAndRunTask(
         // Race condition: another task grabbed the last slot — queue and wait.
         // Unmark chain so tryDequeue can re-pick it up correctly.
         if (task.chainId !== undefined) {
-            ctx.unmarkChainActive(projectId, task.chainId);
+            tm.unmarkChainActive(projectId, task.chainId);
         }
         task.status = "queued";
         entry.executor = null;
-        ctx.store.save({ ...task, workspaceId: null });
-        ctx.enqueue(projectId, taskId);
+        tm.store.save({ ...task, workspaceId: null });
+        tm.enqueue(projectId, taskId);
         console.log(`[${taskId}] Queued after acquire race`);
         return;
     }
 
     entry.workspaceId = workspace.id;
-    ctx.store.save({ ...task, workspaceId: workspace.id });
+    tm.store.save({ ...task, workspaceId: workspace.id });
 
-    executeTask(task, workspace, state, ctx).catch((err) => {
+    executeTask(task, workspace, state, tm).catch((err) => {
         console.error(`Task ${taskId} failed unexpectedly:`, err);
     });
 }

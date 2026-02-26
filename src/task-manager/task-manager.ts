@@ -12,7 +12,6 @@ import { TaskActiveError, TaskCancelError, TaskEditError } from "./errors.js";
 import { BadRequestError } from "../errors.js";
 import { fireWebhook } from "./utils.js";
 import {
-    TaskRunnerContext,
     executeTask,
     scheduleRetry,
     prepareAndRunTask
@@ -22,18 +21,18 @@ export { TaskActiveError, TaskCancelError, TaskEditError };
 
 export class TaskManager {
     // Global stuff
-    private serverWorkspaceDir: string;
+    serverWorkspaceDir: string;
     private globalMaxConcurrentTasks: number | undefined;
 
     // Projects
     private projects: Map<ProjectId, ProjectState> = new Map();
 
-    private gitManager: GitManager;
-    private store: TaskStore;
+    gitManager: GitManager;
+    store: TaskStore;
 
-    private tasks: Map<TaskId, TaskEntry> = new Map();
+    tasks: Map<TaskId, TaskEntry> = new Map();
     /** Per-project FIFO queues of taskIds waiting to run. */
-    private queues: Map<ProjectId, TaskId[]> = new Map();
+    queues: Map<ProjectId, TaskId[]> = new Map();
     /** Per-project set of chain IDs that have a task currently running. */
     private activeChains: Map<ProjectId, Set<ChainId>> = new Map();
 
@@ -69,25 +68,6 @@ export class TaskManager {
                 tokenManager
             });
         }
-    }
-
-    /** Build a context object exposing the internal state and callbacks needed by task-runner functions. */
-    private get ctx(): TaskRunnerContext {
-        return {
-            tasks: this.tasks,
-            queues: this.queues,
-            gitManager: this.gitManager,
-            store: this.store,
-            serverWorkspaceDir: this.serverWorkspaceDir,
-            isChainActive: (pid, cid) => this.isChainActive(pid, cid),
-            markChainActive: (pid, cid) => this.markChainActive(pid, cid),
-            unmarkChainActive: (pid, cid) => this.unmarkChainActive(pid, cid),
-            shouldQueue: (pid, s) => this.shouldQueue(pid, s),
-            enqueue: (pid, tid) => this.enqueue(pid, tid),
-            tryDequeue: (pid, s) => this.tryDequeue(pid, s),
-            scheduleRetry: (task, state, delay) =>
-                this.scheduleRetry(task, state, delay)
-        };
     }
 
     /**
@@ -222,7 +202,7 @@ export class TaskManager {
                     entry.task,
                     workspace,
                     state,
-                    this.ctx,
+                    this,
                     entry.task.branch ?? undefined
                 ).catch((err) => {
                     console.error(
@@ -303,7 +283,7 @@ export class TaskManager {
         return entry.task.output;
     }
 
-    private shouldQueue(projectId: ProjectId, state: ProjectState): boolean {
+    shouldQueue(projectId: ProjectId, state: ProjectState): boolean {
         const runningCount = Array.from(this.tasks.values()).filter(
             (e) => e.task.status === "running"
         ).length;
@@ -316,22 +296,22 @@ export class TaskManager {
         return !state.pool.hasFreeSlot();
     }
 
-    private enqueue(projectId: ProjectId, taskId: TaskId): void {
+    enqueue(projectId: ProjectId, taskId: TaskId): void {
         if (!this.queues.has(projectId)) this.queues.set(projectId, []);
         this.queues.get(projectId)!.push(taskId);
     }
 
-    private markChainActive(projectId: ProjectId, chainId: ChainId): void {
+    markChainActive(projectId: ProjectId, chainId: ChainId): void {
         if (!this.activeChains.has(projectId))
             this.activeChains.set(projectId, new Set());
         this.activeChains.get(projectId)!.add(chainId);
     }
 
-    private unmarkChainActive(projectId: ProjectId, chainId: ChainId): void {
+    unmarkChainActive(projectId: ProjectId, chainId: ChainId): void {
         this.activeChains.get(projectId)?.delete(chainId);
     }
 
-    private isChainActive(projectId: ProjectId, chainId: ChainId): boolean {
+    isChainActive(projectId: ProjectId, chainId: ChainId): boolean {
         return this.activeChains.get(projectId)?.has(chainId) ?? false;
     }
 
@@ -350,7 +330,7 @@ export class TaskManager {
         return current;
     }
 
-    private tryDequeue(projectId: ProjectId, state: ProjectState): void {
+    tryDequeue(projectId: ProjectId, state: ProjectState): void {
         const queue = this.queues.get(projectId);
         if (!queue || queue.length === 0) return;
         if (this.shouldQueue(projectId, state)) return;
@@ -400,7 +380,7 @@ export class TaskManager {
                     task,
                     workspace,
                     state,
-                    this.ctx,
+                    this,
                     entry.checkoutBranch
                 );
             })
@@ -483,7 +463,7 @@ export class TaskManager {
         this.store.save({ ...task, workspaceId: null });
 
         // Slug generation and workspace acquisition run in the background
-        prepareAndRunTask(task, state, this.ctx).catch((err) => {
+        prepareAndRunTask(task, state, this).catch((err) => {
             console.error(`[${taskId}] Failed to initialize task:`, err);
             task.status = "failed";
             task.error = err instanceof Error ? err.message : String(err);
@@ -616,7 +596,7 @@ export class TaskManager {
         entry.workspaceId = workspace.id;
         this.store.save({ ...task, workspaceId: workspace.id });
 
-        executeTask(task, workspace, state, this.ctx, checkoutBranch).catch(
+        executeTask(task, workspace, state, this, checkoutBranch).catch(
             (err) => {
                 console.error(`Task ${taskId} retry failed unexpectedly:`, err);
             }
@@ -736,6 +716,6 @@ export class TaskManager {
         state: ProjectState,
         delayOverrideSeconds?: number
     ): void {
-        scheduleRetry(task, state, this.ctx, delayOverrideSeconds);
+        scheduleRetry(task, state, this, delayOverrideSeconds);
     }
 }

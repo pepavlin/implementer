@@ -113,7 +113,7 @@ Každá změna stavu tasku se okamžitě zapíše na disk přes `TaskStore` (JSO
 | Soubor | Co obsahuje |
 |---|---|
 | `task-manager.ts` | Třída `TaskManager` — veřejné API, fronta, state |
-| `task-runner.ts` | `executeTask`, `scheduleRetry`, `prepareAndRunTask` + `TaskRunnerContext` |
+| `task-runner.ts` | `executeTask`, `scheduleRetry`, `prepareAndRunTask` |
 | `utils.ts` | Čisté pomocné funkce — prompt building, Docker mount, webhook |
 | `types.ts` | Interní rozhraní — `ProjectState`, `TaskEntry` |
 | `errors.ts` | Doménové chyby — `TaskActiveError`, `TaskCancelError`, `TaskEditError` |
