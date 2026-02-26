@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import yaml from "js-yaml";
 import { ServerConfig, ProjectConfig, ConfigSchema } from "./config-types";
 import { NotFoundError, UnauthorizedError } from "../errors";
+import { ProjectId } from "../types";
 
 export class Config {
     server: ServerConfig;
@@ -42,14 +43,12 @@ export class Config {
         return validated;
     }
 
-    getProjectIdByToken(projectToken: string): string {
+    getProjectIdByToken(projectToken: string): ProjectId | null {
         for (const [projectId, project] of Object.entries(this.projects)) {
             if (project.apiKey && project.apiKey === projectToken) {
-                return projectId;
+                return projectId as ProjectId;
             }
         }
-        throw new UnauthorizedError(
-            "Project not found for the provided API key"
-        );
+        return null;
     }
 }

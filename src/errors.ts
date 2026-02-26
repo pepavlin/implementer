@@ -11,7 +11,10 @@ export class HttpError extends Error {
 }
 
 export class BadRequestError extends HttpError {
-    constructor(message = "Bad Request") {
+    constructor(
+        message = "Bad Request",
+        public readonly details?: unknown
+    ) {
         super(400, message);
     }
 }

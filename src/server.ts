@@ -12,6 +12,7 @@ import { extractLastAssistantMessage } from "./executor.js";
 import { openApiSpec } from "./openapi.js";
 import { registerDashboardRoutes } from "./dashboard.js";
 import {
+    BadRequestError,
     HttpError,
     NotFoundError,
     UnauthorizedError,
@@ -55,6 +56,10 @@ function getDurationSeconds(task: {
     return Math.round((end - start) / 1000);
 }
 
+function getProjectId(res: any): ProjectId {
+    return res.locals.projectId as ProjectId;
+}
+
 export function createServer(
     taskManager: TaskManager,
     config: Config
@@ -95,16 +100,17 @@ export function createServer(
     app.post(
         "/task",
         asyncRoute(async (req, res) => {
-            const projectId = res.locals.projectId as ProjectId;
             const parsed = TaskCreateSchema.safeParse(req.body);
             if (!parsed.success) {
-                res.status(400).json({
-                    error: "Invalid request",
-                    details: parsed.error.issues
-                });
-                return;
+                throw new BadRequestError(
+                    "Invalid request",
+                    parsed.error.issues
+                );
             }
-            const task = await taskManager.startTask(projectId, parsed.data);
+            const task = await taskManager.startTask(
+                getProjectId(res),
+                parsed.data
+            );
             res.status(200).json({
                 taskId: task.taskId,
                 branch: task.branch,
@@ -115,11 +121,9 @@ export function createServer(
 
     // GET /tasks - List all tasks for the authenticated project
     app.get("/tasks", (req, res) => {
-        const projectId = res.locals.projectId as ProjectId;
         const parsed = TaskListQuerySchema.safeParse(req.query);
         if (!parsed.success) {
-            res.status(400).json({ error: "Invalid status value" });
-            return;
+            throw new BadRequestError("Invalid status value");
         }
         const statusFilter = parsed.data.status
             ? new Set<TaskStatus>(
@@ -129,7 +133,7 @@ export function createServer(
               )
             : null;
         const tasks = taskManager
-            .listTasks(projectId)
+            .listTasks(getProjectId(res))
             .filter((task) => !statusFilter || statusFilter.has(task.status))
             .map((task) => ({
                 taskId: task.taskId,
@@ -148,8 +152,7 @@ export function createServer(
 
     // GET /task/:taskId - Get specific task status
     app.get("/task/:taskId", (req, res) => {
-        const projectId = res.locals.projectId as ProjectId;
-        const task = taskManager.getTask(projectId, req.params.taskId);
+        const task = taskManager.getTask(getProjectId(res), req.params.taskId);
         if (!task) throw new NotFoundError("Task not found");
         res.json({
             taskId: task.taskId,
@@ -176,43 +179,16 @@ export function createServer(
 
     // POST /task/:taskId/cancel - Cancel a queued, running, or retrying task
     app.post("/task/:taskId/cancel", (req, res) => {
-        const projectId = res.locals.projectId as ProjectId;
-        const task = taskManager.getTask(projectId, req.params.taskId);
+        const task = taskManager.getTask(getProjectId(res), req.params.taskId);
         if (!task) throw new NotFoundError("Task not found");
-        const cancelled = taskManager.cancelTask(projectId, req.params.taskId);
+        const cancelled = taskManager.cancelTask(
+            getProjectId(res),
+            req.params.taskId
+        );
         res.json({
             taskId: cancelled.taskId,
             branch: cancelled.branch,
             status: cancelled.status
-        });
-    });
-
-    // PATCH /task/:taskId - Edit the prompt of a queued task
-    app.patch("/task/:taskId", (req, res) => {
-        const projectId = res.locals.projectId as ProjectId;
-        const task = taskManager.getTask(projectId, req.params.taskId);
-        if (!task) throw new NotFoundError("Task not found");
-        const parsed = z
-            .object({ prompt: z.string().min(1) })
-            .safeParse(req.body);
-        if (!parsed.success) {
-            res.status(400).json({
-                error: "Prompt is required",
-                details: parsed.error.issues
-            });
-            return;
-        }
-        const updated = taskManager.editTask(
-            projectId,
-            req.params.taskId,
-            parsed.data.prompt
-        );
-        res.json({
-            taskId: updated.taskId,
-            branch: updated.branch,
-            prompt: updated.prompt,
-            title: updated.title ?? null,
-            status: updated.status
         });
     });
 
@@ -255,7 +231,14 @@ export function createServer(
     app.use(
         (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
             if (err instanceof HttpError) {
-                res.status(err.statusCode).json({ error: err.message });
+                const body: Record<string, unknown> = { error: err.message };
+                if (
+                    err instanceof BadRequestError &&
+                    err.details !== undefined
+                ) {
+                    body.details = err.details;
+                }
+                res.status(err.statusCode).json(body);
                 return;
             }
             if (
