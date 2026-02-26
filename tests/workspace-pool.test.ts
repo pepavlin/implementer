@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, readFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { WorkspacePool, PoolExhaustedError } from "./workspace-pool.js";
-import type { RepositoryConfig } from "./types.js";
+import { WorkspacePool, PoolExhaustedError } from "../src/workspace-pool.js";
+import type { RepositoryConfig } from "../src/types.js";
 
 const TMP = join(import.meta.dirname, "..", "tmp", "pool-test");
 

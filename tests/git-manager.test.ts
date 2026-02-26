@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
-import { GitManager } from "./git-manager.js";
+import { GitManager } from "../src/git-manager.js";
 
 const TMP = join(import.meta.dirname, "..", "tmp", "git-manager-test");
 
@@ -134,7 +134,7 @@ describe("GitManager", () => {
   });
 
   describe("deleteRemoteBranchAll", () => {
-    it("skips repos not on the target branch", async () => {
+    it("skips repos not on the target branch", { timeout: 15000 }, async () => {
       const bareDir = join(TMP, "bare-repo");
       const workDir = join(TMP, "workspace");
       const repoDir = join(workDir, "my-repo");

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { UsageLimiter, UsageLimitError } from "./usage-limiter.js";
-import type { TokenManager } from "./auth.js";
+import { UsageLimiter, UsageLimitError } from "../src/usage-limiter.js";
+import type { TokenManager } from "../src/auth.js";
 
 const TMP = join(import.meta.dirname, "..", "tmp", "usage-limiter-test");
 

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { runConfigCheck } from "./check-config.js";
+import { runConfigCheck } from "../src/check-config.js";
 
 const TMP = join(import.meta.dirname, "..", "tmp", "check-config-test");
 

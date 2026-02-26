@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { TaskStore } from "./task-store.js";
-import type { PersistedTask } from "./types.js";
+import { TaskStore } from "../src/task-store.js";
+import type { PersistedTask } from "../src/types.js";
 
 const TMP = join(import.meta.dirname, "..", "tmp", "task-store-test");
 

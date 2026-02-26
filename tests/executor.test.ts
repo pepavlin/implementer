@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as child_process from "node:child_process";
 import { EventEmitter } from "node:events";
-import type { ClaudeCodeConfig } from "./types.js";
-import { TokenManager } from "./auth.js";
-import { Executor, extractLastAssistantMessage } from "./executor.js";
+import type { ClaudeCodeConfig } from "../src/types.js";
+import { TokenManager } from "../src/auth.js";
+import { Executor, extractLastAssistantMessage } from "../src/executor.js";
 
 // Mock child_process.spawn to capture docker args without running containers
 vi.mock("node:child_process", async () => {
