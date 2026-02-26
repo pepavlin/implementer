@@ -44,12 +44,6 @@ RUN gosu claude git config --global user.name "Implementer" && \
 
 WORKDIR /home/claude
 
-# Install gh-pr-guard: a Claude Code PreToolUse hook that blocks destructive PR operations.
-# This is a hard technical enforcement (on top of the system-prompt instruction) so that
-# even if Claude ignores the instruction it still cannot run `gh pr close/merge/delete`.
-COPY gh-pr-guard.sh /usr/local/bin/gh-pr-guard
-RUN chmod +x /usr/local/bin/gh-pr-guard
-
 # Entrypoint starts dockerd, waits for it, then runs claude as unprivileged user
 COPY sandbox-entrypoint.sh /usr/local/bin/sandbox-entrypoint.sh
 RUN chmod +x /usr/local/bin/sandbox-entrypoint.sh
