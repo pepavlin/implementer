@@ -47,6 +47,7 @@ function makeMockTaskManager(overrides: Partial<TaskManager> = {}) {
         startTask: vi.fn(),
         getTask: vi.fn(),
         listTasks: vi.fn().mockReturnValue([]),
+        listAllActiveTasks: vi.fn().mockReturnValue([]),
         getOutput: vi.fn().mockReturnValue(""),
         retryTask: vi.fn(),
         ...overrides
@@ -547,6 +548,25 @@ describe("server", () => {
             await request(app).get("/tasks").expect(200);
         });
 
+        it("does not expose project data through /dashboard/events when project auth is configured", async () => {
+            // /dashboard/events with no adminPassword returns 404, not project data
+            const app = createServer(
+                makeMockTaskManager(),
+                makeConfig({ apiKey: "test-secret" })
+            );
+            await request(app).get("/dashboard/events").expect(404);
+        });
+
+        it("allows /dashboard without API key even when auth is configured", async () => {
+            const app = createServer(
+                makeMockTaskManager(),
+                makeConfig({ apiKey: "test-secret" })
+            );
+            // dashboard returns 404 when no adminPassword configured (not 401)
+            const res = await request(app).get("/dashboard");
+            expect(res.status).not.toBe(401);
+        });
+
         it("rejects when multiple projects configured but no API keys", async () => {
             const config: Config = {
                 server: { workspaceDir: "/tmp/test" },
@@ -575,6 +595,139 @@ describe("server", () => {
             };
             const app = createServer(makeMockTaskManager(), config);
             await request(app).get("/tasks").expect(401);
+        });
+    });
+
+    describe("GET /dashboard", () => {
+        it("returns 404 when adminPassword is not configured", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfig());
+            await request(app).get("/dashboard").expect(404);
+        });
+
+        it("returns login form when not authenticated", async () => {
+            const config: Config = {
+                server: { workspaceDir: "/tmp/test", adminPassword: "secret" },
+                projects: {
+                    [PROJECT_ID]: {
+                        repositories: [{ name: "repo", url: "https://example.com/repo.git", defaultBranch: "main" }],
+                        claudeCode: { command: "claude" }
+                    }
+                }
+            };
+            const res = await request(createServer(makeMockTaskManager(), config))
+                .get("/dashboard")
+                .expect(200);
+            expect(res.text).toContain("<form");
+            expect(res.text).toContain("password");
+        });
+
+        it("returns dashboard HTML when authenticated via cookie", async () => {
+            const config: Config = {
+                server: { workspaceDir: "/tmp/test", adminPassword: "secret" },
+                projects: {
+                    [PROJECT_ID]: {
+                        repositories: [{ name: "repo", url: "https://example.com/repo.git", defaultBranch: "main" }],
+                        claudeCode: { command: "claude" }
+                    }
+                }
+            };
+            // First login to get cookie
+            const loginRes = await request(createServer(makeMockTaskManager(), config))
+                .post("/dashboard")
+                .type("form")
+                .send({ password: "secret" })
+                .expect(302);
+            const setCookie = loginRes.headers["set-cookie"] as string[] | string;
+            const cookieHeader = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+            const cookieValue = cookieHeader?.split(";")[0] ?? "";
+
+            const res = await request(createServer(makeMockTaskManager(), config))
+                .get("/dashboard")
+                .set("Cookie", cookieValue)
+                .expect(200);
+            expect(res.text).toContain("EventSource");
+        });
+    });
+
+    describe("POST /dashboard", () => {
+        it("returns 404 when adminPassword is not configured", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfig());
+            await request(app)
+                .post("/dashboard")
+                .type("form")
+                .send({ password: "anything" })
+                .expect(404);
+        });
+
+        it("sets auth cookie and redirects on correct password", async () => {
+            const config: Config = {
+                server: { workspaceDir: "/tmp/test", adminPassword: "secret" },
+                projects: {
+                    [PROJECT_ID]: {
+                        repositories: [{ name: "repo", url: "https://example.com/repo.git", defaultBranch: "main" }],
+                        claudeCode: { command: "claude" }
+                    }
+                }
+            };
+            const res = await request(createServer(makeMockTaskManager(), config))
+                .post("/dashboard")
+                .type("form")
+                .send({ password: "secret" })
+                .expect(302);
+            expect(res.headers.location).toBe("/dashboard");
+            expect(res.headers["set-cookie"]).toBeDefined();
+            expect((res.headers["set-cookie"] as unknown as string[])[0]).toContain("impl_dash=");
+        });
+
+        it("returns login form with error on wrong password", async () => {
+            const config: Config = {
+                server: { workspaceDir: "/tmp/test", adminPassword: "secret" },
+                projects: {
+                    [PROJECT_ID]: {
+                        repositories: [{ name: "repo", url: "https://example.com/repo.git", defaultBranch: "main" }],
+                        claudeCode: { command: "claude" }
+                    }
+                }
+            };
+            const res = await request(createServer(makeMockTaskManager(), config))
+                .post("/dashboard")
+                .type("form")
+                .send({ password: "wrong" })
+                .expect(200);
+            expect(res.text).toContain("Incorrect password");
+            expect(res.headers["set-cookie"]).toBeUndefined();
+        });
+    });
+
+    describe("GET /dashboard/events", () => {
+        it("returns 404 when adminPassword is not configured", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfig());
+            await request(app).get("/dashboard/events").expect(404);
+        });
+
+        it("returns 401 when not authenticated", async () => {
+            const config: Config = {
+                server: { workspaceDir: "/tmp/test", adminPassword: "secret" },
+                projects: {
+                    [PROJECT_ID]: {
+                        repositories: [{ name: "repo", url: "https://example.com/repo.git", defaultBranch: "main" }],
+                        claudeCode: { command: "claude" }
+                    }
+                }
+            };
+            await request(createServer(makeMockTaskManager(), config))
+                .get("/dashboard/events")
+                .expect(401);
+        });
+    });
+
+    describe("GET /dashboard/logout", () => {
+        it("clears cookie and redirects to /dashboard", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfig());
+            const res = await request(app).get("/dashboard/logout").expect(302);
+            expect(res.headers.location).toBe("/dashboard");
+            const cookie = (res.headers["set-cookie"] as unknown as string[])?.[0] ?? "";
+            expect(cookie).toContain("Max-Age=0");
         });
     });
 });

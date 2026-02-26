@@ -66,6 +66,25 @@ describe("TaskManager", () => {
     expect(tm.listTasks(PROJECT_ID)).toEqual([]);
   });
 
+  it("listAllActiveTasks returns empty array initially", async () => {
+    const { TaskManager } = await import("./task-manager.js");
+    const config = makeConfig();
+    const tm = new TaskManager(config);
+    expect(tm.listAllActiveTasks()).toEqual([]);
+  });
+
+  it("listAllActiveTasks returns empty when only completed/failed tasks are loaded", async () => {
+    const { TaskManager } = await import("./task-manager.js");
+    const store = new TaskStore(makeConfig().server.workspaceDir);
+    store.save(makePersistedTask({ taskId: "t-completed", status: "completed", completedAt: new Date().toISOString() }));
+    store.save(makePersistedTask({ taskId: "t-failed", status: "failed", completedAt: new Date().toISOString() }));
+
+    const tm = new TaskManager(makeConfig());
+    await tm.init();
+
+    expect(tm.listAllActiveTasks()).toEqual([]);
+  });
+
   it("getTask returns undefined for unknown id", async () => {
     const { TaskManager } = await import("./task-manager.js");
     const config = makeConfig();

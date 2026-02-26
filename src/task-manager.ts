@@ -334,6 +334,18 @@ export class TaskManager {
             .map((entry) => entry.task);
     }
 
+    /** Returns all active tasks (queued, running, retrying) across all projects. */
+    listAllActiveTasks(): Task[] {
+        return Array.from(this.tasks.values())
+            .filter(
+                (entry) =>
+                    entry.task.status === "queued" ||
+                    entry.task.status === "running" ||
+                    entry.task.status === "retrying"
+            )
+            .map((entry) => entry.task);
+    }
+
     getOutput(projectId: string, taskId: string): string {
         const entry = this.tasks.get(taskId);
         if (!entry || entry.task.projectId !== projectId) return "";

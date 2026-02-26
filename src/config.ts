@@ -16,7 +16,8 @@ const ServerSchema = z
     .object({
         workspaceDir: z.string().default("./workspace"),
         maxConcurrentTasks: z.number().int().min(1).optional(),
-        maxTokensPerHour: z.number().int().min(1).optional()
+        maxTokensPerHour: z.number().int().min(1).optional(),
+        adminPassword: z.string().optional()
     })
     .strict();
 
@@ -98,6 +99,11 @@ function normalizeValidatedConfig(
         "..",
         validated.server.workspaceDir
     );
+
+    // Interpolate ${VAR} references in server config
+    if (validated.server.adminPassword) {
+        validated.server.adminPassword = interpolateEnv(validated.server.adminPassword);
+    }
 
     // Interpolate ${VAR} references in auth and apiKey fields
     for (const project of Object.values(validated.projects)) {

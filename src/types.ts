@@ -4,6 +4,8 @@ export interface ServerConfig {
     maxConcurrentTasks?: number;
     /** Max tokens/hour allowed via the OAuth usage API before rejecting new tasks. Only applies in OAuth mode. */
     maxTokensPerHour?: number;
+    /** Password required to access the /dashboard admin UI. */
+    adminPassword?: string;
 }
 
 export interface RepositoryConfig {
