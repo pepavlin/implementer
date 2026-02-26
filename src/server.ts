@@ -553,6 +553,9 @@ function dashboardHtml(hasPassword: boolean): string {
     .btn-ref{padding:6px 14px;background:transparent;color:#94a3b8;border:1px solid #2a2f42;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
     .btn-ref:hover:not(:disabled){background:#1e2130;color:#e2e8f0}
     .btn-ref:disabled{opacity:.5;cursor:not-allowed}
+    .btn-rfa{padding:6px 14px;background:transparent;color:#ef4444;border:1px solid #ef4444;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
+    .btn-rfa:hover:not(:disabled){background:#3b0f0f}
+    .btn-rfa:disabled{opacity:.5;cursor:not-allowed}
     /* Modals */
     .overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}
     .modal{background:#1e2130;border-radius:12px;width:100%;max-width:700px;max-height:90vh;display:flex;flex-direction:column;border:1px solid #2a2f42;box-shadow:0 20px 60px rgba(0,0,0,.5)}
@@ -591,6 +594,7 @@ function dashboardHtml(hasPassword: boolean): string {
     <h1>Implementer Dashboard</h1>
     <div style="display:flex;align-items:center;gap:12px">
       <button class="btn-new" onclick="openNewTask()">+ New Task</button>
+      <button class="btn-rfa" id="retry-failed-btn" onclick="retryAllFailed()">Retry All Failed</button>
       <button class="btn-ref" id="refresh-btn" onclick="refreshData()">\u21bb Refresh</button>
       <div class="live"><span class="dot" id="dot"></span><span id="upd">Connecting\u2026</span></div>
       ${signOutLink}
@@ -793,6 +797,19 @@ function dashboardHtml(hasPassword: boolean): string {
           closeTask();
         })
         .catch(function(){btn.disabled=false;alert('Failed to retry task');});
+    }
+    function retryAllFailed(){
+      if(!confirm('Retry all failed tasks?'))return;
+      var btn=document.getElementById('retry-failed-btn');
+      btn.disabled=true;
+      fetch('/dashboard/api/tasks/retry-failed',{method:'POST',headers:{'Content-Type':'application/json'}})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          btn.disabled=false;
+          if(d.error){alert('Error: '+d.error);return;}
+          alert('Retried '+d.retried+' failed task(s).');
+        })
+        .catch(function(){btn.disabled=false;alert('Failed to retry tasks');});
     }
     function openNewTask(){
       var projects=lastData?Object.keys(lastData.projects):[];
@@ -1073,6 +1090,27 @@ export function createServer(
             }
             res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
         }
+    });
+
+    // POST /dashboard/api/tasks/retry-failed — retry all failed tasks (dashboard auth)
+    app.post("/dashboard/api/tasks/retry-failed", async (req, res) => {
+        if (!config.server.adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, config.server.adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        const failedTasks = taskManager.listAllTasks().filter((t) => t.status === "failed");
+        const results = await Promise.allSettled(
+            failedTasks.map((t) => taskManager.retryTask(t.projectId, t.taskId))
+        );
+        const retried = results.filter((r) => r.status === "fulfilled").length;
+        const errors = results
+            .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+            .map((r) => (r.reason instanceof Error ? r.reason.message : "Unknown error"));
+        res.json({ retried, errors });
     });
 
     // Build Bearer token → projectId map from config
