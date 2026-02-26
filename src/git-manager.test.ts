@@ -45,6 +45,94 @@ describe("GitManager", () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  describe("prepareNewBranchAll", () => {
+    it("succeeds when there are uncommitted changes in the working tree", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Simulate uncommitted changes left over from a previous task (e.g. after a failed run)
+      await shell("echo dirty > file.txt", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      // Should not throw despite local modifications
+      await gm.prepareNewBranchAll(workDir, repos, "impl/new-task");
+
+      const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
+      expect(branch).toBe("impl/new-task");
+    });
+
+    it("succeeds when there are staged changes in the working tree", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Simulate staged but uncommitted changes
+      await shell("echo staged > file.txt && git add file.txt", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      await gm.prepareNewBranchAll(workDir, repos, "impl/new-task");
+
+      const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
+      expect(branch).toBe("impl/new-task");
+    });
+  });
+
+  describe("resetToDefaultAll", () => {
+    it("succeeds when there are uncommitted changes in the working tree", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Checkout a feature branch and add uncommitted changes
+      await shell("git checkout -b impl/old-task", repoDir);
+      await shell("echo dirty > file.txt", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      // Should not throw — workspace pool calls this when reusing instances
+      await gm.resetToDefaultAll(workDir, repos);
+
+      const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
+      expect(branch).toBe("main");
+    });
+  });
+
+  describe("checkoutBranchAll", () => {
+    it("succeeds when there are uncommitted changes during PR continuation", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Create and push the PR branch
+      await shell("git checkout -b impl/pr-branch", repoDir);
+      await shell("echo feature > feature.txt && git add . && git commit -m 'feat'", repoDir);
+      await shell("git push origin impl/pr-branch", repoDir);
+
+      // Switch back to main and add uncommitted changes (simulates dirty workspace on retry)
+      await shell("git checkout main", repoDir);
+      await shell("echo dirty > file.txt", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      // Should not throw even though working tree is dirty
+      await gm.checkoutBranchAll(workDir, repos, "impl/pr-branch");
+
+      const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
+      expect(branch).toBe("impl/pr-branch");
+    });
+  });
+
   describe("deleteRemoteBranchAll", () => {
     it("skips repos not on the target branch", async () => {
       const bareDir = join(TMP, "bare-repo");
