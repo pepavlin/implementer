@@ -1,0 +1,354 @@
+export const openApiSpec = {
+    openapi: "3.0.3",
+    info: {
+        title: "Implementer",
+        description:
+            "AI Code Task Execution Service — receives coding tasks via REST API, executes them using Claude Code CLI in isolated Docker sandboxes.",
+        version: "1.0.0"
+    },
+    servers: [{ url: "/" }],
+    security: [{ BearerAuth: [] }],
+    components: {
+        securitySchemes: {
+            BearerAuth: {
+                type: "http",
+                scheme: "bearer"
+            }
+        },
+        schemas: {
+            TaskCreateRequest: {
+                type: "object",
+                required: ["prompt"],
+                properties: {
+                    prompt: {
+                        type: "string",
+                        description: "What to implement",
+                        example: "Add a dark mode toggle to the navbar"
+                    },
+                    pullRequestNumber: {
+                        type: "integer",
+                        description:
+                            "Continue work on an existing pull request. Tasks with the same PR number run sequentially.",
+                        example: 42
+                    },
+                    callbackUrl: {
+                        type: "string",
+                        format: "uri",
+                        description:
+                            "URL to POST to when the task finishes. Body: { taskId, status }",
+                        example: "https://example.com/webhook/task-done"
+                    }
+                }
+            },
+            TaskCreateResponse: {
+                type: "object",
+                properties: {
+                    taskId: { type: "string", example: "TVchAThD" },
+                    branch: {
+                        type: "string",
+                        nullable: true,
+                        description:
+                            "Branch name. Null until generated asynchronously — poll GET /task/{taskId} to get the final branch.",
+                        example: null
+                    },
+                    status: {
+                        type: "string",
+                        enum: ["queued"],
+                        example: "queued"
+                    }
+                }
+            },
+            PullRequest: {
+                type: "object",
+                properties: {
+                    repo: { type: "string", example: "my-repo" },
+                    url: {
+                        type: "string",
+                        example: "https://github.com/org/repo/pull/42"
+                    }
+                }
+            },
+            TaskStatus: {
+                type: "object",
+                properties: {
+                    taskId: { type: "string" },
+                    branch: { type: "string", nullable: true },
+                    prompt: { type: "string" },
+                    title: {
+                        type: "string",
+                        nullable: true,
+                        description: "Auto-generated short title for the task (null until generated)"
+                    },
+                    pullRequestNumber: {
+                        type: "integer",
+                        nullable: true,
+                        description: "Pull request number this task is linked to (null for standalone tasks)"
+                    },
+                    status: {
+                        type: "string",
+                        enum: ["queued", "running", "retrying", "completed", "failed", "interrupted", "cancelled"]
+                    },
+                    startedAt: { type: "string", format: "date-time" },
+                    completedAt: {
+                        type: "string",
+                        format: "date-time",
+                        nullable: true
+                    },
+                    durationSeconds: {
+                        type: "number",
+                        description:
+                            "Elapsed time in seconds (running tasks show time so far)"
+                    },
+                    output: {
+                        type: "string",
+                        nullable: true,
+                        description:
+                            "Final response/answer from Claude Code (null while task is running)"
+                    },
+                    error: { type: "string", nullable: true },
+                    pullRequests: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/PullRequest" },
+                        nullable: true,
+                        description: "Pull requests created for this task"
+                    }
+                }
+            },
+            TaskLog: {
+                type: "object",
+                properties: {
+                    taskId: { type: "string" },
+                    output: {
+                        type: "string",
+                        description: "Claude Code CLI output"
+                    },
+                    truncated: {
+                        type: "boolean",
+                        description: "Whether the output was truncated to 1MB"
+                    }
+                }
+            },
+            Error: {
+                type: "object",
+                properties: {
+                    error: { type: "string" }
+                }
+            }
+        }
+    },
+    paths: {
+        "/task": {
+            post: {
+                summary: "Start a new task",
+                description:
+                    "Creates a new coding task. The task runs asynchronously in an isolated Docker sandbox with Claude Code. Returns immediately with the task ID and branch name.",
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                $ref: "#/components/schemas/TaskCreateRequest"
+                            }
+                        }
+                    }
+                },
+                responses: {
+                    "200": {
+                        description: "Task started",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    $ref: "#/components/schemas/TaskCreateResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        description: "Invalid request",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/Error" }
+                            }
+                        }
+                    },
+                    "401": { description: "Unauthorized" },
+                    "429": {
+                        description: "Max concurrent tasks reached",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/Error" }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/tasks": {
+            get: {
+                summary: "List all tasks",
+                description:
+                    "Returns all tasks for the authenticated project (running, completed, and failed). Optionally filter by one or more statuses using the `status` query parameter.",
+                parameters: [
+                    {
+                        name: "status",
+                        in: "query",
+                        required: false,
+                        description:
+                            "Filter by task status. Repeat to include multiple statuses (e.g. `?status=running&status=queued`).",
+                        schema: {
+                            type: "array",
+                            items: {
+                                type: "string",
+                                enum: ["queued", "running", "retrying", "completed", "failed", "interrupted", "cancelled"]
+                            }
+                        },
+                        style: "form",
+                        explode: true
+                    }
+                ],
+                responses: {
+                    "200": {
+                        description: "Task list",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        tasks: {
+                                            type: "array",
+                                            items: {
+                                                $ref: "#/components/schemas/TaskStatus"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        description: "Invalid status value",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/Error" }
+                            }
+                        }
+                    },
+                    "401": { description: "Unauthorized" }
+                }
+            }
+        },
+        "/task/{taskId}": {
+            get: {
+                summary: "Get task status",
+                description: "Returns the current status of a specific task.",
+                parameters: [
+                    {
+                        name: "taskId",
+                        in: "path",
+                        required: true,
+                        schema: { type: "string" }
+                    }
+                ],
+                responses: {
+                    "200": {
+                        description: "Task status",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    $ref: "#/components/schemas/TaskStatus"
+                                }
+                            }
+                        }
+                    },
+                    "401": { description: "Unauthorized" },
+                    "404": {
+                        description: "Task not found",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/Error" }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/task/{taskId}/log": {
+            get: {
+                summary: "Get task output log",
+                description:
+                    "Returns the Claude Code CLI output for a task. Output is truncated to 1MB if larger.",
+                parameters: [
+                    {
+                        name: "taskId",
+                        in: "path",
+                        required: true,
+                        schema: { type: "string" }
+                    }
+                ],
+                responses: {
+                    "200": {
+                        description: "Task log",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/TaskLog" }
+                            }
+                        }
+                    },
+                    "401": { description: "Unauthorized" },
+                    "404": {
+                        description: "Task not found",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/Error" }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/task/{taskId}/retry": {
+            post: {
+                summary: "Retry a task",
+                description:
+                    "Re-runs an existing task regardless of its current status (completed, failed, interrupted). The task is re-executed on the same branch so Claude can see previous work. Returns 409 if the task is currently active (queued, running, or retrying).",
+                parameters: [
+                    {
+                        name: "taskId",
+                        in: "path",
+                        required: true,
+                        schema: { type: "string" }
+                    }
+                ],
+                responses: {
+                    "200": {
+                        description: "Task retried",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    $ref: "#/components/schemas/TaskCreateResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": { description: "Unauthorized" },
+                    "404": {
+                        description: "Task not found",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/Error" }
+                            }
+                        }
+                    },
+                    "409": {
+                        description: "Task is currently active and cannot be retried",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/Error" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+};

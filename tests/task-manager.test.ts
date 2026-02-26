@@ -341,7 +341,7 @@ describe("TaskManager", () => {
     });
 
     it("sets resumedFromRestart flag on task entries during resumption", async () => {
-      const { TaskManager } = await import("./task-manager.js");
+      const { TaskManager } = await import("../src/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -369,7 +369,7 @@ describe("TaskManager", () => {
 
   describe("restart resume — retry delay", () => {
     it("tasks resumed after restart skip the retry delay on their first failure", async () => {
-      const { TaskManager } = await import("./task-manager.js");
+      const { TaskManager } = await import("../src/task-manager.js");
       const config = makeConfig({
         projects: {
           [PROJECT_ID]: {
@@ -421,8 +421,8 @@ describe("TaskManager", () => {
     });
 
     it("subsequent retries after a restart use the normal configured delay", async () => {
-      const { TaskManager } = await import("./task-manager.js");
-      const { Executor } = await import("./executor.js");
+      const { TaskManager } = await import("../src/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
       const config = makeConfig({
         projects: {
           [PROJECT_ID]: {

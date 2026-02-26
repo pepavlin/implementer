@@ -4,7 +4,7 @@ import { createServer } from "../src/server.js";
 import type { TaskManager } from "../src/task-manager.js";
 import type { Config, Task } from "../src/types.js";
 import { UsageLimitError } from "../src/usage-limiter.js";
-import { TaskActiveError, TaskCancelError } from "../src/task-manager.js";
+import { TaskActiveError, TaskCancelError, TaskEditError } from "../src/task-manager.js";
 
 const PROJECT_ID = "test-project";
 

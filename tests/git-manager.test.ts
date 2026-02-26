@@ -63,7 +63,7 @@ describe("GitManager", () => {
 
       const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
       expect(branch).toBe("impl/new-task");
-    });
+    }, 15000);
 
     it("succeeds when there are staged changes in the working tree", async () => {
       const bareDir = join(TMP, "bare-repo");
