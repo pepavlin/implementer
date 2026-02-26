@@ -2,12 +2,7 @@ import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import swaggerUi from "swagger-ui-express";
 import { z } from "zod";
-import {
-    TaskManager,
-    TaskActiveError,
-    TaskCancelError,
-    TaskEditError
-} from "./task-manager/task-manager.js";
+import { TaskManager } from "./task-manager/task-manager.js";
 import { extractLastAssistantMessage } from "./executor.js";
 import { openApiSpec } from "./openapi.js";
 import { registerDashboardRoutes } from "./dashboard.js";
@@ -232,21 +227,8 @@ export function createServer(
         (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
             if (err instanceof HttpError) {
                 const body: Record<string, unknown> = { error: err.message };
-                if (
-                    err instanceof BadRequestError &&
-                    err.details !== undefined
-                ) {
-                    body.details = err.details;
-                }
+                if (err.details !== undefined) body.details = err.details;
                 res.status(err.statusCode).json(body);
-                return;
-            }
-            if (
-                err instanceof TaskCancelError ||
-                err instanceof TaskEditError ||
-                err instanceof TaskActiveError
-            ) {
-                res.status(409).json({ error: (err as Error).message });
                 return;
             }
             res.status(500).json({

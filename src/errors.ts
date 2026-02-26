@@ -3,7 +3,8 @@ import type { Request, Response, NextFunction, RequestHandler } from "express";
 export class HttpError extends Error {
     constructor(
         public readonly statusCode: number,
-        message: string
+        message: string,
+        public readonly details?: unknown
     ) {
         super(message);
         this.name = this.constructor.name;
@@ -11,11 +12,8 @@ export class HttpError extends Error {
 }
 
 export class BadRequestError extends HttpError {
-    constructor(
-        message = "Bad Request",
-        public readonly details?: unknown
-    ) {
-        super(400, message);
+    constructor(message = "Bad Request", details?: unknown) {
+        super(400, message, details);
     }
 }
 
