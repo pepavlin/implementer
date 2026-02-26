@@ -1,0 +1,35 @@
+name: Deploy (main)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_SSH_PORT || 22 }}
+          known_hosts: ${{ secrets.SERVER_KNOWN_HOSTS }}
+          script: |
+            set -e
+
+            cd /root/Workspace/implementer
+
+            echo "Pulling new version..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "Rebuilding containers..."
+            docker compose up -d --build
