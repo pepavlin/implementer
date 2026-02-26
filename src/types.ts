@@ -1,3 +1,5 @@
+export type ProjectId = string & { readonly _brand: unique symbol };
+
 export type TaskStatus =
     | "queued"
     | "running"
@@ -14,7 +16,7 @@ export interface PullRequest {
 
 export interface Task {
     taskId: string;
-    projectId: string;
+    projectId: ProjectId;
     branch: string | null;
     prompt: string;
     title?: string;

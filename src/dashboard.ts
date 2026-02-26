@@ -8,7 +8,8 @@ import {
 } from "./task-manager/task-manager.js";
 import { UsageLimitError } from "./usage-limiter.js";
 import { extractLastAssistantMessage } from "./executor.js";
-import type { Config } from "./types.js";
+import type { Config } from "./config/config.js";
+import type { ProjectId } from "./types.js";
 
 // ── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -838,7 +839,7 @@ export function registerDashboardRoutes(
                   ? parseInt(pullRequestNumber, 10)
                   : undefined;
         try {
-            const task = await taskManager.startTask(projectId, {
+            const task = await taskManager.startTask(projectId as ProjectId, {
                 prompt: prompt.trim(),
                 pullRequestNumber: prNum
             });

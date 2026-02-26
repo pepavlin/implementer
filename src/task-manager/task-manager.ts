@@ -1,19 +1,14 @@
 import { join } from "node:path";
 import { nanoid } from "nanoid";
-import type { PersistedTask, Task, TaskCreateRequest } from "../types.js";
+import type { PersistedTask, ProjectId, Task, TaskCreateRequest } from "../types.js";
 import { GitManager } from "../git-manager.js";
 import { Executor } from "../executor.js";
 import { WorkspacePool } from "../workspace-pool.js";
 import { TaskStore } from "../task-store.js";
 import { TokenManager } from "../auth.js";
-import { UsageLimiter } from "../usage-limiter.js";
 import { Config } from "../config/config.js";
 import { ProjectState, TaskEntry } from "./types.js";
-import {
-    TaskActiveError,
-    TaskCancelError,
-    TaskEditError
-} from "./errors.js";
+import { TaskActiveError, TaskCancelError, TaskEditError } from "./errors.js";
 import { fireWebhook } from "./utils.js";
 import {
     TaskRunnerContext,
@@ -25,26 +20,33 @@ import {
 export { TaskActiveError, TaskCancelError, TaskEditError };
 
 export class TaskManager {
+    // Global stuff
     private serverWorkspaceDir: string;
     private globalMaxConcurrentTasks: number | undefined;
-    private projects: Map<string, ProjectState> = new Map();
+
+    // Projects
+    private projects: Map<ProjectId, ProjectState> = new Map();
+
     private gitManager: GitManager;
     private store: TaskStore;
+
     private tasks: Map<string, TaskEntry> = new Map();
     /** Per-project FIFO queues of taskIds waiting to run. */
-    private queues: Map<string, string[]> = new Map();
+    private queues: Map<ProjectId, string[]> = new Map();
     /** Per-project set of PR numbers that have a task currently running. */
-    private activePrNumbers: Map<string, Set<number>> = new Map();
+    private activePrNumbers: Map<ProjectId, Set<number>> = new Map();
 
     constructor(config: Config) {
         this.serverWorkspaceDir = config.server.workspaceDir;
         this.globalMaxConcurrentTasks = config.server.maxConcurrentTasks;
+
         this.gitManager = new GitManager();
         this.store = new TaskStore(config.server.workspaceDir);
 
+        // Get ready projects
         for (const [projectId, projectConfig] of Object.entries(
             config.projects
-        )) {
+        ) as [ProjectId, (typeof config.projects)[string]][]) {
             const projectDir = join(
                 config.server.workspaceDir,
                 "projects",
@@ -59,25 +61,12 @@ export class TaskManager {
                 projectConfig.auth,
                 projectDir
             );
-            const usageLimiter = config.server.maxTokensPerHour
-                ? new UsageLimiter(config.server.maxTokensPerHour, tokenManager)
-                : null;
+
             this.projects.set(projectId, {
                 config: projectConfig,
                 pool,
-                tokenManager,
-                usageLimiter
+                tokenManager
             });
-        }
-
-        if (process.env.WORKSPACE_VOLUME) {
-            console.log(
-                `Docker volume mode: sandbox containers mount volume "${process.env.WORKSPACE_VOLUME}"`
-            );
-        } else if (process.env.WORKSPACE_HOST_DIR) {
-            console.log(
-                `Docker bind mode: mapping ${config.server.workspaceDir} → ${process.env.WORKSPACE_HOST_DIR} for sandbox mounts`
-            );
         }
     }
 
@@ -257,13 +246,13 @@ export class TaskManager {
         }
     }
 
-    getTask(projectId: string, taskId: string): Task | undefined {
+    getTask(projectId: ProjectId, taskId: string): Task | undefined {
         const entry = this.tasks.get(taskId);
         if (!entry || entry.task.projectId !== projectId) return undefined;
         return entry.task;
     }
 
-    listTasks(projectId: string): Task[] {
+    listTasks(projectId: ProjectId): Task[] {
         return Array.from(this.tasks.values())
             .filter((entry) => entry.task.projectId === projectId)
             .map((entry) => entry.task);
@@ -292,7 +281,7 @@ export class TaskManager {
             );
     }
 
-    getOutput(projectId: string, taskId: string): string {
+    getOutput(projectId: ProjectId, taskId: string): string {
         const entry = this.tasks.get(taskId);
         if (!entry || entry.task.projectId !== projectId) return "";
         if (entry.task.status === "running" && entry.executor) {
@@ -301,7 +290,7 @@ export class TaskManager {
         return entry.task.output;
     }
 
-    private shouldQueue(projectId: string, state: ProjectState): boolean {
+    private shouldQueue(projectId: ProjectId, state: ProjectState): boolean {
         const runningCount = Array.from(this.tasks.values()).filter(
             (e) => e.task.status === "running"
         ).length;
@@ -314,26 +303,26 @@ export class TaskManager {
         return !state.pool.hasFreeSlot();
     }
 
-    private enqueue(projectId: string, taskId: string): void {
+    private enqueue(projectId: ProjectId, taskId: string): void {
         if (!this.queues.has(projectId)) this.queues.set(projectId, []);
         this.queues.get(projectId)!.push(taskId);
     }
 
-    private markPrActive(projectId: string, prNumber: number): void {
+    private markPrActive(projectId: ProjectId, prNumber: number): void {
         if (!this.activePrNumbers.has(projectId))
             this.activePrNumbers.set(projectId, new Set());
         this.activePrNumbers.get(projectId)!.add(prNumber);
     }
 
-    private unmarkPrActive(projectId: string, prNumber: number): void {
+    private unmarkPrActive(projectId: ProjectId, prNumber: number): void {
         this.activePrNumbers.get(projectId)?.delete(prNumber);
     }
 
-    private isPrActive(projectId: string, prNumber: number): boolean {
+    private isPrActive(projectId: ProjectId, prNumber: number): boolean {
         return this.activePrNumbers.get(projectId)?.has(prNumber) ?? false;
     }
 
-    private tryDequeue(projectId: string, state: ProjectState): void {
+    private tryDequeue(projectId: ProjectId, state: ProjectState): void {
         const queue = this.queues.get(projectId);
         if (!queue || queue.length === 0) return;
         if (this.shouldQueue(projectId, state)) return;
@@ -408,16 +397,11 @@ export class TaskManager {
      * task — branch slug generation and workspace acquisition happen in the background.
      */
     async startTask(
-        projectId: string,
+        projectId: ProjectId,
         request: TaskCreateRequest
     ): Promise<Task> {
         const state = this.projects.get(projectId);
         if (!state) throw new Error(`Unknown project: ${projectId}`);
-
-        // Check token usage limit (OAuth only, non-fatal on API error)
-        if (state.usageLimiter) {
-            await state.usageLimiter.checkLimit();
-        }
 
         const taskId = nanoid(8);
 
@@ -457,7 +441,7 @@ export class TaskManager {
      * Retry an existing task regardless of its terminal status (completed, failed, interrupted).
      * Resets the task state and re-runs it, continuing from the same branch if one exists.
      */
-    async retryTask(projectId: string, taskId: string): Promise<Task> {
+    async retryTask(projectId: ProjectId, taskId: string): Promise<Task> {
         const state = this.projects.get(projectId);
         if (!state) throw new Error(`Unknown project: ${projectId}`);
 
@@ -588,7 +572,7 @@ export class TaskManager {
      * - Retrying: the pending retry timer is cleared, task is marked as cancelled.
      * Throws TaskCancelError if the task is already in a terminal state.
      */
-    cancelTask(projectId: string, taskId: string): Task {
+    cancelTask(projectId: ProjectId, taskId: string): Task {
         const state = this.projects.get(projectId);
         if (!state) throw new Error(`Unknown project: ${projectId}`);
 
@@ -655,7 +639,7 @@ export class TaskManager {
      * The title is cleared so it can be regenerated when the task eventually runs.
      * Throws TaskEditError if the task cannot be edited.
      */
-    editTask(projectId: string, taskId: string, newPrompt: string): Task {
+    editTask(projectId: ProjectId, taskId: string, newPrompt: string): Task {
         const state = this.projects.get(projectId);
         if (!state) throw new Error(`Unknown project: ${projectId}`);
 

@@ -1,6 +1,5 @@
 import type { WorkspacePool } from "../workspace-pool.js";
 import type { TokenManager } from "../auth.js";
-import type { UsageLimiter } from "../usage-limiter.js";
 import type { ProjectConfig } from "../config/config-types.js";
 import type { Task } from "../types.js";
 import type { Executor } from "../executor.js";
@@ -9,7 +8,6 @@ export interface ProjectState {
     config: ProjectConfig;
     pool: WorkspacePool;
     tokenManager: TokenManager;
-    usageLimiter: UsageLimiter | null;
 }
 
 export interface TaskEntry {
@@ -26,4 +24,3 @@ export interface TaskEntry {
     /** setTimeout handle for scheduled retries — cleared on cancelTask to abort pending retry. */
     retryTimeoutId?: ReturnType<typeof setTimeout>;
 }
-
