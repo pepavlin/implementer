@@ -557,6 +557,13 @@ function dashboardHtml(hasPassword: boolean): string {
     .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite;flex-shrink:0}
     .dot.err{background:#ef4444;animation:none}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes blink-dot{0%,100%{opacity:1}40%{opacity:.15}}
+    @keyframes queued-pulse{0%,100%{opacity:1}50%{opacity:.45}}
+    @keyframes sweep{0%{left:-70%}100%{left:170%}}
+    @keyframes stat-pop{0%{transform:scale(1.35)}60%{transform:scale(.95)}100%{transform:scale(1)}}
+    @keyframes modal-in{from{opacity:0;transform:scale(.96) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}
+    @keyframes row-in{from{opacity:0;transform:translateY(-2px)}to{opacity:1;transform:translateY(0)}}
     .stats{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
     .stat{background:var(--bg-card);border-radius:8px;padding:14px 20px;min-width:110px}
     .stat-label{font-size:.68rem;color:var(--text2);text-transform:uppercase;letter-spacing:.05em}
@@ -578,13 +585,27 @@ function dashboardHtml(hasPassword: boolean): string {
     .proj-hint{font-size:.72rem;color:var(--text4);margin-bottom:18px;min-height:16px}
     .muted{color:var(--text4)}
     .filters{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
-    .filter-btn{padding:4px 12px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--text2);font-size:.75rem;cursor:pointer}
+    .filter-btn{padding:4px 12px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--text2);font-size:.75rem;cursor:pointer;transition:background .15s,color .15s,border-color .15s,transform .1s}
+    .filter-btn:hover:not(.active){background:var(--hover-bg);color:var(--text);transform:translateY(-1px)}
     .filter-btn.active{background:#3b82f6;border-color:#3b82f6;color:#fff}
     table{width:100%;border-collapse:collapse;background:var(--bg-card);border-radius:12px;overflow:hidden}
     th{background:var(--bg-head);color:var(--text3);font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;padding:10px 16px;text-align:left;font-weight:600}
     td{padding:12px 16px;border-top:1px solid var(--border);font-size:.85rem;vertical-align:middle}
-    tr.clickable{cursor:pointer}
+    tr.clickable{cursor:pointer;animation:row-in .18s ease-out}
     tr.clickable:hover td{background:var(--hover-bg)}
+    tr.row-running>td{background:rgba(34,197,94,.04)}
+    tr.row-running>td:first-child{border-left:3px solid rgba(34,197,94,.75)}
+    tr.row-running:hover>td{background:rgba(34,197,94,.09)!important}
+    tr.row-queued>td:first-child{border-left:3px solid rgba(245,158,11,.55)}
+    tr.row-retrying>td:first-child{border-left:3px solid rgba(96,165,250,.6)}
+    tr.row-failed>td:first-child{border-left:3px solid rgba(239,68,68,.6)}
+    tr.row-interrupted>td:first-child{border-left:3px solid rgba(167,139,250,.5)}
+    .running-bar{display:block;position:relative;overflow:hidden;height:2px;margin-top:5px;background:rgba(34,197,94,.15);border-radius:1px}
+    .running-bar::after{content:'';position:absolute;top:0;width:55%;height:100%;background:linear-gradient(90deg,transparent,#22c55e,transparent);animation:sweep 1.8s ease-in-out infinite}
+    .retrying-bar{display:block;position:relative;overflow:hidden;height:2px;margin-top:5px;background:rgba(96,165,250,.15);border-radius:1px}
+    .retrying-bar::after{content:'';position:absolute;top:0;width:55%;height:100%;background:linear-gradient(90deg,transparent,#60a5fa,transparent);animation:sweep 2.2s ease-in-out infinite}
+    .stat-val.pop{animation:stat-pop .4s ease-out}
+    .ps-running{animation:queued-pulse 1.5s ease-in-out infinite}
     .badge{display:inline-flex;align-items:center;padding:2px 10px;border-radius:999px;font-size:.7rem;font-weight:600;white-space:nowrap}
     .b-running{background:var(--b-run-bg);color:var(--b-run-fg)}
     .b-queued{background:var(--b-q-bg);color:var(--b-q-fg)}
@@ -593,6 +614,9 @@ function dashboardHtml(hasPassword: boolean): string {
     .b-failed{background:var(--b-fail-bg);color:var(--b-fail-fg)}
     .b-interrupted{background:var(--b-int-bg);color:var(--b-int-fg)}
     .b-cancelled{background:var(--b-can-bg);color:var(--b-can-fg)}
+    .b-running::before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-right:5px;flex-shrink:0;animation:blink-dot 1.2s ease-in-out infinite}
+    .b-queued{animation:queued-pulse 2s ease-in-out infinite}
+    .b-retrying::before{content:'↻';margin-right:4px;display:inline-block;font-style:normal;line-height:1;animation:spin 1.1s linear infinite}
     .proj-tag{background:var(--tag-bg);padding:2px 8px;border-radius:4px;font-size:.73rem;color:var(--text2)}
     .mono{font-family:ui-monospace,'SF Mono',monospace;font-size:.76rem;color:var(--text2)}
     .ttitle{font-weight:500;color:var(--text5)}
@@ -612,7 +636,7 @@ function dashboardHtml(hasPassword: boolean): string {
     .theme-btn:hover{color:var(--text)}
     /* Modals */
     .overlay{position:fixed;inset:0;background:var(--overlay);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}
-    .modal{background:var(--bg-card);border-radius:12px;width:100%;max-width:700px;max-height:90vh;display:flex;flex-direction:column;border:1px solid var(--border2);box-shadow:var(--shadow)}
+    .modal{background:var(--bg-card);border-radius:12px;width:100%;max-width:700px;max-height:90vh;display:flex;flex-direction:column;border:1px solid var(--border2);box-shadow:var(--shadow);animation:modal-in .2s ease-out}
     .modal-hd{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0;gap:12px}
     .modal-ttl{font-size:1rem;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .modal-x{background:transparent;border:none;color:var(--text3);font-size:1.1rem;cursor:pointer;padding:4px 8px;border-radius:4px;flex-shrink:0;line-height:1}
@@ -759,6 +783,7 @@ function dashboardHtml(hasPassword: boolean): string {
 
   <script>
     var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null;
+    function setStatVal(id,val){var el=document.getElementById(id);if(el.textContent!==String(val)){el.textContent=val;el.classList.remove('pop');void el.offsetWidth;el.classList.add('pop');}}
     function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
     function badge(s){var m={running:['b-running','Running'],queued:['b-queued','Queued'],retrying:['b-retrying','Retrying'],completed:['b-completed','Completed'],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
     function dur(s){if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
@@ -814,12 +839,15 @@ function dashboardHtml(hasPassword: boolean): string {
         tb.innerHTML='<tr><td colspan="6" class="empty">'+msg+'</td></tr>';return;
       }
       tb.innerHTML=filtered.map(function(t){
-        return '<tr class="clickable" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'">'
+        var started=new Date(t.startedAt).getTime();
+        var isActive=t.status==='running'||t.status==='retrying';
+        var bar=t.status==='running'?'<span class="running-bar"></span>':t.status==='retrying'?'<span class="retrying-bar"></span>':'';
+        return '<tr class="clickable row-'+t.status+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'" data-status="'+t.status+'" data-started="'+started+'">'
           +'<td>'+badge(t.status)+'</td>'
           +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
           +'<td><span class="mono">'+esc(t.taskId)+'</span></td>'
           +'<td>'+(t.title?'<div class="ttitle">'+esc(t.title)+'</div>':'')+'<div class="tprompt">'+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+'</div></td>'
-          +'<td class="mono">'+dur(t.durationSeconds)+'</td>'
+          +'<td class="mono dur-cell"><span class="dur-val">'+dur(isActive?Math.floor((Date.now()-started)/1000):t.durationSeconds)+'</span>'+bar+'</td>'
           +'<td class="mono">'+fmtDate(t.startedAt)+'</td>'
           +'</tr>';
       }).join('');
@@ -990,11 +1018,11 @@ function dashboardHtml(hasPassword: boolean): string {
         .then(function(r){return r.json();})
         .then(function(d){
           lastData=d;
-          document.getElementById('sr').textContent=d.stats.running;
-          document.getElementById('sq').textContent=d.stats.queued;
-          document.getElementById('st').textContent=d.stats.retrying;
-          document.getElementById('sc').textContent=d.stats.completed;
-          document.getElementById('sf').textContent=d.stats.failed;
+          setStatVal('sr',d.stats.running);
+          setStatVal('sq',d.stats.queued);
+          setStatVal('st',d.stats.retrying);
+          setStatVal('sc',d.stats.completed);
+          setStatVal('sf',d.stats.failed);
           renderProjects(d.projects);
           renderTasks(d.tasks);
           document.getElementById('dot').className='dot';
@@ -1007,11 +1035,11 @@ function dashboardHtml(hasPassword: boolean): string {
     es.onmessage=function(e){
       var d=JSON.parse(e.data);
       lastData=d;
-      document.getElementById('sr').textContent=d.stats.running;
-      document.getElementById('sq').textContent=d.stats.queued;
-      document.getElementById('st').textContent=d.stats.retrying;
-      document.getElementById('sc').textContent=d.stats.completed;
-      document.getElementById('sf').textContent=d.stats.failed;
+      setStatVal('sr',d.stats.running);
+      setStatVal('sq',d.stats.queued);
+      setStatVal('st',d.stats.retrying);
+      setStatVal('sc',d.stats.completed);
+      setStatVal('sf',d.stats.failed);
       renderProjects(d.projects);
       renderTasks(d.tasks);
       document.getElementById('dot').className='dot';
@@ -1022,6 +1050,16 @@ function dashboardHtml(hasPassword: boolean): string {
       document.getElementById('upd').textContent='Connection lost';
     };
     ${THEME_TOGGLE_JS}
+    setInterval(function(){
+      var now=Date.now();
+      document.querySelectorAll('#tb tr[data-status="running"],#tb tr[data-status="retrying"]').forEach(function(row){
+        var started=parseInt(row.dataset.started,10);
+        if(!started)return;
+        var secs=Math.floor((now-started)/1000);
+        var dv=row.querySelector('.dur-val');
+        if(dv)dv.textContent=dur(secs);
+      });
+    },1000);
   </script>
 </body>
 </html>`;
