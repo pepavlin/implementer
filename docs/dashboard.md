@@ -45,8 +45,12 @@ Theming is implemented using CSS custom properties (variables):
 | `--text2` | `#94a3b8` | `#475569` | Secondary text |
 | `--text3` | `#64748b` | `#64748b` | Tertiary text |
 | `--text4` | `#4a5568` | `#94a3b8` | Muted/hint text |
+| `--hover-bg` | `#252a3a` | `#f1f5f9` | Row/button hover background |
 | `--b-run-bg/fg` | dark green | light green | Running badge |
 | `--b-q-bg/fg` | dark amber | light amber | Queued badge |
 | `--b-ret-bg/fg` | dark blue | light blue | Retrying badge |
 | `--b-fail-bg/fg` | dark red | light red | Failed badge |
 | `--b-int-bg/fg` | dark purple | light purple | Interrupted badge |
+| `--btn-sec-bg/fg/h` | dark slate | light slate | Secondary buttons |
+
+All interactive elements (buttons, table rows, modals) use CSS variables exclusively — no hardcoded colours appear outside the `:root` and `[data-theme=light]` blocks.

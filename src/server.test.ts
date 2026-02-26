@@ -1156,5 +1156,18 @@ describe("server", () => {
             expect(res.text).toContain("var(--bg-card)");
             expect(res.text).toContain("var(--text)");
         });
+
+        it("refresh button uses CSS variables for theming", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app).get("/dashboard").set("Cookie", cookie).expect(200);
+            // .btn-ref must not contain hardcoded dark-mode hex values
+            expect(res.text).toContain("var(--text2)");
+            expect(res.text).toContain("var(--border2)");
+            expect(res.text).toContain("var(--hover-bg)");
+            // Ensure the old hardcoded colors are gone from btn-ref
+            expect(res.text).not.toContain("color:#94a3b8;border:1px solid #2a2f42");
+            expect(res.text).not.toContain("background:#1e2130;color:#e2e8f0");
+        });
     });
 });

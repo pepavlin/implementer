@@ -595,8 +595,8 @@ function dashboardHtml(hasPassword: boolean): string {
     a.out:hover{color:var(--text2)}
     .btn-new{padding:6px 14px;background:#3b82f6;color:#fff;border:none;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer}
     .btn-new:hover{background:#2563eb}
-    .btn-ref{padding:6px 14px;background:transparent;color:#94a3b8;border:1px solid #2a2f42;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
-    .btn-ref:hover:not(:disabled){background:#1e2130;color:#e2e8f0}
+    .btn-ref{padding:6px 14px;background:transparent;color:var(--text2);border:1px solid var(--border2);border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
+    .btn-ref:hover:not(:disabled){background:var(--hover-bg);color:var(--text)}
     .btn-ref:disabled{opacity:.5;cursor:not-allowed}
     .theme-btn{background:var(--bg-card);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:5px 10px;font-size:.85rem;cursor:pointer;transition:color .15s,background .15s;line-height:1}
     .theme-btn:hover{color:var(--text)}
