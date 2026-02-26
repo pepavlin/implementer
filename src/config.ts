@@ -102,7 +102,9 @@ function normalizeValidatedConfig(
 
     // Interpolate ${VAR} references in server config
     if (validated.server.adminPassword) {
-        validated.server.adminPassword = interpolateEnv(validated.server.adminPassword);
+        validated.server.adminPassword = interpolateEnv(
+            validated.server.adminPassword
+        );
     }
 
     // Interpolate ${VAR} references in auth and apiKey fields
@@ -137,14 +139,19 @@ function normalizeValidatedConfig(
     return validated;
 }
 
-export function validateConfigFile(configPath?: string): Config {
+export function validateConfigFile(configPath?: string): Config & {
+    configPath: string;
+} {
     const resolvedPath = resolve(configPath ?? "config.yaml");
     const raw = readFileSync(resolvedPath, "utf-8");
     const parsed = yaml.load(raw);
     const validated = ConfigSchema.parse(parsed);
-    return normalizeValidatedConfig(validated, resolvedPath);
+    return {
+        ...normalizeValidatedConfig(validated, resolvedPath),
+        configPath: resolvedPath
+    };
 }
 
-export function loadConfig(configPath?: string): Config {
+export function loadConfig(configPath?: string) {
     return validateConfigFile(configPath);
 }
