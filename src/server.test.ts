@@ -1181,4 +1181,61 @@ describe("server", () => {
             expect(res.body.errors).toEqual(["retry failed"]);
         });
     });
+
+    describe("theme toggle", () => {
+        it("login page includes CSS custom properties for dark mode", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const res = await request(app).get("/dashboard").expect(200);
+            expect(res.text).toContain("--bg:");
+            expect(res.text).toContain("[data-theme=light]");
+        });
+
+        it("login page includes theme toggle button", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const res = await request(app).get("/dashboard").expect(200);
+            expect(res.text).toContain("theme-toggle");
+            expect(res.text).toContain("toggleTheme");
+        });
+
+        it("login page includes FOUC prevention script", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const res = await request(app).get("/dashboard").expect(200);
+            expect(res.text).toContain("impl-theme");
+            expect(res.text).toContain("data-theme");
+        });
+
+        it("dashboard includes CSS custom properties for both themes", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app).get("/dashboard").set("Cookie", cookie).expect(200);
+            expect(res.text).toContain("--bg:");
+            expect(res.text).toContain("[data-theme=light]");
+            expect(res.text).toContain("--b-run-bg");
+        });
+
+        it("dashboard includes theme toggle button in header", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app).get("/dashboard").set("Cookie", cookie).expect(200);
+            expect(res.text).toContain("theme-toggle");
+            expect(res.text).toContain("toggleTheme");
+        });
+
+        it("dashboard includes FOUC prevention script", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app).get("/dashboard").set("Cookie", cookie).expect(200);
+            expect(res.text).toContain("impl-theme");
+            expect(res.text).toContain("localStorage");
+        });
+
+        it("dashboard uses CSS variables instead of hardcoded dark colors", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app).get("/dashboard").set("Cookie", cookie).expect(200);
+            expect(res.text).toContain("var(--bg)");
+            expect(res.text).toContain("var(--bg-card)");
+            expect(res.text).toContain("var(--text)");
+        });
+    });
 });
