@@ -8,7 +8,6 @@ import {
     TaskCancelError,
     TaskEditError
 } from "./task-manager/task-manager.js";
-import { UsageLimitError } from "./usage-limiter.js";
 import { extractLastAssistantMessage } from "./executor.js";
 import { openApiSpec } from "./openapi.js";
 import { registerDashboardRoutes } from "./dashboard.js";
@@ -265,10 +264,6 @@ export function createServer(
                 err instanceof TaskActiveError
             ) {
                 res.status(409).json({ error: (err as Error).message });
-                return;
-            }
-            if (err instanceof UsageLimitError) {
-                res.status(429).json({ error: (err as Error).message });
                 return;
             }
             res.status(500).json({
