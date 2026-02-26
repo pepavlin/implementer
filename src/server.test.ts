@@ -1100,4 +1100,85 @@ describe("server", () => {
             expect(res.body.error).toBe("unexpected");
         });
     });
+
+    describe("POST /dashboard/api/tasks/retry-failed", () => {
+        it("returns 404 when adminPassword is not configured", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfig());
+            await request(app).post("/dashboard/api/tasks/retry-failed").expect(404);
+        });
+
+        it("returns 401 when not authenticated", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            await request(app).post("/dashboard/api/tasks/retry-failed").expect(401);
+        });
+
+        it("returns retried=0 when there are no failed tasks", async () => {
+            const tasks = [
+                makeMockTask({ taskId: "t1", status: "running" }),
+                makeMockTask({ taskId: "t2", status: "completed" })
+            ];
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue(tasks),
+                retryTask: vi.fn()
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .post("/dashboard/api/tasks/retry-failed")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(res.body.retried).toBe(0);
+            expect(res.body.errors).toEqual([]);
+            expect(tm.retryTask).not.toHaveBeenCalled();
+        });
+
+        it("retries all failed tasks and returns count", async () => {
+            const tasks = [
+                makeMockTask({ taskId: "t1", status: "failed" }),
+                makeMockTask({ taskId: "t2", status: "failed" }),
+                makeMockTask({ taskId: "t3", status: "completed" })
+            ];
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue(tasks),
+                retryTask: vi.fn().mockResolvedValue(makeMockTask({ status: "queued" }))
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .post("/dashboard/api/tasks/retry-failed")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(res.body.retried).toBe(2);
+            expect(res.body.errors).toEqual([]);
+            expect(tm.retryTask).toHaveBeenCalledTimes(2);
+        });
+
+        it("reports errors for tasks that could not be retried", async () => {
+            const tasks = [
+                makeMockTask({ taskId: "t1", status: "failed" }),
+                makeMockTask({ taskId: "t2", status: "failed" })
+            ];
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue(tasks),
+                retryTask: vi
+                    .fn()
+                    .mockResolvedValueOnce(makeMockTask({ status: "queued" }))
+                    .mockRejectedValueOnce(new Error("retry failed"))
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .post("/dashboard/api/tasks/retry-failed")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(res.body.retried).toBe(1);
+            expect(res.body.errors).toEqual(["retry failed"]);
+        });
+    });
 });
