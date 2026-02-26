@@ -4,7 +4,7 @@ import { createServer } from "./server.js";
 import type { TaskManager } from "./task-manager.js";
 import type { Config, Task } from "./types.js";
 import { UsageLimitError } from "./usage-limiter.js";
-import { TaskActiveError } from "./task-manager.js";
+import { TaskActiveError, TaskCancelError, TaskEditError } from "./task-manager.js";
 
 const PROJECT_ID = "test-project";
 
@@ -51,6 +51,8 @@ function makeMockTaskManager(overrides: Partial<TaskManager> = {}) {
         listAllTasks: vi.fn().mockReturnValue([]),
         getOutput: vi.fn().mockReturnValue(""),
         retryTask: vi.fn(),
+        cancelTask: vi.fn(),
+        editTask: vi.fn(),
         ...overrides
     } as unknown as TaskManager;
 }
@@ -1179,6 +1181,299 @@ describe("server", () => {
 
             expect(res.body.retried).toBe(1);
             expect(res.body.errors).toEqual(["retry failed"]);
+        });
+    });
+
+    describe("POST /dashboard/api/task/:taskId/cancel", () => {
+        it("returns 404 when adminPassword is not configured", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfig());
+            await request(app).post("/dashboard/api/task/abc123/cancel").expect(404);
+        });
+
+        it("returns 401 when not authenticated", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            await request(app).post("/dashboard/api/task/abc123/cancel").expect(401);
+        });
+
+        it("returns 404 for unknown task", async () => {
+            const tm = makeMockTaskManager({ listAllTasks: vi.fn().mockReturnValue([]) });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            await request(app)
+                .post("/dashboard/api/task/nonexistent/cancel")
+                .set("Cookie", cookie)
+                .expect(404);
+        });
+
+        it("cancels a queued task and returns the cancelled task info", async () => {
+            const task = makeMockTask({ status: "queued" });
+            const cancelled = makeMockTask({ status: "cancelled" });
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue([task]),
+                cancelTask: vi.fn().mockReturnValue(cancelled)
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .post("/dashboard/api/task/abc123/cancel")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(res.body.taskId).toBe("abc123");
+            expect(res.body.status).toBe("cancelled");
+        });
+
+        it("cancels a running task", async () => {
+            const task = makeMockTask({ status: "running" });
+            const cancelled = makeMockTask({ status: "cancelled" });
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue([task]),
+                cancelTask: vi.fn().mockReturnValue(cancelled)
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .post("/dashboard/api/task/abc123/cancel")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(res.body.status).toBe("cancelled");
+        });
+
+        it("returns 409 when task cannot be cancelled", async () => {
+            const task = makeMockTask({ status: "completed" });
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue([task]),
+                cancelTask: vi.fn().mockImplementation(() => {
+                    throw new TaskCancelError("Task is already completed");
+                })
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .post("/dashboard/api/task/abc123/cancel")
+                .set("Cookie", cookie)
+                .expect(409);
+
+            expect(res.body.error).toContain("already completed");
+        });
+
+        it("returns 500 on unexpected error", async () => {
+            const task = makeMockTask({ status: "running" });
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue([task]),
+                cancelTask: vi.fn().mockImplementation(() => {
+                    throw new Error("unexpected");
+                })
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .post("/dashboard/api/task/abc123/cancel")
+                .set("Cookie", cookie)
+                .expect(500);
+
+            expect(res.body.error).toBe("unexpected");
+        });
+    });
+
+    describe("PATCH /dashboard/api/task/:taskId", () => {
+        it("returns 404 when adminPassword is not configured", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfig());
+            await request(app).patch("/dashboard/api/task/abc123").send({ prompt: "new prompt" }).expect(404);
+        });
+
+        it("returns 401 when not authenticated", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            await request(app).patch("/dashboard/api/task/abc123").send({ prompt: "new prompt" }).expect(401);
+        });
+
+        it("returns 404 for unknown task", async () => {
+            const tm = makeMockTaskManager({ listAllTasks: vi.fn().mockReturnValue([]) });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            await request(app)
+                .patch("/dashboard/api/task/nonexistent")
+                .set("Cookie", cookie)
+                .send({ prompt: "new prompt" })
+                .expect(404);
+        });
+
+        it("returns 400 when prompt is missing", async () => {
+            const task = makeMockTask({ status: "queued" });
+            const tm = makeMockTaskManager({ listAllTasks: vi.fn().mockReturnValue([task]) });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .patch("/dashboard/api/task/abc123")
+                .set("Cookie", cookie)
+                .send({})
+                .expect(400);
+
+            expect(res.body.error).toBeTruthy();
+        });
+
+        it("updates the prompt of a queued task", async () => {
+            const task = makeMockTask({ status: "queued" });
+            const updated = makeMockTask({ status: "queued", prompt: "Updated prompt" });
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue([task]),
+                editTask: vi.fn().mockReturnValue(updated)
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .patch("/dashboard/api/task/abc123")
+                .set("Cookie", cookie)
+                .send({ prompt: "Updated prompt" })
+                .expect(200);
+
+            expect(res.body.taskId).toBe("abc123");
+            expect(res.body.prompt).toBe("Updated prompt");
+            expect(res.body.status).toBe("queued");
+            expect(tm.editTask).toHaveBeenCalledWith(PROJECT_ID, "abc123", "Updated prompt");
+        });
+
+        it("returns 409 when task cannot be edited", async () => {
+            const task = makeMockTask({ status: "running" });
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue([task]),
+                editTask: vi.fn().mockImplementation(() => {
+                    throw new TaskEditError("Task is not queued");
+                })
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .patch("/dashboard/api/task/abc123")
+                .set("Cookie", cookie)
+                .send({ prompt: "new prompt" })
+                .expect(409);
+
+            expect(res.body.error).toContain("not queued");
+        });
+
+        it("returns 500 on unexpected error", async () => {
+            const task = makeMockTask({ status: "queued" });
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue([task]),
+                editTask: vi.fn().mockImplementation(() => {
+                    throw new Error("unexpected");
+                })
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .patch("/dashboard/api/task/abc123")
+                .set("Cookie", cookie)
+                .send({ prompt: "new prompt" })
+                .expect(500);
+
+            expect(res.body.error).toBe("unexpected");
+        });
+    });
+
+    describe("dashboard cancel/edit UI", () => {
+        it("dashboard includes cancel task button in task detail modal", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app).get("/dashboard").set("Cookie", cookie).expect(200);
+            expect(res.text).toContain("task-cancel");
+            expect(res.text).toContain("Cancel Task");
+            expect(res.text).toContain("cancelTask");
+        });
+
+        it("dashboard includes edit task button in task detail modal", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app).get("/dashboard").set("Cookie", cookie).expect(200);
+            expect(res.text).toContain("task-edit");
+            expect(res.text).toContain("Edit Task");
+            expect(res.text).toContain("openEditTask");
+        });
+
+        it("dashboard includes edit task modal with prompt textarea", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app).get("/dashboard").set("Cookie", cookie).expect(200);
+            expect(res.text).toContain("et-overlay");
+            expect(res.text).toContain("et-prompt");
+            expect(res.text).toContain("submitEditTask");
+        });
+
+        it("dashboard badge function includes cancelled status", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app).get("/dashboard").set("Cookie", cookie).expect(200);
+            expect(res.text).toContain("b-cancelled");
+            expect(res.text).toContain("Cancelled");
+        });
+    });
+
+    describe("theme toggle", () => {
+        it("login page includes CSS custom properties for dark mode", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const res = await request(app).get("/dashboard").expect(200);
+            expect(res.text).toContain("--bg:");
+            expect(res.text).toContain("[data-theme=light]");
+        });
+
+        it("login page includes theme toggle button", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const res = await request(app).get("/dashboard").expect(200);
+            expect(res.text).toContain("theme-toggle");
+            expect(res.text).toContain("toggleTheme");
+        });
+
+        it("login page includes FOUC prevention script", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const res = await request(app).get("/dashboard").expect(200);
+            expect(res.text).toContain("impl-theme");
+            expect(res.text).toContain("data-theme");
+        });
+
+        it("dashboard includes CSS custom properties for both themes", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app).get("/dashboard").set("Cookie", cookie).expect(200);
+            expect(res.text).toContain("--bg:");
+            expect(res.text).toContain("[data-theme=light]");
+            expect(res.text).toContain("--b-run-bg");
+        });
+
+        it("dashboard includes theme toggle button in header", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app).get("/dashboard").set("Cookie", cookie).expect(200);
+            expect(res.text).toContain("theme-toggle");
+            expect(res.text).toContain("toggleTheme");
+        });
+
+        it("dashboard includes FOUC prevention script", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app).get("/dashboard").set("Cookie", cookie).expect(200);
+            expect(res.text).toContain("impl-theme");
+            expect(res.text).toContain("localStorage");
+        });
+
+        it("dashboard uses CSS variables instead of hardcoded dark colors", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app).get("/dashboard").set("Cookie", cookie).expect(200);
+            expect(res.text).toContain("var(--bg)");
+            expect(res.text).toContain("var(--bg-card)");
+            expect(res.text).toContain("var(--text)");
         });
     });
 });

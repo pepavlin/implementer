@@ -46,12 +46,30 @@ interface TaskEntry {
     /** True when this task was just resumed after a server restart. Causes the first post-restart
      *  failure to retry immediately (delay=0) instead of waiting the full errorRetry.delaySeconds. */
     resumedFromRestart?: boolean;
+    /** True when cancelTask() was called on a running task. Prevents executeTask from overwriting cancelled status. */
+    cancelled?: boolean;
+    /** setTimeout handle for scheduled retries — cleared on cancelTask to abort pending retry. */
+    retryTimeoutId?: ReturnType<typeof setTimeout>;
 }
 
 export class TaskActiveError extends Error {
     constructor(status: string) {
         super(`Cannot retry task with status: ${status}`);
         this.name = "TaskActiveError";
+    }
+}
+
+export class TaskCancelError extends Error {
+    constructor(status: string) {
+        super(`Cannot cancel task with status: ${status}`);
+        this.name = "TaskCancelError";
+    }
+}
+
+export class TaskEditError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "TaskEditError";
     }
 }
 
@@ -474,7 +492,9 @@ export class TaskManager {
             `[${task.taskId}] Retrying in ${delaySeconds}s (attempt ${task.attempt}/${retryConfig.maxAttempts})`
         );
 
-        setTimeout(async () => {
+        const timeoutId = setTimeout(async () => {
+            const entryForTimer = this.tasks.get(task.taskId);
+            if (entryForTimer) entryForTimer.retryTimeoutId = undefined;
             // If PR is active (another task for the same PR is running), queue and wait
             if (task.pullRequestNumber !== undefined && this.isPrActive(task.projectId, task.pullRequestNumber)) {
                 task.status = "queued";
@@ -534,6 +554,10 @@ export class TaskManager {
                 console.error(`[${task.taskId}] Retry execution failed:`, err);
             });
         }, delaySeconds * 1000);
+
+        // Store timeout ID so it can be cancelled
+        const entryForTimeout = this.tasks.get(task.taskId);
+        if (entryForTimeout) entryForTimeout.retryTimeoutId = timeoutId;
     }
 
     private fireWebhook(taskId: string, status: string, url: string): void {
@@ -942,6 +966,13 @@ export class TaskManager {
                 }
             }
 
+            // If the task was cancelled while running, respect that status
+            if (this.tasks.get(task.taskId)?.cancelled) {
+                task.status = "cancelled";
+                console.log(`[${task.taskId}] Task was cancelled.`);
+                return;
+            }
+
             if (result.exitCode === 0) {
                 if (hasCommits) {
                     // Success with commits: force-push (rebase rewrites history) and create ready PR
@@ -1120,12 +1151,20 @@ export class TaskManager {
                 );
             }
         } catch (err) {
-            task.status = "failed";
-            task.error = err instanceof Error ? err.message : String(err);
-            task.output = executor.getOutput();
-            console.error(`[${task.taskId}] Error:`, task.error);
+            // If cancelled, preserve the cancelled status (don't overwrite with failed)
+            if (!this.tasks.get(task.taskId)?.cancelled) {
+                task.status = "failed";
+                task.error = err instanceof Error ? err.message : String(err);
+                task.output = executor.getOutput();
+                console.error(`[${task.taskId}] Error:`, task.error);
+            } else {
+                console.log(`[${task.taskId}] Task was cancelled (caught during execution).`);
+            }
         } finally {
-            task.completedAt = new Date().toISOString();
+            // Preserve completedAt if already set by cancelTask
+            if (!task.completedAt) {
+                task.completedAt = new Date().toISOString();
+            }
             this.store.save({ ...task, workspaceId: workspace.id });
             // Release PR lock so the next task for this PR can be dequeued
             if (task.pullRequestNumber !== undefined) {
@@ -1156,5 +1195,105 @@ export class TaskManager {
         if (task.callbackUrl) {
             this.fireWebhook(task.taskId, task.status, task.callbackUrl);
         }
+    }
+
+    /**
+     * Cancel a task that is queued, running, or retrying.
+     * - Queued: removed from the queue immediately, marked as cancelled.
+     * - Running: executor process is killed; executeTask will detect the cancelled flag and clean up.
+     * - Retrying: the pending retry timer is cleared, task is marked as cancelled.
+     * Throws TaskCancelError if the task is already in a terminal state.
+     */
+    cancelTask(projectId: string, taskId: string): Task {
+        const state = this.projects.get(projectId);
+        if (!state) throw new Error(`Unknown project: ${projectId}`);
+
+        const entry = this.tasks.get(taskId);
+        if (!entry || entry.task.projectId !== projectId) {
+            throw new Error(`Task not found: ${taskId}`);
+        }
+
+        const task = entry.task;
+
+        if (task.status !== "queued" && task.status !== "running" && task.status !== "retrying") {
+            throw new TaskCancelError(task.status);
+        }
+
+        const previousStatus = task.status;
+
+        if (previousStatus === "queued") {
+            // Remove from the project's queue
+            const queue = this.queues.get(projectId);
+            if (queue) {
+                const idx = queue.indexOf(taskId);
+                if (idx !== -1) queue.splice(idx, 1);
+            }
+            // Release PR lock if it was held (queued tasks don't hold the PR lock, but check anyway)
+            task.status = "cancelled";
+            task.completedAt = new Date().toISOString();
+            this.store.save({ ...task, workspaceId: entry.workspaceId });
+            console.log(`[${taskId}] Cancelled (was queued)`);
+        } else if (previousStatus === "retrying") {
+            // Clear the pending retry timer
+            if (entry.retryTimeoutId !== undefined) {
+                clearTimeout(entry.retryTimeoutId);
+                entry.retryTimeoutId = undefined;
+            }
+            task.status = "cancelled";
+            task.completedAt = new Date().toISOString();
+            this.store.save({ ...task, workspaceId: entry.workspaceId });
+            console.log(`[${taskId}] Cancelled (was retrying)`);
+        } else {
+            // running: set cancelled flag, kill executor — executeTask's finally block will clean up
+            entry.cancelled = true;
+            task.status = "cancelled";
+            task.completedAt = new Date().toISOString();
+            this.store.save({ ...task, workspaceId: entry.workspaceId });
+            if (entry.executor) {
+                entry.executor.kill();
+            }
+            console.log(`[${taskId}] Cancellation requested (was running)`);
+        }
+
+        if (task.callbackUrl) {
+            this.fireWebhook(taskId, task.status, task.callbackUrl);
+        }
+
+        return task;
+    }
+
+    /**
+     * Edit the prompt of a queued task.
+     * Only queued tasks can be edited — running/retrying tasks are already executing.
+     * The title is cleared so it can be regenerated when the task eventually runs.
+     * Throws TaskEditError if the task cannot be edited.
+     */
+    editTask(projectId: string, taskId: string, newPrompt: string): Task {
+        const state = this.projects.get(projectId);
+        if (!state) throw new Error(`Unknown project: ${projectId}`);
+
+        const entry = this.tasks.get(taskId);
+        if (!entry || entry.task.projectId !== projectId) {
+            throw new Error(`Task not found: ${taskId}`);
+        }
+
+        const task = entry.task;
+
+        if (task.status !== "queued") {
+            throw new TaskEditError(`Cannot edit task with status: ${task.status}. Only queued tasks can be edited.`);
+        }
+
+        if (!newPrompt || !newPrompt.trim()) {
+            throw new TaskEditError("Prompt cannot be empty.");
+        }
+
+        task.prompt = newPrompt.trim();
+        // Clear the title so the user sees the updated prompt and title regenerates on next run
+        task.title = undefined;
+
+        this.store.save({ ...task, workspaceId: entry.workspaceId });
+        console.log(`[${taskId}] Prompt updated`);
+
+        return task;
     }
 }
