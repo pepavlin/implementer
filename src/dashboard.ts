@@ -396,8 +396,8 @@ export function dashboardHtml(hasPassword: boolean): string {
           <textarea id="nt-prompt" class="form-inp" rows="8" placeholder="Describe what to implement\u2026"></textarea>
         </div>
         <div class="form-g">
-          <label class="form-lbl" for="nt-pr">Pull Request # <span class="muted" style="font-weight:400">(optional)</span></label>
-          <input type="number" id="nt-pr" class="form-inp" placeholder="42" min="1">
+          <label class="form-lbl" for="nt-continue">Continue Task ID <span class="muted" style="font-weight:400">(optional)</span></label>
+          <input type="text" id="nt-continue" class="form-inp" placeholder="TVchAThD">
         </div>
         <div id="nt-err" class="form-err" style="display:none"></div>
       </div>
@@ -509,7 +509,8 @@ export function dashboardHtml(hasPassword: boolean): string {
           if(t.title)html+='<div class="det-row"><div class="det-lbl">Title</div><div class="det-val">'+esc(t.title)+'</div></div>';
           html+='<div class="det-row"><div class="det-lbl">Project</div><div class="det-val">'+esc(t.projectId)+'</div></div>';
           if(t.branch)html+='<div class="det-row"><div class="det-lbl">Branch</div><div class="det-val mono">'+esc(t.branch)+'</div></div>';
-          if(t.pullRequestNumber)html+='<div class="det-row"><div class="det-lbl">PR #</div><div class="det-val">'+esc(String(t.pullRequestNumber))+'</div></div>';
+          if(t.chainId)html+='<div class="det-row"><div class="det-lbl">Chain</div><div class="det-val mono">'+esc(t.chainId)+'</div></div>';
+          if(t.parentTaskId)html+='<div class="det-row"><div class="det-lbl">Parent Task</div><div class="det-val mono">'+esc(t.parentTaskId)+'</div></div>';
           html+='<div class="det-row"><div class="det-lbl">Duration</div><div class="det-val mono">'+dur(t.durationSeconds)+'</div></div>';
           html+='<div class="det-row"><div class="det-lbl">Started</div><div class="det-val mono">'+fmtDate(t.startedAt)+'</div></div>';
           if(t.completedAt)html+='<div class="det-row"><div class="det-lbl">Completed</div><div class="det-val mono">'+fmtDate(t.completedAt)+'</div></div>';
@@ -598,7 +599,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       sel.innerHTML=projects.map(function(p){return '<option value="'+esc(p)+'">'+esc(p)+'</option>';}).join('');
       if(selectedProjects.size===1){sel.value=Array.from(selectedProjects)[0];}
       document.getElementById('nt-prompt').value='';
-      document.getElementById('nt-pr').value='';
+      document.getElementById('nt-continue').value='';
       document.getElementById('nt-err').style.display='none';
       document.getElementById('nt-submit').disabled=false;
       document.getElementById('nt-overlay').style.display='flex';
@@ -608,12 +609,12 @@ export function dashboardHtml(hasPassword: boolean): string {
     function submitNewTask(){
       var projectId=document.getElementById('nt-proj').value;
       var prompt=document.getElementById('nt-prompt').value.trim();
-      var pr=document.getElementById('nt-pr').value;
+      var contId=document.getElementById('nt-continue').value.trim();
       var errEl=document.getElementById('nt-err');
       errEl.style.display='none';
       if(!projectId||!prompt){errEl.textContent='Project and prompt are required.';errEl.style.display='block';return;}
       var body={projectId:projectId,prompt:prompt};
-      if(pr){var n=parseInt(pr,10);if(n>0)body.pullRequestNumber=n;}
+      if(contId)body.continueTaskId=contId;
       var btn=document.getElementById('nt-submit');
       btn.disabled=true;
       fetch('/dashboard/api/task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
@@ -789,7 +790,8 @@ export function registerDashboardRoutes(
             branch: task.branch,
             prompt: task.prompt,
             title: task.title ?? null,
-            pullRequestNumber: task.pullRequestNumber ?? null,
+            parentTaskId: task.parentTaskId ?? null,
+            chainId: task.chainId ?? null,
             status: task.status,
             attempt: task.attempt,
             startedAt: task.startedAt,
@@ -822,7 +824,8 @@ export function registerDashboardRoutes(
             res.status(401).json({ error: "Unauthorized" });
             return;
         }
-        const { projectId, prompt, pullRequestNumber } = req.body ?? {};
+        const { projectId, prompt, continueTaskId } =
+            req.body ?? {};
         if (typeof projectId !== "string" || !config.projects[projectId]) {
             res.status(400).json({ error: "Invalid or missing project ID" });
             return;
@@ -831,17 +834,14 @@ export function registerDashboardRoutes(
             res.status(400).json({ error: "Prompt is required" });
             return;
         }
-        const prNum =
-            typeof pullRequestNumber === "number" && pullRequestNumber > 0
-                ? pullRequestNumber
-                : typeof pullRequestNumber === "string" &&
-                    parseInt(pullRequestNumber, 10) > 0
-                  ? parseInt(pullRequestNumber, 10)
-                  : undefined;
+        const contId =
+            typeof continueTaskId === "string" && continueTaskId.trim()
+                ? continueTaskId.trim()
+                : undefined;
         try {
             const task = await taskManager.startTask(projectId as ProjectId, {
                 prompt: prompt.trim(),
-                pullRequestNumber: prNum
+                continueTaskId: contId
             });
             res.json({
                 taskId: task.taskId,

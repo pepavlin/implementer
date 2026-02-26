@@ -18,7 +18,7 @@ import { Config } from "./config/config.js";
 
 const TaskCreateSchema = z.object({
     prompt: z.string().min(1),
-    pullRequestNumber: z.number().int().positive().optional(),
+    continueTaskId: z.string().min(1).optional(),
     callbackUrl: z.string().url().optional()
 });
 
@@ -35,7 +35,8 @@ const TASK_STATUSES = [
 const TaskStatusEnum = z.enum(TASK_STATUSES);
 
 const TaskListQuerySchema = z.object({
-    status: z.union([TaskStatusEnum, z.array(TaskStatusEnum)]).optional()
+    status: z.union([TaskStatusEnum, z.array(TaskStatusEnum)]).optional(),
+    chainId: z.string().optional()
 });
 
 const MAX_LOG_SIZE = 1024 * 1024; // 1MB
@@ -109,7 +110,9 @@ export function createServer(
             res.status(200).json({
                 taskId: task.taskId,
                 branch: task.branch,
-                status: task.status
+                status: task.status,
+                parentTaskId: task.parentTaskId ?? null,
+                chainId: task.chainId ?? null
             });
         })
     );
@@ -127,15 +130,17 @@ export function createServer(
                       : [parsed.data.status]
               )
             : null;
+        const { chainId } = parsed.data;
         const tasks = taskManager
-            .listTasks(getProjectId(res))
+            .listTasks(getProjectId(res), chainId ? { chainId } : undefined)
             .filter((task) => !statusFilter || statusFilter.has(task.status))
             .map((task) => ({
                 taskId: task.taskId,
                 branch: task.branch,
                 prompt: task.prompt,
                 title: task.title ?? null,
-                pullRequestNumber: task.pullRequestNumber ?? null,
+                parentTaskId: task.parentTaskId ?? null,
+                chainId: task.chainId ?? null,
                 status: task.status,
                 startedAt: task.startedAt,
                 completedAt: task.completedAt,
@@ -154,7 +159,8 @@ export function createServer(
             branch: task.branch,
             prompt: task.prompt,
             title: task.title ?? null,
-            pullRequestNumber: task.pullRequestNumber ?? null,
+            parentTaskId: task.parentTaskId ?? null,
+            chainId: task.chainId ?? null,
             status: task.status,
             attempt: task.attempt,
             startedAt: task.startedAt,

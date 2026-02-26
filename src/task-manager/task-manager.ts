@@ -9,6 +9,7 @@ import { TokenManager } from "../auth.js";
 import { Config } from "../config/config.js";
 import { ProjectState, TaskEntry } from "./types.js";
 import { TaskActiveError, TaskCancelError, TaskEditError } from "./errors.js";
+import { BadRequestError } from "../errors.js";
 import { fireWebhook } from "./utils.js";
 import {
     TaskRunnerContext,
@@ -33,8 +34,8 @@ export class TaskManager {
     private tasks: Map<string, TaskEntry> = new Map();
     /** Per-project FIFO queues of taskIds waiting to run. */
     private queues: Map<ProjectId, string[]> = new Map();
-    /** Per-project set of PR numbers that have a task currently running. */
-    private activePrNumbers: Map<ProjectId, Set<number>> = new Map();
+    /** Per-project set of chain IDs that have a task currently running. */
+    private activeChains: Map<ProjectId, Set<string>> = new Map();
 
     constructor(config: Config) {
         this.serverWorkspaceDir = config.server.workspaceDir;
@@ -78,9 +79,9 @@ export class TaskManager {
             gitManager: this.gitManager,
             store: this.store,
             serverWorkspaceDir: this.serverWorkspaceDir,
-            isPrActive: (pid, pr) => this.isPrActive(pid, pr),
-            markPrActive: (pid, pr) => this.markPrActive(pid, pr),
-            unmarkPrActive: (pid, pr) => this.unmarkPrActive(pid, pr),
+            isChainActive: (pid, cid) => this.isChainActive(pid, cid),
+            markChainActive: (pid, cid) => this.markChainActive(pid, cid),
+            unmarkChainActive: (pid, cid) => this.unmarkChainActive(pid, cid),
             shouldQueue: (pid, s) => this.shouldQueue(pid, s),
             enqueue: (pid, tid) => this.enqueue(pid, tid),
             tryDequeue: (pid, s) => this.tryDequeue(pid, s),
@@ -195,11 +196,11 @@ export class TaskManager {
                 entry.task.status = "running";
                 entry.task.output = "";
 
-                // Mark PR as active before resuming so tryDequeue respects the serial constraint
-                if (entry.task.pullRequestNumber !== undefined) {
-                    this.markPrActive(
+                // Mark chain as active before resuming so tryDequeue respects the serial constraint
+                if (entry.task.chainId !== undefined) {
+                    this.markChainActive(
                         entry.task.projectId,
-                        entry.task.pullRequestNumber
+                        entry.task.chainId
                     );
                 }
 
@@ -252,9 +253,20 @@ export class TaskManager {
         return entry.task;
     }
 
-    listTasks(projectId: ProjectId): Task[] {
+    listTasks(projectId: ProjectId, filters?: { chainId?: string }): Task[] {
         return Array.from(this.tasks.values())
-            .filter((entry) => entry.task.projectId === projectId)
+            .filter((entry) => {
+                if (entry.task.projectId !== projectId) return false;
+                if (filters?.chainId) {
+                    const cid = filters.chainId;
+                    // Match tasks in the chain or the root task itself
+                    return (
+                        entry.task.chainId === cid ||
+                        entry.task.taskId === cid
+                    );
+                }
+                return true;
+            })
             .map((entry) => entry.task);
     }
 
@@ -308,18 +320,33 @@ export class TaskManager {
         this.queues.get(projectId)!.push(taskId);
     }
 
-    private markPrActive(projectId: ProjectId, prNumber: number): void {
-        if (!this.activePrNumbers.has(projectId))
-            this.activePrNumbers.set(projectId, new Set());
-        this.activePrNumbers.get(projectId)!.add(prNumber);
+    private markChainActive(projectId: ProjectId, chainId: string): void {
+        if (!this.activeChains.has(projectId))
+            this.activeChains.set(projectId, new Set());
+        this.activeChains.get(projectId)!.add(chainId);
     }
 
-    private unmarkPrActive(projectId: ProjectId, prNumber: number): void {
-        this.activePrNumbers.get(projectId)?.delete(prNumber);
+    private unmarkChainActive(projectId: ProjectId, chainId: string): void {
+        this.activeChains.get(projectId)?.delete(chainId);
     }
 
-    private isPrActive(projectId: ProjectId, prNumber: number): boolean {
-        return this.activePrNumbers.get(projectId)?.has(prNumber) ?? false;
+    private isChainActive(projectId: ProjectId, chainId: string): boolean {
+        return this.activeChains.get(projectId)?.has(chainId) ?? false;
+    }
+
+    /** Walk parentTaskId links to find the leaf (latest) task in a chain. */
+    private findChainTip(taskId: string): string {
+        const childIndex = new Map<string, string>();
+        for (const [tid, entry] of this.tasks) {
+            if (entry.task.parentTaskId) {
+                childIndex.set(entry.task.parentTaskId, tid);
+            }
+        }
+        let current = taskId;
+        while (childIndex.has(current)) {
+            current = childIndex.get(current)!;
+        }
+        return current;
     }
 
     private tryDequeue(projectId: ProjectId, state: ProjectState): void {
@@ -327,15 +354,15 @@ export class TaskManager {
         if (!queue || queue.length === 0) return;
         if (this.shouldQueue(projectId, state)) return;
 
-        // Find the first task whose PR is not currently active (or has no PR).
+        // Find the first task whose chain is not currently active.
         const idx = queue.findIndex((tid) => {
             const e = this.tasks.get(tid);
             if (!e) return true; // stale entry — will be cleaned up below
-            const prNum = e.task.pullRequestNumber;
-            return prNum === undefined || !this.isPrActive(projectId, prNum);
+            const cid = e.task.chainId;
+            return cid === undefined || !this.isChainActive(projectId, cid);
         });
 
-        if (idx === -1) return; // All queued tasks are waiting for their PR to free up
+        if (idx === -1) return; // All queued tasks are waiting for their chain to free up
 
         const taskId = queue.splice(idx, 1)[0];
         const entry = this.tasks.get(taskId);
@@ -347,9 +374,9 @@ export class TaskManager {
 
         const task = entry.task;
 
-        // Mark PR as active immediately (synchronously) before any async work
-        if (task.pullRequestNumber !== undefined) {
-            this.markPrActive(projectId, task.pullRequestNumber);
+        // Mark chain as active immediately (synchronously) before any async work
+        if (task.chainId !== undefined) {
+            this.markChainActive(projectId, task.chainId);
         }
 
         const executor = new Executor(
@@ -382,9 +409,9 @@ export class TaskManager {
                 task.error = err instanceof Error ? err.message : String(err);
                 task.completedAt = new Date().toISOString();
                 this.store.save({ ...task, workspaceId: entry.workspaceId });
-                // Release PR lock on failure
-                if (task.pullRequestNumber !== undefined) {
-                    this.unmarkPrActive(projectId, task.pullRequestNumber);
+                // Release chain lock on failure
+                if (task.chainId !== undefined) {
+                    this.unmarkChainActive(projectId, task.chainId);
                 }
                 if (task.callbackUrl) {
                     fireWebhook(task.taskId, task.status, task.callbackUrl);
@@ -405,11 +432,43 @@ export class TaskManager {
 
         const taskId = nanoid(8);
 
+        // Resolve chain continuation fields
+        let parentTaskId: string | undefined;
+        let chainId: string | undefined;
+        let inheritedBranch: string | null = null;
+
+        if (request.continueTaskId) {
+            const parentEntry = this.tasks.get(request.continueTaskId);
+            if (!parentEntry || parentEntry.task.projectId !== projectId) {
+                throw new BadRequestError(
+                    `Task not found: ${request.continueTaskId}`
+                );
+            }
+            // Validate it's the chain tip (no children)
+            const tip = this.findChainTip(request.continueTaskId);
+            if (tip !== request.continueTaskId) {
+                throw new BadRequestError(
+                    `Task ${request.continueTaskId} is not the latest in its chain. Continue from ${tip} instead.`
+                );
+            }
+            // Validate parent has a branch
+            if (!parentEntry.task.branch) {
+                throw new BadRequestError(
+                    `Task ${request.continueTaskId} has no branch to continue from`
+                );
+            }
+            parentTaskId = request.continueTaskId;
+            chainId =
+                parentEntry.task.chainId ?? parentEntry.task.taskId;
+            inheritedBranch = parentEntry.task.branch;
+        }
+
         const task: Task = {
             taskId,
             projectId,
-            branch: null,
-            pullRequestNumber: request.pullRequestNumber,
+            branch: inheritedBranch,
+            parentTaskId,
+            chainId,
             prompt: request.prompt,
             status: "queued",
             startedAt: new Date().toISOString(),
@@ -461,9 +520,9 @@ export class TaskManager {
         }
 
         // For normal tasks: if branch was cleaned up (no commits), regenerate a slug so
-        // executeTask creates a fresh branch. For PR tasks the branch is never nulled out,
-        // so this only triggers for non-PR tasks.
-        if (!task.branch && task.pullRequestNumber === undefined) {
+        // executeTask creates a fresh branch. For chain tasks the branch is never nulled out,
+        // so this only triggers for non-chain tasks.
+        if (!task.branch && task.chainId === undefined) {
             const slugExecutor = new Executor(
                 state.config.claudeCode,
                 state.tokenManager
@@ -493,10 +552,10 @@ export class TaskManager {
             `[${taskId}] Manual retry requested — branch: ${task.branch}`
         );
 
-        // If the PR is already active, queue the retry instead of running immediately
+        // If the chain is already active, queue the retry instead of running immediately
         if (
-            task.pullRequestNumber !== undefined &&
-            this.isPrActive(projectId, task.pullRequestNumber)
+            task.chainId !== undefined &&
+            this.isChainActive(projectId, task.chainId)
         ) {
             task.status = "queued";
             entry.executor = null;
@@ -505,7 +564,7 @@ export class TaskManager {
             this.store.save({ ...task, workspaceId: null });
             this.enqueue(projectId, taskId);
             console.log(
-                `[${taskId}] Retry queued — PR #${task.pullRequestNumber} is already active`
+                `[${taskId}] Retry queued — chain ${task.chainId} is already active`
             );
             return task;
         }
@@ -521,9 +580,9 @@ export class TaskManager {
             return task;
         }
 
-        // Mark PR as active immediately before any async work
-        if (task.pullRequestNumber !== undefined) {
-            this.markPrActive(projectId, task.pullRequestNumber);
+        // Mark chain as active immediately before any async work
+        if (task.chainId !== undefined) {
+            this.markChainActive(projectId, task.chainId);
         }
 
         const executor = new Executor(
@@ -540,9 +599,9 @@ export class TaskManager {
                 state.config.auth?.githubToken
             );
         } catch (_err) {
-            // Unmark PR before re-queuing so tryDequeue can pick it up correctly
-            if (task.pullRequestNumber !== undefined) {
-                this.unmarkPrActive(projectId, task.pullRequestNumber);
+            // Unmark chain before re-queuing so tryDequeue can pick it up correctly
+            if (task.chainId !== undefined) {
+                this.unmarkChainActive(projectId, task.chainId);
             }
             task.status = "queued";
             entry.executor = null;

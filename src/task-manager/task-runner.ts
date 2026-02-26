@@ -17,9 +17,9 @@ export interface TaskRunnerContext {
     gitManager: GitManager;
     store: TaskStore;
     serverWorkspaceDir: string;
-    isPrActive(projectId: ProjectId, prNumber: number): boolean;
-    markPrActive(projectId: ProjectId, prNumber: number): void;
-    unmarkPrActive(projectId: ProjectId, prNumber: number): void;
+    isChainActive(projectId: ProjectId, chainId: string): boolean;
+    markChainActive(projectId: ProjectId, chainId: string): void;
+    unmarkChainActive(projectId: ProjectId, chainId: string): void;
     shouldQueue(projectId: ProjectId, state: ProjectState): boolean;
     enqueue(projectId: ProjectId, taskId: string): void;
     tryDequeue(projectId: ProjectId, state: ProjectState): void;
@@ -31,7 +31,7 @@ export async function executeTask(
     workspace: { id: number; dir: string },
     state: ProjectState,
     ctx: TaskRunnerContext,
-    /** Override which branch to checkout. Used for resume/retry. For PR tasks defaults to task.branch. */
+    /** Override which branch to checkout. Used for resume/retry. For chain tasks defaults to task.branch. */
     checkoutBranch?: string
 ): Promise<void> {
     const repos = state.config.repositories;
@@ -39,10 +39,10 @@ export async function executeTask(
     const executor = entry.executor!;
     const branchName = task.branch!;
     const githubToken = state.config.auth?.githubToken;
-    // PR tasks always check out their existing branch; normal tasks create a new one.
+    // Chain tasks always check out their existing branch; normal tasks create a new one.
     const fromBranch =
         checkoutBranch ??
-        (task.pullRequestNumber !== undefined ? task.branch! : undefined);
+        (task.chainId !== undefined ? task.branch! : undefined);
 
     try {
         // Step 1: Prepare branch in all repos
@@ -252,10 +252,10 @@ export async function executeTask(
                 );
             } else {
                 // Success with no commits
-                if (task.pullRequestNumber !== undefined) {
-                    // PR task: keep the branch — the PR already exists on GitHub
+                if (task.chainId !== undefined) {
+                    // Chain task: keep the branch — future chain tasks may need it
                     console.log(
-                        `[${task.taskId}] No new commits on PR branch — leaving branch intact.`
+                        `[${task.taskId}] No new commits on continuation branch — leaving branch intact.`
                     );
                 } else {
                     // Normal task: delete remote branch and clear branch ref
@@ -336,10 +336,10 @@ export async function executeTask(
                 }
             } else {
                 // Failure with no commits
-                if (task.pullRequestNumber !== undefined) {
-                    // PR task: keep the branch — the PR already exists on GitHub
+                if (task.chainId !== undefined) {
+                    // Chain task: keep the branch
                     console.log(
-                        `[${task.taskId}] Failed with no commits on PR branch — leaving branch intact.`
+                        `[${task.taskId}] Failed with no commits on continuation branch — leaving branch intact.`
                     );
                 } else {
                     // Normal task: delete remote branch
@@ -380,9 +380,9 @@ export async function executeTask(
             task.completedAt = new Date().toISOString();
         }
         ctx.store.save({ ...task, workspaceId: workspace.id });
-        // Release PR lock so the next task for this PR can be dequeued
-        if (task.pullRequestNumber !== undefined) {
-            ctx.unmarkPrActive(task.projectId, task.pullRequestNumber);
+        // Release chain lock so the next task in the chain can be dequeued
+        if (task.chainId !== undefined) {
+            ctx.unmarkChainActive(task.projectId, task.chainId);
         }
         state.pool.release(workspace.id);
         // Start next queued task for this project if capacity is now available
@@ -435,10 +435,10 @@ export function scheduleRetry(
     const timeoutId = setTimeout(async () => {
         const entryForTimer = ctx.tasks.get(task.taskId);
         if (entryForTimer) entryForTimer.retryTimeoutId = undefined;
-        // If PR is active (another task for the same PR is running), queue and wait
+        // If chain is active (another task in the same chain is running), queue and wait
         if (
-            task.pullRequestNumber !== undefined &&
-            ctx.isPrActive(task.projectId, task.pullRequestNumber)
+            task.chainId !== undefined &&
+            ctx.isChainActive(task.projectId, task.chainId)
         ) {
             task.status = "queued";
             ctx.enqueue(task.projectId, task.taskId);
@@ -449,7 +449,7 @@ export function scheduleRetry(
                     workspaceId: entry.workspaceId
                 });
             console.log(
-                `[${task.taskId}] Retry queued — PR #${task.pullRequestNumber} is already active`
+                `[${task.taskId}] Retry queued — chain ${task.chainId} is already active`
             );
             return;
         }
@@ -468,9 +468,9 @@ export function scheduleRetry(
             return;
         }
 
-        // Mark PR as active before running
-        if (task.pullRequestNumber !== undefined) {
-            ctx.markPrActive(task.projectId, task.pullRequestNumber);
+        // Mark chain as active before running
+        if (task.chainId !== undefined) {
+            ctx.markChainActive(task.projectId, task.chainId);
         }
 
         task.status = "running";
@@ -483,9 +483,9 @@ export function scheduleRetry(
                 state.config.auth?.githubToken
             );
         } catch (err) {
-            // Pool full despite check — queue it; unmark PR first
-            if (task.pullRequestNumber !== undefined) {
-                ctx.unmarkPrActive(task.projectId, task.pullRequestNumber);
+            // Pool full despite check — queue it; unmark chain first
+            if (task.chainId !== undefined) {
+                ctx.unmarkChainActive(task.projectId, task.chainId);
             }
             task.status = "queued";
             ctx.enqueue(task.projectId, task.taskId);
@@ -530,35 +530,7 @@ export async function prepareAndRunTask(
     const { taskId, projectId } = task;
 
     // Resolve branch and title based on task type
-    if (task.pullRequestNumber !== undefined && !task.branch) {
-        // PR task: fetch the PR's head branch from GitHub
-        console.log(
-            `[${taskId}] Fetching branch for PR #${task.pullRequestNumber}...`
-        );
-        const primaryRepo = state.config.repositories[0];
-        const prBranch = await ctx.gitManager.getPullRequestBranch(
-            task.pullRequestNumber,
-            primaryRepo,
-            ctx.serverWorkspaceDir,
-            state.config.auth?.githubToken
-        );
-        task.branch = prBranch;
-        if (!task.title) {
-            const metaExecutor = new Executor(
-                state.config.claudeCode,
-                state.tokenManager
-            );
-            const { title } = await metaExecutor.generateTaskMetadata(
-                task.prompt,
-                taskId
-            );
-            if (title) task.title = title;
-        }
-        console.log(
-            `[${taskId}] Branch: ${task.branch}, Title: ${task.title}`
-        );
-        ctx.store.save({ ...task, workspaceId: null });
-    } else if (!task.branch) {
+    if (!task.branch) {
         // Normal task: generate branch slug and title
         console.log(`[${taskId}] Generating branch name and title...`);
         const metaExecutor = new Executor(
@@ -591,15 +563,15 @@ export async function prepareAndRunTask(
         ctx.store.save({ ...task, workspaceId: null });
     }
 
-    // If the PR is already active (another task for the same PR is running), queue and wait
+    // If the chain is already active (another task in the same chain is running), queue and wait
     if (
-        task.pullRequestNumber !== undefined &&
-        ctx.isPrActive(projectId, task.pullRequestNumber)
+        task.chainId !== undefined &&
+        ctx.isChainActive(projectId, task.chainId)
     ) {
         ctx.enqueue(projectId, taskId);
         const queueLen = ctx.queues.get(projectId)?.length ?? 0;
         console.log(
-            `[${taskId}] Queued — PR #${task.pullRequestNumber} is already active (position ${queueLen} for ${projectId})`
+            `[${taskId}] Queued — chain ${task.chainId} is already active (position ${queueLen} for ${projectId})`
         );
         return;
     }
@@ -614,9 +586,9 @@ export async function prepareAndRunTask(
         return;
     }
 
-    // Mark PR as active immediately before any async work
-    if (task.pullRequestNumber !== undefined) {
-        ctx.markPrActive(projectId, task.pullRequestNumber);
+    // Mark chain as active immediately before any async work
+    if (task.chainId !== undefined) {
+        ctx.markChainActive(projectId, task.chainId);
     }
 
     // Acquire workspace and run immediately
@@ -636,9 +608,9 @@ export async function prepareAndRunTask(
         );
     } catch (_err) {
         // Race condition: another task grabbed the last slot — queue and wait.
-        // Unmark PR so tryDequeue can re-pick it up correctly.
-        if (task.pullRequestNumber !== undefined) {
-            ctx.unmarkPrActive(projectId, task.pullRequestNumber);
+        // Unmark chain so tryDequeue can re-pick it up correctly.
+        if (task.chainId !== undefined) {
+            ctx.unmarkChainActive(projectId, task.chainId);
         }
         task.status = "queued";
         entry.executor = null;

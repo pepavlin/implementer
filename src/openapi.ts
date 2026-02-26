@@ -25,11 +25,11 @@ export const openApiSpec = {
                         description: "What to implement",
                         example: "Add a dark mode toggle to the navbar"
                     },
-                    pullRequestNumber: {
-                        type: "integer",
+                    continueTaskId: {
+                        type: "string",
                         description:
-                            "Continue work on an existing pull request. Tasks with the same PR number run sequentially.",
-                        example: 42
+                            "Task ID to continue from (inherits branch and chain).",
+                        example: "TVchAThD"
                     },
                     callbackUrl: {
                         type: "string",
@@ -55,6 +55,16 @@ export const openApiSpec = {
                         type: "string",
                         enum: ["queued"],
                         example: "queued"
+                    },
+                    parentTaskId: {
+                        type: "string",
+                        nullable: true,
+                        description: "Direct parent task ID in the chain (null for standalone tasks)"
+                    },
+                    chainId: {
+                        type: "string",
+                        nullable: true,
+                        description: "Root task ID of the chain (null for standalone tasks)"
                     }
                 }
             },
@@ -79,10 +89,15 @@ export const openApiSpec = {
                         nullable: true,
                         description: "Auto-generated short title for the task (null until generated)"
                     },
-                    pullRequestNumber: {
-                        type: "integer",
+                    parentTaskId: {
+                        type: "string",
                         nullable: true,
-                        description: "Pull request number this task is linked to (null for standalone tasks)"
+                        description: "Direct parent task ID in the chain (null for standalone tasks)"
+                    },
+                    chainId: {
+                        type: "string",
+                        nullable: true,
+                        description: "Root task ID of the chain (null for standalone tasks)"
                     },
                     status: {
                         type: "string",
@@ -204,6 +219,14 @@ export const openApiSpec = {
                         },
                         style: "form",
                         explode: true
+                    },
+                    {
+                        name: "chainId",
+                        in: "query",
+                        required: false,
+                        description:
+                            "Filter tasks by chain ID (root task ID). Returns only tasks belonging to the specified chain.",
+                        schema: { type: "string" }
                     }
                 ],
                 responses: {

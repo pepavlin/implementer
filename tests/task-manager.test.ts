@@ -477,7 +477,7 @@ describe("TaskManager", () => {
   });
 
   describe("startTask", () => {
-    it("returns immediately with queued status and null branch (no pullRequestNumber)", async () => {
+    it("returns immediately with queued status and null branch", async () => {
       const { TaskManager } = await import("../src/task-manager.js");
       const { Executor } = await import("../src/executor.js");
       const config = makeConfig();
@@ -509,33 +509,6 @@ describe("TaskManager", () => {
       expect(tm.getTask(PROJECT_ID, task.taskId)?.title).toBe("Add a Button");
     });
 
-    it("uses pullRequestNumber — fetches PR branch and stores pullRequestNumber on task", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
-      const { Executor } = await import("../src/executor.js");
-      const { GitManager } = await import("../src/git-manager.js");
-      const config = makeConfig();
-      const tm = new TaskManager(config);
-
-      // @ts-expect-error - private
-      const state = tm.projects.get(PROJECT_ID)!;
-      vi.spyOn(state.pool, "acquire").mockRejectedValue(new Error("no capacity"));
-      vi.spyOn(GitManager.prototype, "getPullRequestBranch").mockResolvedValue("feature/my-pr-branch");
-      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "fix-bug", title: "Fix Bug" });
-
-      const task = await tm.startTask(PROJECT_ID, { prompt: "Fix bug", pullRequestNumber: 42 });
-
-      expect(task.pullRequestNumber).toBe(42);
-      expect(task.status).toBe("queued");
-      expect(task.taskId).toBeDefined();
-
-      // Give background a moment to resolve PR branch
-      await new Promise((r) => setTimeout(r, 80));
-
-      // After PR branch fetch, branch should be set to the PR's head branch
-      expect(tm.getTask(PROJECT_ID, task.taskId)?.branch).toBe("feature/my-pr-branch");
-      expect(tm.getTask(PROJECT_ID, task.taskId)?.title).toBe("Fix Bug");
-    });
-
     it("registers the task in memory before slug generation completes", async () => {
       const { TaskManager } = await import("../src/task-manager.js");
       const { Executor } = await import("../src/executor.js");
@@ -549,115 +522,6 @@ describe("TaskManager", () => {
 
       expect(tm.getTask(PROJECT_ID, task.taskId)).toBeDefined();
       expect(tm.listTasks(PROJECT_ID)).toHaveLength(1);
-    });
-  });
-
-  describe("PR serial execution", () => {
-    it("queues second task for same PR when first is already active", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
-      const { Executor } = await import("../src/executor.js");
-      const { GitManager } = await import("../src/git-manager.js");
-      const config = makeConfig();
-      const tm = new TaskManager(config);
-
-      // @ts-expect-error - private
-      const state = tm.projects.get(PROJECT_ID)!;
-      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(true); // capacity is available
-      vi.spyOn(state.pool, "acquire").mockRejectedValue(new Error("should not be called"));
-      vi.spyOn(GitManager.prototype, "getPullRequestBranch").mockResolvedValue("feature/pr-42");
-      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "fix", title: "Fix" });
-
-      // Simulate PR #42 being already active
-      // @ts-expect-error - private
-      tm.markPrActive(PROJECT_ID, 42);
-
-      const task = await tm.startTask(PROJECT_ID, { prompt: "Add tests", pullRequestNumber: 42 });
-
-      // Give background a moment to complete
-      await new Promise((r) => setTimeout(r, 80));
-
-      // Despite free capacity, task should be queued because PR #42 is active
-      expect(tm.getTask(PROJECT_ID, task.taskId)?.status).toBe("queued");
-    });
-
-    it("runs task with different PR number in parallel even when another PR is active", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
-      const { Executor } = await import("../src/executor.js");
-      const { GitManager } = await import("../src/git-manager.js");
-      const config = makeConfig();
-      const tm = new TaskManager(config);
-
-      // @ts-expect-error - private
-      const state = tm.projects.get(PROJECT_ID)!;
-      // Simulate a free slot and then no more
-      let acquireCount = 0;
-      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(true);
-      vi.spyOn(state.pool, "acquire").mockImplementation(() => {
-        acquireCount++;
-        // Never resolve so task stays "running"
-        return new Promise(() => {});
-      });
-      vi.spyOn(GitManager.prototype, "getPullRequestBranch").mockResolvedValue("feature/pr-99");
-      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "feat", title: "Feat" });
-
-      // Simulate PR #42 being active
-      // @ts-expect-error - private
-      tm.markPrActive(PROJECT_ID, 42);
-
-      // Start a task for PR #99 (different PR)
-      const task = await tm.startTask(PROJECT_ID, { prompt: "New feature", pullRequestNumber: 99 });
-
-      await new Promise((r) => setTimeout(r, 80));
-
-      // Task for PR #99 should proceed to running (acquire was attempted)
-      expect(acquireCount).toBeGreaterThan(0);
-      expect(tm.getTask(PROJECT_ID, task.taskId)?.status).toBe("running");
-    });
-
-    it("dequeues next task for PR after first completes", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
-      const config = makeConfig();
-      const tm = new TaskManager(config);
-
-      // Pre-populate a queued task for PR #5
-      const store = new TaskStore(TMP);
-      store.save(makePersistedTask({
-        taskId: "pr-task-2",
-        status: "queued",
-        pullRequestNumber: 5,
-        branch: "feature/pr-5",
-      }));
-
-      const tm2 = new TaskManager(config);
-
-      // @ts-expect-error - private
-      const state = tm2.projects.get(PROJECT_ID)!;
-      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(false); // No capacity during init
-
-      await tm2.init();
-
-      const queuedTask = tm2.getTask(PROJECT_ID, "pr-task-2");
-      expect(queuedTask?.status).toBe("queued");
-
-      // Simulate PR #5 being active then released
-      // @ts-expect-error - private
-      tm2.markPrActive(PROJECT_ID, 5);
-
-      // When PR #5 is released, tryDequeue should pick up pr-task-2
-      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(true);
-      let acquireCalled = false;
-      vi.spyOn(state.pool, "acquire").mockImplementation(() => {
-        acquireCalled = true;
-        return new Promise(() => {}); // stay pending
-      });
-
-      // @ts-expect-error - private
-      tm2.unmarkPrActive(PROJECT_ID, 5);
-      // @ts-expect-error - private
-      tm2.tryDequeue(PROJECT_ID, state);
-
-      await new Promise((r) => setTimeout(r, 20));
-      expect(acquireCalled).toBe(true);
     });
   });
 
@@ -809,68 +673,6 @@ describe("TaskManager", () => {
       expect(result.attempt).toBe(1);
     });
 
-    it("queues retry when PR is already active instead of running in parallel", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
-      const config = makeConfig();
-      const store = new TaskStore(TMP);
-
-      store.save(makePersistedTask({
-        taskId: "pr-task",
-        status: "completed",
-        pullRequestNumber: 55,
-        branch: "feature/pr-55",
-        output: "Done",
-      }));
-
-      const tm = new TaskManager(config);
-      await tm.init();
-
-      // Simulate PR #55 being active (another task is running for it)
-      // @ts-expect-error - private
-      tm.markPrActive(PROJECT_ID, 55);
-
-      // @ts-expect-error - private
-      const state = tm.projects.get(PROJECT_ID)!;
-      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(true); // capacity available
-      const acquireSpy = vi.spyOn(state.pool, "acquire").mockRejectedValue(new Error("should not be called"));
-
-      const result = await tm.retryTask(PROJECT_ID, "pr-task");
-
-      // Must be queued, not running — serial execution requires waiting for PR to free
-      expect(result.status).toBe("queued");
-      expect(acquireSpy).not.toHaveBeenCalled();
-    });
-
-    it("marks PR as active when retrying directly (not queued)", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
-      const config = makeConfig();
-      const store = new TaskStore(TMP);
-
-      store.save(makePersistedTask({
-        taskId: "pr-retry-task",
-        status: "failed",
-        pullRequestNumber: 77,
-        branch: "feature/pr-77",
-        error: "Claude Code exited with code 1",
-      }));
-
-      const tm = new TaskManager(config);
-      await tm.init();
-
-      // @ts-expect-error - private
-      const state = tm.projects.get(PROJECT_ID)!;
-      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(true);
-      // Reject acquire so the task is re-queued (to avoid actual execution)
-      vi.spyOn(state.pool, "acquire").mockRejectedValue(new Error("no workspace"));
-
-      await tm.retryTask(PROJECT_ID, "pr-retry-task");
-
-      // After acquire fails, PR must be unmarked so tryDequeue can pick it up
-      // @ts-expect-error - private
-      expect(tm.isPrActive(PROJECT_ID, 77)).toBe(false);
-    });
-  });
-
   describe("project isolation", () => {
     it("getTask returns undefined for task belonging to another project", async () => {
       const { TaskManager } = await import("../src/task-manager.js");
@@ -900,6 +702,253 @@ describe("TaskManager", () => {
       // listTasks is scoped
       expect(tm.listTasks("project-a")).toHaveLength(1);
       expect(tm.listTasks("project-b")).toHaveLength(0);
+    });
+  });
+
+  describe("task chains", () => {
+    it("startTask with continueTaskId sets parentTaskId, chainId, and inherits branch", async () => {
+      const { TaskManager } = await import("../src/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      // Pre-populate a completed task to continue from
+      store.save(makePersistedTask({
+        taskId: "task-a",
+        status: "completed",
+        branch: "impl/feature-task-a",
+        output: "Done",
+      }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      // Mock metadata generation
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "continue", title: "Continue" });
+
+      // @ts-expect-error - private
+      const state = tm.projects.get(PROJECT_ID)!;
+      vi.spyOn(state.pool, "acquire").mockRejectedValue(new Error("no capacity"));
+
+      const task = await tm.startTask(PROJECT_ID, { prompt: "Continue work", continueTaskId: "task-a" });
+
+      expect(task.parentTaskId).toBe("task-a");
+      expect(task.chainId).toBe("task-a");
+      expect(task.branch).toBe("impl/feature-task-a");
+    });
+
+    it("rejects continueTaskId for non-existent task", async () => {
+      const { TaskManager } = await import("../src/task-manager.js");
+      const config = makeConfig();
+      const tm = new TaskManager(config);
+
+      await expect(
+        tm.startTask(PROJECT_ID, { prompt: "Continue", continueTaskId: "nonexistent" })
+      ).rejects.toThrow("Task not found: nonexistent");
+    });
+
+    it("rejects continueTaskId for task in different project", async () => {
+      const { TaskManager } = await import("../src/task-manager.js");
+      const config: Config = {
+        server: { workspaceDir: TMP },
+        projects: {
+          [PROJECT_ID]: {
+            repositories: [{ name: "my-repo", url: "https://github.com/test/repo.git", defaultBranch: "main" }],
+            claudeCode: { command: "claude" },
+          },
+          "other-project": {
+            repositories: [{ name: "other-repo", url: "https://github.com/test/other.git", defaultBranch: "main" }],
+            claudeCode: { command: "claude" },
+          },
+        },
+      };
+      const store = new TaskStore(TMP);
+      store.save(makePersistedTask({ taskId: "task-other", projectId: "other-project", status: "completed", branch: "impl/other" }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      // Trying to continue task-other from PROJECT_ID should fail
+      await expect(
+        tm.startTask(PROJECT_ID, { prompt: "Continue", continueTaskId: "task-other" })
+      ).rejects.toThrow("Task not found: task-other");
+    });
+
+    it("rejects continueTaskId that is not the chain tip (error mentions the actual tip)", async () => {
+      const { TaskManager } = await import("../src/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      // Build chain: A -> B
+      store.save(makePersistedTask({ taskId: "chain-a", status: "completed", branch: "impl/chain-a" }));
+      store.save(makePersistedTask({ taskId: "chain-b", status: "completed", branch: "impl/chain-a", parentTaskId: "chain-a", chainId: "chain-a" }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test" });
+
+      // Trying to continue from chain-a (not the tip) should fail mentioning chain-b
+      await expect(
+        tm.startTask(PROJECT_ID, { prompt: "Continue", continueTaskId: "chain-a" })
+      ).rejects.toThrow("Continue from chain-b instead");
+    });
+
+    it("rejects continueTaskId for task with null branch", async () => {
+      const { TaskManager } = await import("../src/task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "no-branch", status: "completed", branch: null }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      await expect(
+        tm.startTask(PROJECT_ID, { prompt: "Continue", continueTaskId: "no-branch" })
+      ).rejects.toThrow("has no branch to continue from");
+    });
+
+    it("chain tasks run serially (second task queues when chain active)", async () => {
+      const { TaskManager } = await import("../src/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "root-task", status: "completed", branch: "impl/root-task" }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test" });
+
+      // @ts-expect-error - private
+      const state = tm.projects.get(PROJECT_ID)!;
+      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(true);
+      vi.spyOn(state.pool, "acquire").mockRejectedValue(new Error("should not be called for second task"));
+
+      // Simulate chain being active
+      // @ts-expect-error - private
+      tm.markChainActive(PROJECT_ID, "root-task");
+
+      const task = await tm.startTask(PROJECT_ID, { prompt: "Chain task", continueTaskId: "root-task" });
+
+      // Give background a moment
+      await new Promise((r) => setTimeout(r, 80));
+
+      // Despite free capacity, task should be queued because chain is active
+      expect(tm.getTask(PROJECT_ID, task.taskId)?.status).toBe("queued");
+    });
+
+    it("chain task dequeues after active chain completes", async () => {
+      const { TaskManager } = await import("../src/task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      // Pre-populate a queued chain task
+      store.save(makePersistedTask({
+        taskId: "chain-task-2",
+        status: "queued",
+        chainId: "root-chain",
+        parentTaskId: "root-chain",
+        branch: "impl/root-chain",
+      }));
+
+      const tm2 = new TaskManager(config);
+
+      // @ts-expect-error - private
+      const state = tm2.projects.get(PROJECT_ID)!;
+      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(false);
+
+      await tm2.init();
+
+      const queuedTask = tm2.getTask(PROJECT_ID, "chain-task-2");
+      expect(queuedTask?.status).toBe("queued");
+
+      // Simulate chain being active then released
+      // @ts-expect-error - private
+      tm2.markChainActive(PROJECT_ID, "root-chain");
+
+      // Release chain, make capacity available
+      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(true);
+      let acquireCalled = false;
+      vi.spyOn(state.pool, "acquire").mockImplementation(() => {
+        acquireCalled = true;
+        return new Promise(() => {}); // stay pending
+      });
+
+      // @ts-expect-error - private
+      tm2.unmarkChainActive(PROJECT_ID, "root-chain");
+      // @ts-expect-error - private
+      tm2.tryDequeue(PROJECT_ID, state);
+
+      await new Promise((r) => setTimeout(r, 20));
+      expect(acquireCalled).toBe(true);
+    });
+
+    it("chain task preserves branch on no-commits completion", async () => {
+      const { TaskManager } = await import("../src/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({
+        taskId: "chain-root",
+        status: "completed",
+        branch: "impl/chain-root",
+      }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test" });
+
+      // @ts-expect-error - private
+      const state = tm.projects.get(PROJECT_ID)!;
+      vi.spyOn(state.pool, "acquire").mockRejectedValue(new Error("no capacity"));
+
+      const task = await tm.startTask(PROJECT_ID, { prompt: "Chain work", continueTaskId: "chain-root" });
+
+      // Chain task should inherit the branch
+      expect(task.branch).toBe("impl/chain-root");
+      expect(task.chainId).toBe("chain-root");
+    });
+
+    it("multi-task chain: A->B->C, continuing from C works, from A/B rejected", async () => {
+      const { TaskManager } = await import("../src/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      // Build chain: A -> B -> C
+      store.save(makePersistedTask({ taskId: "mt-a", status: "completed", branch: "impl/mt-a" }));
+      store.save(makePersistedTask({ taskId: "mt-b", status: "completed", branch: "impl/mt-a", parentTaskId: "mt-a", chainId: "mt-a" }));
+      store.save(makePersistedTask({ taskId: "mt-c", status: "completed", branch: "impl/mt-a", parentTaskId: "mt-b", chainId: "mt-a" }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test" });
+
+      // @ts-expect-error - private
+      const state = tm.projects.get(PROJECT_ID)!;
+      vi.spyOn(state.pool, "acquire").mockRejectedValue(new Error("no capacity"));
+
+      // Continuing from C (tip) should work
+      const taskD = await tm.startTask(PROJECT_ID, { prompt: "Continue from C", continueTaskId: "mt-c" });
+      expect(taskD.parentTaskId).toBe("mt-c");
+      expect(taskD.chainId).toBe("mt-a");
+
+      // Continuing from A (not tip) should fail
+      await expect(
+        tm.startTask(PROJECT_ID, { prompt: "Continue from A", continueTaskId: "mt-a" })
+      ).rejects.toThrow("not the latest in its chain");
+
+      // Continuing from B (not tip) should fail
+      await expect(
+        tm.startTask(PROJECT_ID, { prompt: "Continue from B", continueTaskId: "mt-b" })
+      ).rejects.toThrow("not the latest in its chain");
     });
   });
 

@@ -178,11 +178,12 @@ describe("server", () => {
             expect(res.body.error).toBe("boom");
         });
 
-        it("accepts pullRequestNumber as integer and passes it to startTask", async () => {
+        it("accepts continueTaskId and passes it to startTask", async () => {
             const task = makeMockTask({
                 status: "queued",
-                branch: null,
-                pullRequestNumber: 42
+                branch: "impl/inherited-branch",
+                parentTaskId: "parentXYZ",
+                chainId: "rootABC"
             });
             const startTask = vi.fn().mockResolvedValue(task);
             const tm = makeMockTaskManager({ startTask });
@@ -190,30 +191,53 @@ describe("server", () => {
 
             const res = await request(app)
                 .post("/task")
-                .send({ prompt: "Fix bug", pullRequestNumber: 42 })
+                .send({ prompt: "Continue work", continueTaskId: "parentXYZ" })
                 .expect(200);
 
             expect(res.body.taskId).toBe("abc123");
+            expect(res.body.parentTaskId).toBe("parentXYZ");
+            expect(res.body.chainId).toBe("rootABC");
             expect(startTask).toHaveBeenCalledWith(expect.any(String), {
-                prompt: "Fix bug",
-                pullRequestNumber: 42
+                prompt: "Continue work",
+                continueTaskId: "parentXYZ"
             });
         });
 
-        it("rejects non-integer pullRequestNumber", async () => {
-            const app = createServer(makeMockTaskManager(), makeConfig());
-            await request(app)
+        it("includes parentTaskId and chainId in POST /task response", async () => {
+            const task = makeMockTask({
+                status: "queued",
+                branch: null,
+                parentTaskId: "parent1",
+                chainId: "chain1"
+            });
+            const tm = makeMockTaskManager({
+                startTask: vi.fn().mockResolvedValue(task)
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app)
                 .post("/task")
-                .send({ prompt: "Fix bug", pullRequestNumber: "not-a-number" })
-                .expect(400);
+                .send({ prompt: "Continue" })
+                .expect(200);
+
+            expect(res.body.parentTaskId).toBe("parent1");
+            expect(res.body.chainId).toBe("chain1");
         });
 
-        it("rejects negative pullRequestNumber", async () => {
-            const app = createServer(makeMockTaskManager(), makeConfig());
-            await request(app)
+        it("returns null parentTaskId and chainId for standalone tasks", async () => {
+            const task = makeMockTask({ status: "queued", branch: null });
+            const tm = makeMockTaskManager({
+                startTask: vi.fn().mockResolvedValue(task)
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app)
                 .post("/task")
-                .send({ prompt: "Fix bug", pullRequestNumber: -1 })
-                .expect(400);
+                .send({ prompt: "New task" })
+                .expect(200);
+
+            expect(res.body.parentTaskId).toBeNull();
+            expect(res.body.chainId).toBeNull();
         });
     });
 
@@ -308,11 +332,12 @@ describe("server", () => {
             expect(res.body.error).toBe("Invalid status value");
         });
 
-        it("includes pullRequestNumber in task list items", async () => {
+        it("includes parentTaskId and chainId in task list items", async () => {
             const task = makeMockTask({
                 status: "completed",
                 completedAt: "2025-01-01T01:00:00.000Z",
-                pullRequestNumber: 42
+                parentTaskId: "parent1",
+                chainId: "chain1"
             });
             const tm = makeMockTaskManager({
                 listTasks: vi.fn().mockReturnValue([task])
@@ -320,10 +345,11 @@ describe("server", () => {
             const app = createServer(tm, makeConfig());
 
             const res = await request(app).get("/tasks").expect(200);
-            expect(res.body.tasks[0].pullRequestNumber).toBe(42);
+            expect(res.body.tasks[0].parentTaskId).toBe("parent1");
+            expect(res.body.tasks[0].chainId).toBe("chain1");
         });
 
-        it("returns null pullRequestNumber for tasks without one", async () => {
+        it("returns null parentTaskId and chainId for standalone tasks", async () => {
             const task = makeMockTask({
                 status: "completed",
                 completedAt: "2025-01-01T01:00:00.000Z"
@@ -334,7 +360,21 @@ describe("server", () => {
             const app = createServer(tm, makeConfig());
 
             const res = await request(app).get("/tasks").expect(200);
-            expect(res.body.tasks[0].pullRequestNumber).toBeNull();
+            expect(res.body.tasks[0].parentTaskId).toBeNull();
+            expect(res.body.tasks[0].chainId).toBeNull();
+        });
+
+        it("passes chainId query filter to listTasks", async () => {
+            const listTasks = vi.fn().mockReturnValue([]);
+            const tm = makeMockTaskManager({ listTasks });
+            const app = createServer(tm, makeConfig());
+
+            await request(app).get("/tasks?chainId=rootABC").expect(200);
+
+            expect(listTasks).toHaveBeenCalledWith(
+                expect.any(String),
+                { chainId: "rootABC" }
+            );
         });
     });
 
@@ -355,11 +395,12 @@ describe("server", () => {
             expect(res.body.durationSeconds).toBe(300);
         });
 
-        it("returns pullRequestNumber when present", async () => {
+        it("returns parentTaskId and chainId when present", async () => {
             const task = makeMockTask({
                 status: "completed",
                 completedAt: "2025-01-01T00:05:00.000Z",
-                pullRequestNumber: 42
+                parentTaskId: "parent1",
+                chainId: "chain1"
             });
             const tm = makeMockTaskManager({
                 getTask: vi.fn().mockReturnValue(task)
@@ -367,10 +408,11 @@ describe("server", () => {
             const app = createServer(tm, makeConfig());
 
             const res = await request(app).get("/task/abc123").expect(200);
-            expect(res.body.pullRequestNumber).toBe(42);
+            expect(res.body.parentTaskId).toBe("parent1");
+            expect(res.body.chainId).toBe("chain1");
         });
 
-        it("returns null pullRequestNumber when not present", async () => {
+        it("returns null parentTaskId and chainId for standalone tasks", async () => {
             const task = makeMockTask({
                 status: "completed",
                 completedAt: "2025-01-01T00:05:00.000Z"
@@ -381,7 +423,8 @@ describe("server", () => {
             const app = createServer(tm, makeConfig());
 
             const res = await request(app).get("/task/abc123").expect(200);
-            expect(res.body.pullRequestNumber).toBeNull();
+            expect(res.body.parentTaskId).toBeNull();
+            expect(res.body.chainId).toBeNull();
         });
 
         it("returns pullRequests when present", async () => {
@@ -1010,34 +1053,7 @@ describe("server", () => {
             expect(res.body.status).toBe("queued");
             expect(startTask).toHaveBeenCalledWith(PROJECT_ID, {
                 prompt: "Add a button",
-                pullRequestNumber: undefined
-            });
-        });
-
-        it("passes pullRequestNumber when provided as integer", async () => {
-            const task = makeMockTask({
-                status: "queued",
-                branch: null,
-                pullRequestNumber: 42
-            });
-            const startTask = vi.fn().mockResolvedValue(task);
-            const tm = makeMockTaskManager({ startTask });
-            const app = createServer(tm, makeConfigWithAdmin());
-            const cookie = await getAdminCookie(app);
-
-            await request(app)
-                .post("/dashboard/api/task")
-                .set("Cookie", cookie)
-                .send({
-                    projectId: PROJECT_ID,
-                    prompt: "Fix bug",
-                    pullRequestNumber: 42
-                })
-                .expect(200);
-
-            expect(startTask).toHaveBeenCalledWith(PROJECT_ID, {
-                prompt: "Fix bug",
-                pullRequestNumber: 42
+                continueTaskId: undefined
             });
         });
 

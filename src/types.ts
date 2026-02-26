@@ -27,8 +27,10 @@ export interface Task {
     error?: string;
     pullRequests?: PullRequest[];
     callbackUrl?: string;
-    /** Pull request number to continue work on. Tasks with the same PR number run serially. */
-    pullRequestNumber?: number;
+    /** Direct parent in chain (the task this one continues from). */
+    parentTaskId?: string;
+    /** Root task ID of the chain (first task in the lineage). */
+    chainId?: string;
     /** Current attempt number (1-indexed). Incremented on each retry. */
     attempt: number;
 }
@@ -39,7 +41,7 @@ export interface PersistedTask extends Task {
 
 export interface TaskCreateRequest {
     prompt: string;
-    /** Pull request number to continue work on. Tasks with the same PR number run serially. */
-    pullRequestNumber?: number;
+    /** Task ID to continue from (inherits branch and chain). */
+    continueTaskId?: string;
     callbackUrl?: string;
 }
