@@ -446,7 +446,8 @@ function loginHtml(error = false): string {
 </html>`;
 }
 
-function dashboardHtml(): string {
+function dashboardHtml(hasPassword: boolean): string {
+    const signOutLink = hasPassword ? '<a href="/dashboard/logout" class="out">Sign out</a>' : '';
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -466,7 +467,21 @@ function dashboardHtml(): string {
     .stat{background:#1e2130;border-radius:8px;padding:14px 20px;min-width:110px}
     .stat-label{font-size:.68rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em}
     .stat-val{font-size:1.8rem;font-weight:700;margin-top:2px}
-    .cr{color:#22c55e}.cq{color:#f59e0b}.ct{color:#60a5fa}
+    .cr{color:#22c55e}.cq{color:#f59e0b}.ct{color:#60a5fa}.cc{color:#94a3b8}.cf{color:#ef4444}
+    .section-title{font-size:.8rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
+    .projects{display:flex;gap:10px;margin-bottom:24px;flex-wrap:wrap}
+    .proj-card{background:#1e2130;border-radius:8px;padding:14px 18px;min-width:160px;border:1px solid #252a3a}
+    .proj-name{font-size:.82rem;font-weight:600;color:#e2e8f0;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .proj-stats{display:flex;gap:8px;font-size:.72rem;flex-wrap:wrap}
+    .ps{padding:1px 7px;border-radius:4px;font-weight:600}
+    .ps-running{background:#14532d;color:#22c55e}
+    .ps-queued{background:#451a03;color:#f59e0b}
+    .ps-retrying{background:#1e3a5f;color:#60a5fa}
+    .ps-completed{background:#1a2535;color:#64748b}
+    .ps-failed{background:#3b0f0f;color:#ef4444}
+    .filters{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+    .filter-btn{padding:4px 12px;border-radius:6px;border:1px solid #2a2f42;background:transparent;color:#94a3b8;font-size:.75rem;cursor:pointer}
+    .filter-btn.active{background:#3b82f6;border-color:#3b82f6;color:#fff}
     table{width:100%;border-collapse:collapse;background:#1e2130;border-radius:12px;overflow:hidden}
     th{background:#161925;color:#64748b;font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;padding:10px 16px;text-align:left;font-weight:600}
     td{padding:12px 16px;border-top:1px solid #252a3a;font-size:.85rem;vertical-align:middle}
@@ -475,7 +490,10 @@ function dashboardHtml(): string {
     .b-running{background:#14532d;color:#22c55e}
     .b-queued{background:#451a03;color:#f59e0b}
     .b-retrying{background:#1e3a5f;color:#60a5fa}
-    .proj{background:#252a3a;padding:2px 8px;border-radius:4px;font-size:.73rem;color:#94a3b8}
+    .b-completed{background:#1a2535;color:#64748b}
+    .b-failed{background:#3b0f0f;color:#ef4444}
+    .b-interrupted{background:#2a1f3a;color:#a78bfa}
+    .proj-tag{background:#252a3a;padding:2px 8px;border-radius:4px;font-size:.73rem;color:#94a3b8}
     .mono{font-family:ui-monospace,'SF Mono',monospace;font-size:.76rem;color:#94a3b8}
     .ttitle{font-weight:500;color:#f1f5f9}
     .tprompt{color:#64748b;font-size:.76rem;margin-top:2px}
@@ -488,41 +506,86 @@ function dashboardHtml(): string {
   <header>
     <h1>Implementer Dashboard</h1>
     <div style="display:flex;align-items:center;gap:16px">
-      <div class="live"><span class="dot" id="dot"></span><span id="upd">Connecting…</span></div>
-      <a href="/dashboard/logout" class="out">Sign out</a>
+      <div class="live"><span class="dot" id="dot"></span><span id="upd">Connecting\u2026</span></div>
+      ${signOutLink}
     </div>
   </header>
   <div class="stats">
-    <div class="stat"><div class="stat-label">Running</div><div class="stat-val cr" id="sr">—</div></div>
-    <div class="stat"><div class="stat-label">Queued</div><div class="stat-val cq" id="sq">—</div></div>
-    <div class="stat"><div class="stat-label">Retrying</div><div class="stat-val ct" id="st">—</div></div>
+    <div class="stat"><div class="stat-label">Running</div><div class="stat-val cr" id="sr">\u2014</div></div>
+    <div class="stat"><div class="stat-label">Queued</div><div class="stat-val cq" id="sq">\u2014</div></div>
+    <div class="stat"><div class="stat-label">Retrying</div><div class="stat-val ct" id="st">\u2014</div></div>
+    <div class="stat"><div class="stat-label">Completed</div><div class="stat-val cc" id="sc">\u2014</div></div>
+    <div class="stat"><div class="stat-label">Failed</div><div class="stat-val cf" id="sf">\u2014</div></div>
+  </div>
+  <div class="section-title">Projects</div>
+  <div class="projects" id="projects"><div style="color:#4a5568;font-size:.82rem">Loading\u2026</div></div>
+  <div class="section-title">Tasks</div>
+  <div class="filters" id="filters">
+    <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">All</button>
+    <button class="filter-btn" data-filter="running" onclick="setFilter('running')">Running</button>
+    <button class="filter-btn" data-filter="queued" onclick="setFilter('queued')">Queued</button>
+    <button class="filter-btn" data-filter="retrying" onclick="setFilter('retrying')">Retrying</button>
+    <button class="filter-btn" data-filter="completed" onclick="setFilter('completed')">Completed</button>
+    <button class="filter-btn" data-filter="failed" onclick="setFilter('failed')">Failed</button>
+    <button class="filter-btn" data-filter="interrupted" onclick="setFilter('interrupted')">Interrupted</button>
   </div>
   <table>
     <thead><tr>
       <th>Status</th><th>Project</th><th>Task ID</th><th>Title / Prompt</th><th>Duration</th><th>Started</th>
     </tr></thead>
-    <tbody id="tb"><tr><td colspan="6" class="empty">Connecting…</td></tr></tbody>
+    <tbody id="tb"><tr><td colspan="6" class="empty">Connecting\u2026</td></tr></tbody>
   </table>
   <script>
+    var currentFilter='all';
+    var lastData=null;
     function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-    function badge(s){const m={running:['b-running','Running'],queued:['b-queued','Queued'],retrying:['b-retrying','Retrying']};const[c,l]=m[s]||['','Unknown'];return '<span class="badge '+c+'">'+l+'</span>';}
-    function dur(s){if(s<60)return s+'s';const m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
-    const es=new EventSource('/dashboard/events');
-    es.onmessage=function(e){
-      const{tasks,stats}=JSON.parse(e.data);
-      document.getElementById('sr').textContent=stats.running;
-      document.getElementById('sq').textContent=stats.queued;
-      document.getElementById('st').textContent=stats.retrying;
-      const tb=document.getElementById('tb');
-      if(!tasks.length){tb.innerHTML='<tr><td colspan="6" class="empty">No active tasks</td></tr>';return;}
-      tb.innerHTML=tasks.map(t=>'<tr>'
+    function badge(s){var m={running:['b-running','Running'],queued:['b-queued','Queued'],retrying:['b-retrying','Retrying'],completed:['b-completed','Completed'],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
+    function dur(s){if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
+    function setFilter(f){
+      currentFilter=f;
+      document.querySelectorAll('.filter-btn').forEach(function(b){b.classList.toggle('active',b.dataset.filter===f);});
+      if(lastData)renderTasks(lastData.tasks);
+    }
+    function renderProjects(projects){
+      var el=document.getElementById('projects');
+      var ids=Object.keys(projects);
+      if(!ids.length){el.innerHTML='<div style="color:#4a5568;font-size:.82rem">No projects</div>';return;}
+      el.innerHTML=ids.map(function(id){
+        var p=projects[id];
+        var parts=[];
+        if(p.running)parts.push('<span class="ps ps-running">'+p.running+' running</span>');
+        if(p.queued)parts.push('<span class="ps ps-queued">'+p.queued+' queued</span>');
+        if(p.retrying)parts.push('<span class="ps ps-retrying">'+p.retrying+' retrying</span>');
+        if(p.completed)parts.push('<span class="ps ps-completed">'+p.completed+' done</span>');
+        if(p.failed)parts.push('<span class="ps ps-failed">'+p.failed+' failed</span>');
+        if(!parts.length)parts.push('<span style="color:#4a5568;font-size:.72rem">No tasks</span>');
+        return '<div class="proj-card"><div class="proj-name" title="'+esc(id)+'">'+esc(id)+'</div><div class="proj-stats">'+parts.join('')+'</div></div>';
+      }).join('');
+    }
+    function renderTasks(tasks){
+      var filtered=currentFilter==='all'?tasks:tasks.filter(function(t){return t.status===currentFilter;});
+      var tb=document.getElementById('tb');
+      if(!filtered.length){tb.innerHTML='<tr><td colspan="6" class="empty">No tasks'+(currentFilter!=='all'?' with status \u201c'+currentFilter+'\u201d':'')+'</td></tr>';return;}
+      tb.innerHTML=filtered.map(function(t){return '<tr>'
         +'<td>'+badge(t.status)+'</td>'
-        +'<td><span class="proj">'+esc(t.projectId)+'</span></td>'
+        +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
         +'<td><span class="mono">'+esc(t.taskId)+'</span></td>'
         +'<td>'+(t.title?'<div class="ttitle">'+esc(t.title)+'</div>':'')+'<div class="tprompt">'+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+'</div></td>'
         +'<td class="mono">'+dur(t.durationSeconds)+'</td>'
-        +'<td class="mono">'+new Date(t.startedAt).toLocaleTimeString()+'</td>'
-        +'</tr>').join('');
+        +'<td class="mono">'+new Date(t.startedAt).toLocaleString()+'</td>'
+        +'</tr>';}).join('');
+    }
+    var es=new EventSource('/dashboard/events');
+    es.onmessage=function(e){
+      var d=JSON.parse(e.data);
+      lastData=d;
+      document.getElementById('sr').textContent=d.stats.running;
+      document.getElementById('sq').textContent=d.stats.queued;
+      document.getElementById('st').textContent=d.stats.retrying;
+      document.getElementById('sc').textContent=d.stats.completed;
+      document.getElementById('sf').textContent=d.stats.failed;
+      renderProjects(d.projects);
+      renderTasks(d.tasks);
       document.getElementById('dot').className='dot';
       document.getElementById('upd').textContent='Updated '+new Date().toLocaleTimeString();
     };
@@ -554,7 +617,7 @@ export function createServer(
     // GET /dashboard — login form or live dashboard
     app.get("/dashboard", (req, res) => {
         if (!config.server.adminPassword) {
-            res.status(404).json({ error: "Not found" });
+            res.status(404).send("Not Found");
             return;
         }
         if (!isDashboardAuthenticated(req, config.server.adminPassword)) {
@@ -563,13 +626,13 @@ export function createServer(
             return;
         }
         res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.send(dashboardHtml());
+        res.send(dashboardHtml(true));
     });
 
     // POST /dashboard — process login form
     app.post("/dashboard", (req, res) => {
         if (!config.server.adminPassword) {
-            res.status(404).json({ error: "Not found" });
+            res.status(404).send("Not Found");
             return;
         }
         const password = typeof req.body?.password === "string" ? req.body.password : "";
@@ -589,10 +652,10 @@ export function createServer(
         res.redirect("/dashboard");
     });
 
-    // GET /dashboard/events — Server-Sent Events stream of active tasks
+    // GET /dashboard/events — Server-Sent Events stream of all tasks + per-project stats
     app.get("/dashboard/events", (req, res) => {
         if (!config.server.adminPassword) {
-            res.status(404).json({ error: "Not found" });
+            res.status(404).send("Not Found");
             return;
         }
         if (!isDashboardAuthenticated(req, config.server.adminPassword)) {
@@ -606,7 +669,8 @@ export function createServer(
         res.flushHeaders();
 
         const send = () => {
-            const tasks = taskManager.listAllActiveTasks().map((task) => ({
+            const allTasks = taskManager.listAllTasks();
+            const tasks = allTasks.slice(0, 200).map((task) => ({
                 taskId: task.taskId,
                 projectId: task.projectId,
                 title: task.title ?? null,
@@ -617,12 +681,32 @@ export function createServer(
                     (Date.now() - new Date(task.startedAt).getTime()) / 1000
                 )
             }));
+
             const stats = {
-                running: tasks.filter((t) => t.status === "running").length,
-                queued: tasks.filter((t) => t.status === "queued").length,
-                retrying: tasks.filter((t) => t.status === "retrying").length
+                running: allTasks.filter((t) => t.status === "running").length,
+                queued: allTasks.filter((t) => t.status === "queued").length,
+                retrying: allTasks.filter((t) => t.status === "retrying").length,
+                completed: allTasks.filter((t) => t.status === "completed").length,
+                failed: allTasks.filter((t) => t.status === "failed").length,
+                interrupted: allTasks.filter((t) => t.status === "interrupted").length,
+                total: allTasks.length
             };
-            res.write(`data: ${JSON.stringify({ tasks, stats })}\n\n`);
+
+            const projects: Record<string, Record<string, number>> = {};
+            for (const projectId of Object.keys(config.projects)) {
+                projects[projectId] = { running: 0, queued: 0, retrying: 0, completed: 0, failed: 0, interrupted: 0 };
+            }
+            for (const task of allTasks) {
+                if (!projects[task.projectId]) {
+                    projects[task.projectId] = { running: 0, queued: 0, retrying: 0, completed: 0, failed: 0, interrupted: 0 };
+                }
+                const s = task.status as string;
+                if (s in projects[task.projectId]) {
+                    projects[task.projectId][s]++;
+                }
+            }
+
+            res.write(`data: ${JSON.stringify({ tasks, stats, projects })}\n\n`);
         };
 
         send();

@@ -352,6 +352,13 @@ export class TaskManager {
             .map((entry) => entry.task);
     }
 
+    /** Returns all tasks across all projects, sorted by startedAt descending. */
+    listAllTasks(): Task[] {
+        return Array.from(this.tasks.values())
+            .map((entry) => entry.task)
+            .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+    }
+
     getOutput(projectId: string, taskId: string): string {
         const entry = this.tasks.get(taskId);
         if (!entry || entry.task.projectId !== projectId) return "";

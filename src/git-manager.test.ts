@@ -19,7 +19,7 @@ function shell(cmd: string, cwd: string): Promise<string> {
 // Create a bare git repo to act as "origin"
 async function createBareRepo(dir: string): Promise<void> {
   mkdirSync(dir, { recursive: true });
-  await shell("git init --bare", dir);
+  await shell("git init --bare -b main", dir);
 }
 
 // Create a cloned repo from the bare repo with an initial commit

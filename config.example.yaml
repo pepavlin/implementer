@@ -5,6 +5,10 @@ server:
     # Max tokens/hour via the Anthropic OAuth usage API — rejects new tasks when exceeded (optional, OAuth mode only)
     # ~100k ≈ 1/3 of Claude Max 5x observed hourly capacity (~300k/h); tune based on /api/oauth/usage response
     maxTokensPerHour: 100000
+    # Password for the /dashboard admin UI (optional).
+    # If not set, the dashboard is accessible without authentication.
+    # Supports ${ENV_VAR} substitution.
+    # adminPassword: ${DASHBOARD_PASSWORD}
 
 projects:
     demo-webapp:
