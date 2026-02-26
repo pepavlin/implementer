@@ -107,6 +107,46 @@ describe("GitManager", () => {
   });
 
   describe("checkoutBranchAll", () => {
+    it("resets to remote state when local branch diverged after rebase+force-push", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Create branch with a commit and push it (simulates first run)
+      await shell("git checkout -b impl/retry-branch", repoDir);
+      await shell("echo v1 > feat.txt && git add . && git commit -m 'feat: v1'", repoDir);
+      await shell("git push origin impl/retry-branch", repoDir);
+      const localSha = await shell("git rev-parse HEAD", repoDir);
+
+      // Simulate rebase+force-push on remote: the bare repo gets a new commit with a different SHA
+      // We do this by cloning into a second workspace, amending the commit, and force-pushing
+      const workDir2 = join(TMP, "workspace2");
+      const repoDir2 = join(workDir2, "my-repo");
+      mkdirSync(repoDir2, { recursive: true });
+      await shell(`git clone ${bareDir} .`, repoDir2);
+      await shell('git config user.email "test@test.com"', repoDir2);
+      await shell('git config user.name "Test"', repoDir2);
+      await shell("git checkout impl/retry-branch", repoDir2);
+      await shell("echo v2 > feat.txt && git add . && git commit --amend -m 'feat: v2 (amended)'", repoDir2);
+      await shell("git push --force origin impl/retry-branch", repoDir2);
+      const remoteSha = await shell("git rev-parse HEAD", repoDir2);
+
+      // Local is still at old SHA, remote is at new SHA
+      expect(localSha).not.toBe(remoteSha);
+      const localBeforeCheckout = await shell("git rev-parse impl/retry-branch", repoDir);
+      expect(localBeforeCheckout).toBe(localSha);
+
+      // checkoutBranchAll should reset local to match remote
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      await gm.checkoutBranchAll(workDir, repos, "impl/retry-branch");
+
+      const localAfter = await shell("git rev-parse HEAD", repoDir);
+      expect(localAfter).toBe(remoteSha);
+    });
+
     it("succeeds when there are uncommitted changes during PR continuation", async () => {
       const bareDir = join(TMP, "bare-repo");
       const workDir = join(TMP, "workspace");

@@ -94,7 +94,11 @@ export class GitManager {
       }
 
       try {
-        await git(["pull", "origin", branchName], repoDir, githubToken);
+        // Use reset instead of pull to handle diverged histories (e.g. after a rebase+force-push
+        // on a previous attempt). A regular `git pull` would fail silently when local and remote
+        // have diverged, leaving the local branch behind and causing a non-fast-forward error on
+        // the next push.
+        await git(["reset", "--hard", `origin/${branchName}`], repoDir);
       } catch {
         // Branch may not exist on remote yet
       }
