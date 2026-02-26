@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateConfigFile } from "./config.js";
+import { validateConfigFile } from "./config/config.js";
 
 type Logger = Pick<Console, "log" | "error">;
 

@@ -1,24 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { resolve } from "node:path";
-import { validateConfigFile } from "./config.js";
-import { TaskManager } from "./task-manager.js";
+import { Config } from "./config/config.js";
+import { TaskManager } from "./task-manager/task-manager.js";
 import { createServer } from "./server.js";
 import { ensureAndPrepareDockerImage, getSandboxImageName } from "./docker.js";
 import { exit } from "node:process";
 
-async function main() {
-    // 1. Load config
-    const config = validateConfigFile();
-
-    const projectIds = Object.keys(config.projects);
-    console.log(
-        `Config loaded. ${projectIds.length} project(s) configured: ${projectIds.join(", ")}`
-    );
-
-    // 2. Prepare sandbox Docker image
-    ensureAndPrepareDockerImage(getSandboxImageName(), config.configPath);
-
-    // 3. Check for GitHub CLI
+function checkGitHubCLI() {
     try {
         execFileSync("gh", ["--version"], { stdio: "ignore" });
         console.log(
@@ -28,6 +15,17 @@ async function main() {
         console.warn("WARNING: GitHub CLI (gh) not found. ");
         exit(1);
     }
+}
+
+async function main() {
+    // 1. Load config
+    const config = Config.load();
+
+    // 2. Prepare sandbox Docker image
+    ensureAndPrepareDockerImage(getSandboxImageName(), config.configPath);
+
+    // 3. Check for GitHub CLI
+    checkGitHubCLI();
 
     // 4. Initialize Task Manager
     const taskManager = new TaskManager(config);

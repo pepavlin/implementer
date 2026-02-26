@@ -1,61 +1,3 @@
-export interface ServerConfig {
-    workspaceDir: string;
-    /** Global cap on tasks running simultaneously across all projects. */
-    maxConcurrentTasks?: number;
-    /** Max tokens/hour allowed via the OAuth usage API before rejecting new tasks. Only applies in OAuth mode. */
-    maxTokensPerHour?: number;
-    /** Password required to access the /dashboard admin UI. */
-    adminPassword?: string;
-}
-
-export interface RepositoryConfig {
-    name: string;
-    url: string;
-    defaultBranch: string;
-}
-
-export interface McpServerConfig {
-    type?: string;
-    command?: string;
-    args?: string[];
-    env?: Record<string, string>;
-    url?: string;
-    headers?: Record<string, string>;
-}
-
-export interface ClaudeCodeConfig {
-    command: string;
-    model?: string;
-    systemPrompt?: string;
-    mcpServers?: Record<string, McpServerConfig>;
-    maxOutputTokens?: number;
-}
-
-export interface ProjectAuth {
-    anthropicApiKey?: string;
-    /** Static OAuth access token (expires in ~1h, no auto-refresh). */
-    claudeOauthToken?: string;
-    /** OAuth refresh token used to obtain new access tokens automatically. */
-    claudeOauthRefreshToken?: string;
-    githubToken?: string;
-}
-
-export interface ProjectConfig {
-    apiKey?: string;
-    maxConcurrentTasks?: number;
-    repositories: RepositoryConfig[];
-    claudeCode: ClaudeCodeConfig;
-    auth?: ProjectAuth;
-    errorRetry?: ErrorRetryConfig;
-    /** Paths (files or directories) that Claude must not modify. Changes to these paths are reverted before PR creation. Supports git pathspec patterns (e.g. ".github", "Dockerfile", "docker-compose*.yml"). */
-    protectedPaths?: string[];
-}
-
-export interface Config {
-    server: ServerConfig;
-    projects: Record<string, ProjectConfig>;
-}
-
 export type TaskStatus =
     | "queued"
     | "running"
@@ -64,13 +6,6 @@ export type TaskStatus =
     | "failed"
     | "interrupted"
     | "cancelled";
-
-export interface ErrorRetryConfig {
-    /** Total number of attempts including the first (e.g. 5 = 1 original + 4 retries). */
-    maxAttempts: number;
-    /** Seconds to wait between attempts. */
-    delaySeconds: number;
-}
 
 export interface PullRequest {
     repo: string;

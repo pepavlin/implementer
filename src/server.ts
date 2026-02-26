@@ -1,12 +1,20 @@
 import express from "express";
+import type { Request, Response, NextFunction } from "express";
 import swaggerUi from "swagger-ui-express";
 import { z } from "zod";
-import { TaskManager, TaskActiveError, TaskCancelError, TaskEditError } from "./task-manager.js";
+import {
+    TaskManager,
+    TaskActiveError,
+    TaskCancelError,
+    TaskEditError
+} from "./task-manager/task-manager.js";
 import { UsageLimitError } from "./usage-limiter.js";
 import { extractLastAssistantMessage } from "./executor.js";
 import { openApiSpec } from "./openapi.js";
 import { registerDashboardRoutes } from "./dashboard.js";
-import type { Config, TaskStatus } from "./types.js";
+import { HttpError, NotFoundError, asyncRoute } from "./errors.js";
+import type { TaskStatus } from "./types.js";
+import { Config } from "./config/config.js";
 
 const TaskCreateSchema = z.object({
     prompt: z.string().min(1),
@@ -14,7 +22,15 @@ const TaskCreateSchema = z.object({
     callbackUrl: z.string().url().optional()
 });
 
-const TASK_STATUSES = ["queued", "running", "retrying", "completed", "failed", "interrupted", "cancelled"] as const;
+const TASK_STATUSES = [
+    "queued",
+    "running",
+    "retrying",
+    "completed",
+    "failed",
+    "interrupted",
+    "cancelled"
+] as const;
 
 const TaskStatusEnum = z.enum(TASK_STATUSES);
 
@@ -29,7 +45,9 @@ function getDurationSeconds(task: {
     completedAt: string | null;
 }): number {
     const start = new Date(task.startedAt).getTime();
-    const end = task.completedAt ? new Date(task.completedAt).getTime() : Date.now();
+    const end = task.completedAt
+        ? new Date(task.completedAt).getTime()
+        : Date.now();
     return Math.round((end - start) / 1000);
 }
 
@@ -41,47 +59,21 @@ export function createServer(
     app.use(express.json());
     app.use(express.urlencoded({ extended: false }));
 
-    // Swagger UI — served before auth so it's accessible without a key
+    // 1. Server swagger ui
     app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
 
-    // Dashboard — has its own adminPassword auth
+    // 2. Admin dashboard html
     registerDashboardRoutes(app, taskManager, config);
 
-    // Build Bearer token → projectId map from config
-    const projectByKey = new Map<string, string>();
-    for (const [projectId, project] of Object.entries(config.projects)) {
-        if (project.apiKey) {
-            projectByKey.set(project.apiKey, projectId);
-        }
-    }
-
-    const projectIds = Object.keys(config.projects);
-    const hasAuth = projectByKey.size > 0;
-
-    // Authentication middleware: maps Bearer token to a project
+    // 3. Add authentication middleware
     app.use((req, res, next) => {
-        // Swagger UI and dashboard have their own auth
-        if (req.path.startsWith("/docs") || req.path.startsWith("/dashboard")) return next();
+        // Ignore auth for docs and dashboard routes
+        if (req.path.startsWith("/docs") || req.path.startsWith("/dashboard"))
+            return next();
 
-        if (!hasAuth) {
-            // Dev mode: no API keys configured — require exactly one project
-            if (projectIds.length === 1) {
-                res.locals.projectId = projectIds[0];
-                return next();
-            }
-            res.status(401).json({
-                error: "API key required when multiple projects are configured without apiKey"
-            });
-            return;
-        }
-
-        const token = req.headers.authorization?.replace("Bearer ", "");
-        const projectId = projectByKey.get(token ?? "");
-        if (!projectId) {
-            res.status(401).json({ error: "Unauthorized" });
-            return;
-        }
-        res.locals.projectId = projectId;
+        const token = req.headers.authorization?.replace("Bearer ", "") ?? "";
+        const project = config.getProjectIdByToken(token);
+        res.locals.projectId = project;
         next();
     });
 
@@ -91,21 +83,26 @@ export function createServer(
     });
 
     // POST /task - Start a new task
-    app.post("/task", async (req, res) => {
-        const projectId = res.locals.projectId as string;
-        const parsed = TaskCreateSchema.safeParse(req.body);
-        if (!parsed.success) {
-            res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
-            return;
-        }
-        try {
+    app.post(
+        "/task",
+        asyncRoute(async (req, res) => {
+            const projectId = res.locals.projectId as string;
+            const parsed = TaskCreateSchema.safeParse(req.body);
+            if (!parsed.success) {
+                res.status(400).json({
+                    error: "Invalid request",
+                    details: parsed.error.issues
+                });
+                return;
+            }
             const task = await taskManager.startTask(projectId, parsed.data);
-            res.status(200).json({ taskId: task.taskId, branch: task.branch, status: task.status });
-        } catch (err) {
-            if (err instanceof UsageLimitError) { res.status(429).json({ error: err.message }); return; }
-            res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
-        }
-    });
+            res.status(200).json({
+                taskId: task.taskId,
+                branch: task.branch,
+                status: task.status
+            });
+        })
+    );
 
     // GET /tasks - List all tasks for the authenticated project
     app.get("/tasks", (req, res) => {
@@ -116,7 +113,11 @@ export function createServer(
             return;
         }
         const statusFilter = parsed.data.status
-            ? new Set<TaskStatus>(Array.isArray(parsed.data.status) ? parsed.data.status : [parsed.data.status])
+            ? new Set<TaskStatus>(
+                  Array.isArray(parsed.data.status)
+                      ? parsed.data.status
+                      : [parsed.data.status]
+              )
             : null;
         const tasks = taskManager
             .listTasks(projectId)
@@ -140,7 +141,7 @@ export function createServer(
     app.get("/task/:taskId", (req, res) => {
         const projectId = res.locals.projectId as string;
         const task = taskManager.getTask(projectId, req.params.taskId);
-        if (!task) { res.status(404).json({ error: "Task not found" }); return; }
+        if (!task) throw new NotFoundError("Task not found");
         res.json({
             taskId: task.taskId,
             branch: task.branch,
@@ -153,7 +154,10 @@ export function createServer(
             completedAt: task.completedAt,
             durationSeconds: getDurationSeconds(task),
             output:
-                task.status === "queued" || task.status === "running" || task.status === "retrying" || task.status === "interrupted"
+                task.status === "queued" ||
+                task.status === "running" ||
+                task.status === "retrying" ||
+                task.status === "interrupted"
                     ? null
                     : extractLastAssistantMessage(task.output) || null,
             error: task.error ?? null,
@@ -165,57 +169,104 @@ export function createServer(
     app.post("/task/:taskId/cancel", (req, res) => {
         const projectId = res.locals.projectId as string;
         const task = taskManager.getTask(projectId, req.params.taskId);
-        if (!task) { res.status(404).json({ error: "Task not found" }); return; }
-        try {
-            const cancelled = taskManager.cancelTask(projectId, req.params.taskId);
-            res.json({ taskId: cancelled.taskId, branch: cancelled.branch, status: cancelled.status });
-        } catch (err) {
-            if (err instanceof TaskCancelError) { res.status(409).json({ error: err.message }); return; }
-            res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
-        }
+        if (!task) throw new NotFoundError("Task not found");
+        const cancelled = taskManager.cancelTask(projectId, req.params.taskId);
+        res.json({
+            taskId: cancelled.taskId,
+            branch: cancelled.branch,
+            status: cancelled.status
+        });
     });
 
     // PATCH /task/:taskId - Edit the prompt of a queued task
     app.patch("/task/:taskId", (req, res) => {
         const projectId = res.locals.projectId as string;
         const task = taskManager.getTask(projectId, req.params.taskId);
-        if (!task) { res.status(404).json({ error: "Task not found" }); return; }
-        const parsed = z.object({ prompt: z.string().min(1) }).safeParse(req.body);
+        if (!task) throw new NotFoundError("Task not found");
+        const parsed = z
+            .object({ prompt: z.string().min(1) })
+            .safeParse(req.body);
         if (!parsed.success) {
-            res.status(400).json({ error: "Prompt is required", details: parsed.error.issues }); return;
+            res.status(400).json({
+                error: "Prompt is required",
+                details: parsed.error.issues
+            });
+            return;
         }
-        try {
-            const updated = taskManager.editTask(projectId, req.params.taskId, parsed.data.prompt);
-            res.json({ taskId: updated.taskId, branch: updated.branch, prompt: updated.prompt, title: updated.title ?? null, status: updated.status });
-        } catch (err) {
-            if (err instanceof TaskEditError) { res.status(409).json({ error: err.message }); return; }
-            res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
-        }
+        const updated = taskManager.editTask(
+            projectId,
+            req.params.taskId,
+            parsed.data.prompt
+        );
+        res.json({
+            taskId: updated.taskId,
+            branch: updated.branch,
+            prompt: updated.prompt,
+            title: updated.title ?? null,
+            status: updated.status
+        });
     });
 
     // POST /task/:taskId/retry - Retry a task regardless of its current status
-    app.post("/task/:taskId/retry", async (req, res) => {
-        const projectId = res.locals.projectId as string;
-        const task = taskManager.getTask(projectId, req.params.taskId);
-        if (!task) { res.status(404).json({ error: "Task not found" }); return; }
-        try {
-            const retried = await taskManager.retryTask(projectId, req.params.taskId);
-            res.json({ taskId: retried.taskId, branch: retried.branch, status: retried.status });
-        } catch (err) {
-            if (err instanceof TaskActiveError) { res.status(409).json({ error: err.message }); return; }
-            res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
-        }
-    });
+    app.post(
+        "/task/:taskId/retry",
+        asyncRoute(async (req, res) => {
+            const projectId = res.locals.projectId as string;
+            const task = taskManager.getTask(projectId, req.params.taskId);
+            if (!task) throw new NotFoundError("Task not found");
+            const retried = await taskManager.retryTask(
+                projectId,
+                req.params.taskId
+            );
+            res.json({
+                taskId: retried.taskId,
+                branch: retried.branch,
+                status: retried.status
+            });
+        })
+    );
 
     // GET /task/:taskId/log - Get specific task output log
     app.get("/task/:taskId/log", (req, res) => {
         const projectId = res.locals.projectId as string;
         const task = taskManager.getTask(projectId, req.params.taskId);
-        if (!task) { res.status(404).json({ error: "Task not found" }); return; }
+        if (!task) throw new NotFoundError("Task not found");
         const fullOutput = taskManager.getOutput(projectId, req.params.taskId);
         const truncated = fullOutput.length > MAX_LOG_SIZE;
-        res.json({ taskId: task.taskId, output: truncated ? fullOutput.slice(-MAX_LOG_SIZE) : fullOutput, truncated });
+        res.json({
+            taskId: task.taskId,
+            output: truncated ? fullOutput.slice(-MAX_LOG_SIZE) : fullOutput,
+            truncated
+        });
     });
+
+    // Central error handler — must be declared with 4 params for Express to
+    // recognize it as error middleware (not a regular route).
+    // Handles: HttpError subclasses, known domain errors, and unexpected errors.
+    app.use(
+        (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+            if (err instanceof HttpError) {
+                res.status(err.statusCode).json({ error: err.message });
+                return;
+            }
+            if (
+                err instanceof TaskCancelError ||
+                err instanceof TaskEditError ||
+                err instanceof TaskActiveError
+            ) {
+                res.status(409).json({ error: (err as Error).message });
+                return;
+            }
+            if (err instanceof UsageLimitError) {
+                res.status(429).json({ error: (err as Error).message });
+                return;
+            }
+            res.status(500).json({
+                error:
+                    err instanceof Error ? err.message : "Internal server error"
+            });
+        }
+    );
 
     return app;
 }

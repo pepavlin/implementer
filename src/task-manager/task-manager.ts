@@ -1,21 +1,19 @@
 import { join } from "node:path";
 import { nanoid } from "nanoid";
-import type {
-    Config,
-    PersistedTask,
-    ProjectConfig,
-    Task,
-    TaskCreateRequest
-} from "./types.js";
-import { GitManager } from "./git-manager.js";
-import { Executor, extractLastAssistantMessage } from "./executor.js";
-import { WorkspacePool, chownRecursive } from "./workspace-pool.js";
-import { TaskStore } from "./task-store.js";
-import { TokenManager } from "./auth.js";
-import { UsageLimiter } from "./usage-limiter.js";
+import type { PersistedTask, Task, TaskCreateRequest } from "../types.js";
+import { GitManager } from "../git-manager.js";
+import { Executor, extractLastAssistantMessage } from "../executor.js";
+import { WorkspacePool, chownRecursive } from "../workspace-pool.js";
+import { TaskStore } from "../task-store.js";
+import { TokenManager } from "../auth.js";
+import { UsageLimiter } from "../usage-limiter.js";
+import { ProjectConfig } from "../config/config-types.js";
+import { Config } from "../config/config.js";
 
-
-function buildSystemInstructions(repos: { name: string }[], protectedPaths?: string[]): string {
+function buildSystemInstructions(
+    repos: { name: string }[],
+    protectedPaths?: string[]
+): string {
     const repoList = repos.map((r) => r.name).join(", ");
     const protectedRule =
         protectedPaths && protectedPaths.length > 0
@@ -156,8 +154,8 @@ export class TaskManager {
                 console.log(
                     `[task-manager] Task ${pt.taskId} marked as interrupted (was running)`
                 );
-            // Tasks waiting for a retry delay — the setTimeout is gone after restart.
-            // Re-queue them so the next attempt runs as soon as capacity is available.
+                // Tasks waiting for a retry delay — the setTimeout is gone after restart.
+                // Re-queue them so the next attempt runs as soon as capacity is available.
             } else if (pt.status === "retrying") {
                 pt.status = "queued";
                 this.store.save(pt);
@@ -238,7 +236,10 @@ export class TaskManager {
 
                 // Mark PR as active before resuming so tryDequeue respects the serial constraint
                 if (entry.task.pullRequestNumber !== undefined) {
-                    this.markPrActive(entry.task.projectId, entry.task.pullRequestNumber);
+                    this.markPrActive(
+                        entry.task.projectId,
+                        entry.task.pullRequestNumber
+                    );
                 }
 
                 const persistedTask: PersistedTask = {
@@ -374,7 +375,11 @@ export class TaskManager {
     listAllTasks(): Task[] {
         return Array.from(this.tasks.values())
             .map((entry) => entry.task)
-            .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+            .sort(
+                (a, b) =>
+                    new Date(b.startedAt).getTime() -
+                    new Date(a.startedAt).getTime()
+            );
     }
 
     getOutput(projectId: string, taskId: string): string {
@@ -405,7 +410,8 @@ export class TaskManager {
     }
 
     private markPrActive(projectId: string, prNumber: number): void {
-        if (!this.activePrNumbers.has(projectId)) this.activePrNumbers.set(projectId, new Set());
+        if (!this.activePrNumbers.has(projectId))
+            this.activePrNumbers.set(projectId, new Set());
         this.activePrNumbers.get(projectId)!.add(prNumber);
     }
 
@@ -447,18 +453,28 @@ export class TaskManager {
             this.markPrActive(projectId, task.pullRequestNumber);
         }
 
-        const executor = new Executor(state.config.claudeCode, state.tokenManager);
+        const executor = new Executor(
+            state.config.claudeCode,
+            state.tokenManager
+        );
         entry.executor = executor;
         task.status = "running";
 
-        console.log(`[${taskId}] Dequeuing task (${queue.length} still queued for ${projectId})`);
+        console.log(
+            `[${taskId}] Dequeuing task (${queue.length} still queued for ${projectId})`
+        );
 
         state.pool
             .acquire(state.config.repositories, state.config.auth?.githubToken)
             .then((workspace) => {
                 entry.workspaceId = workspace.id;
                 this.store.save({ ...task, workspaceId: workspace.id });
-                return this.executeTask(task, workspace, state, entry.checkoutBranch);
+                return this.executeTask(
+                    task,
+                    workspace,
+                    state,
+                    entry.checkoutBranch
+                );
             })
             .catch((err) => {
                 console.error(`[${taskId}] Dequeue/acquire failed:`, err);
@@ -471,12 +487,20 @@ export class TaskManager {
                     this.unmarkPrActive(projectId, task.pullRequestNumber);
                 }
                 if (task.callbackUrl) {
-                    this.fireWebhook(task.taskId, task.status, task.callbackUrl);
+                    this.fireWebhook(
+                        task.taskId,
+                        task.status,
+                        task.callbackUrl
+                    );
                 }
             });
     }
 
-    private scheduleRetry(task: Task, state: ProjectState, delayOverrideSeconds?: number): void {
+    private scheduleRetry(
+        task: Task,
+        state: ProjectState,
+        delayOverrideSeconds?: number
+    ): void {
         const retryConfig = state.config.errorRetry!;
         const delaySeconds = delayOverrideSeconds ?? retryConfig.delaySeconds;
         task.attempt += 1;
@@ -496,12 +520,21 @@ export class TaskManager {
             const entryForTimer = this.tasks.get(task.taskId);
             if (entryForTimer) entryForTimer.retryTimeoutId = undefined;
             // If PR is active (another task for the same PR is running), queue and wait
-            if (task.pullRequestNumber !== undefined && this.isPrActive(task.projectId, task.pullRequestNumber)) {
+            if (
+                task.pullRequestNumber !== undefined &&
+                this.isPrActive(task.projectId, task.pullRequestNumber)
+            ) {
                 task.status = "queued";
                 this.enqueue(task.projectId, task.taskId);
                 const entry = this.tasks.get(task.taskId);
-                if (entry) this.store.save({ ...task, workspaceId: entry.workspaceId });
-                console.log(`[${task.taskId}] Retry queued — PR #${task.pullRequestNumber} is already active`);
+                if (entry)
+                    this.store.save({
+                        ...task,
+                        workspaceId: entry.workspaceId
+                    });
+                console.log(
+                    `[${task.taskId}] Retry queued — PR #${task.pullRequestNumber} is already active`
+                );
                 return;
             }
 
@@ -510,7 +543,11 @@ export class TaskManager {
                 task.status = "queued";
                 this.enqueue(task.projectId, task.taskId);
                 const entry = this.tasks.get(task.taskId);
-                if (entry) this.store.save({ ...task, workspaceId: entry.workspaceId });
+                if (entry)
+                    this.store.save({
+                        ...task,
+                        workspaceId: entry.workspaceId
+                    });
                 console.log(`[${task.taskId}] Retry queued (no capacity)`);
                 return;
             }
@@ -537,7 +574,11 @@ export class TaskManager {
                 task.status = "queued";
                 this.enqueue(task.projectId, task.taskId);
                 const entry = this.tasks.get(task.taskId);
-                if (entry) this.store.save({ ...task, workspaceId: entry.workspaceId });
+                if (entry)
+                    this.store.save({
+                        ...task,
+                        workspaceId: entry.workspaceId
+                    });
                 console.log(`[${task.taskId}] Retry queued after acquire race`);
                 return;
             }
@@ -545,12 +586,20 @@ export class TaskManager {
             const entry = this.tasks.get(task.taskId);
             if (entry) {
                 entry.workspaceId = workspace.id;
-                entry.executor = new Executor(state.config.claudeCode, state.tokenManager);
+                entry.executor = new Executor(
+                    state.config.claudeCode,
+                    state.tokenManager
+                );
             }
             this.store.save({ ...task, workspaceId: workspace.id });
 
             // Retry on the same branch — Claude can see previous partial work
-            this.executeTask(task, workspace, state, task.branch ?? undefined).catch((err) => {
+            this.executeTask(
+                task,
+                workspace,
+                state,
+                task.branch ?? undefined
+            ).catch((err) => {
                 console.error(`[${task.taskId}] Retry execution failed:`, err);
             });
         }, delaySeconds * 1000);
@@ -566,7 +615,10 @@ export class TaskManager {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ taskId, status })
         }).catch((err) => {
-            console.error(`[${taskId}] Webhook POST to ${url} failed:`, err instanceof Error ? err.message : String(err));
+            console.error(
+                `[${taskId}] Webhook POST to ${url} failed:`,
+                err instanceof Error ? err.message : String(err)
+            );
         });
     }
 
@@ -620,13 +672,18 @@ export class TaskManager {
         return task;
     }
 
-    private async prepareAndRunTask(task: Task, state: ProjectState): Promise<void> {
+    private async prepareAndRunTask(
+        task: Task,
+        state: ProjectState
+    ): Promise<void> {
         const { taskId, projectId } = task;
 
         // Resolve branch and title based on task type
         if (task.pullRequestNumber !== undefined && !task.branch) {
             // PR task: fetch the PR's head branch from GitHub
-            console.log(`[${taskId}] Fetching branch for PR #${task.pullRequestNumber}...`);
+            console.log(
+                `[${taskId}] Fetching branch for PR #${task.pullRequestNumber}...`
+            );
             const primaryRepo = state.config.repositories[0];
             const prBranch = await this.gitManager.getPullRequestBranch(
                 task.pullRequestNumber,
@@ -636,36 +693,63 @@ export class TaskManager {
             );
             task.branch = prBranch;
             if (!task.title) {
-                const metaExecutor = new Executor(state.config.claudeCode, state.tokenManager);
-                const { title } = await metaExecutor.generateTaskMetadata(task.prompt, taskId);
+                const metaExecutor = new Executor(
+                    state.config.claudeCode,
+                    state.tokenManager
+                );
+                const { title } = await metaExecutor.generateTaskMetadata(
+                    task.prompt,
+                    taskId
+                );
                 if (title) task.title = title;
             }
-            console.log(`[${taskId}] Branch: ${task.branch}, Title: ${task.title}`);
+            console.log(
+                `[${taskId}] Branch: ${task.branch}, Title: ${task.title}`
+            );
             this.store.save({ ...task, workspaceId: null });
         } else if (!task.branch) {
             // Normal task: generate branch slug and title
             console.log(`[${taskId}] Generating branch name and title...`);
-            const metaExecutor = new Executor(state.config.claudeCode, state.tokenManager);
-            const { slug, title } = await metaExecutor.generateTaskMetadata(task.prompt, taskId);
+            const metaExecutor = new Executor(
+                state.config.claudeCode,
+                state.tokenManager
+            );
+            const { slug, title } = await metaExecutor.generateTaskMetadata(
+                task.prompt,
+                taskId
+            );
             task.branch = `impl/${slug}-${taskId}`;
             if (title) task.title = title;
-            console.log(`[${taskId}] Branch: ${task.branch}, Title: ${task.title}`);
+            console.log(
+                `[${taskId}] Branch: ${task.branch}, Title: ${task.title}`
+            );
             this.store.save({ ...task, workspaceId: null });
         } else if (!task.title) {
             // Branch already set (e.g., after restart), but title not yet generated
             console.log(`[${taskId}] Generating title...`);
-            const metaExecutor = new Executor(state.config.claudeCode, state.tokenManager);
-            const { title } = await metaExecutor.generateTaskMetadata(task.prompt, taskId);
+            const metaExecutor = new Executor(
+                state.config.claudeCode,
+                state.tokenManager
+            );
+            const { title } = await metaExecutor.generateTaskMetadata(
+                task.prompt,
+                taskId
+            );
             if (title) task.title = title;
             console.log(`[${taskId}] Title: ${task.title}`);
             this.store.save({ ...task, workspaceId: null });
         }
 
         // If the PR is already active (another task for the same PR is running), queue and wait
-        if (task.pullRequestNumber !== undefined && this.isPrActive(projectId, task.pullRequestNumber)) {
+        if (
+            task.pullRequestNumber !== undefined &&
+            this.isPrActive(projectId, task.pullRequestNumber)
+        ) {
             this.enqueue(projectId, taskId);
             const queueLen = this.queues.get(projectId)!.length;
-            console.log(`[${taskId}] Queued — PR #${task.pullRequestNumber} is already active (position ${queueLen} for ${projectId})`);
+            console.log(
+                `[${taskId}] Queued — PR #${task.pullRequestNumber} is already active (position ${queueLen} for ${projectId})`
+            );
             return;
         }
 
@@ -673,7 +757,9 @@ export class TaskManager {
         if (this.shouldQueue(projectId, state)) {
             this.enqueue(projectId, taskId);
             const queueLen = this.queues.get(projectId)!.length;
-            console.log(`[${taskId}] Queued (position ${queueLen} for ${projectId})`);
+            console.log(
+                `[${taskId}] Queued (position ${queueLen} for ${projectId})`
+            );
             return;
         }
 
@@ -683,14 +769,20 @@ export class TaskManager {
         }
 
         // Acquire workspace and run immediately
-        const executor = new Executor(state.config.claudeCode, state.tokenManager);
+        const executor = new Executor(
+            state.config.claudeCode,
+            state.tokenManager
+        );
         const entry = this.tasks.get(taskId)!;
         entry.executor = executor;
         task.status = "running";
 
         let workspace: { id: number; dir: string };
         try {
-            workspace = await state.pool.acquire(state.config.repositories, state.config.auth?.githubToken);
+            workspace = await state.pool.acquire(
+                state.config.repositories,
+                state.config.auth?.githubToken
+            );
         } catch (_err) {
             // Race condition: another task grabbed the last slot — queue and wait.
             // Unmark PR so tryDequeue can re-pick it up correctly.
@@ -728,7 +820,11 @@ export class TaskManager {
 
         const task = entry.task;
 
-        if (task.status === "queued" || task.status === "running" || task.status === "retrying") {
+        if (
+            task.status === "queued" ||
+            task.status === "running" ||
+            task.status === "retrying"
+        ) {
             throw new TaskActiveError(task.status);
         }
 
@@ -736,14 +832,21 @@ export class TaskManager {
         // executeTask creates a fresh branch. For PR tasks the branch is never nulled out,
         // so this only triggers for non-PR tasks.
         if (!task.branch && task.pullRequestNumber === undefined) {
-            const slugExecutor = new Executor(state.config.claudeCode, state.tokenManager);
-            const slug = await slugExecutor.generateBranchSlug(task.prompt, taskId);
+            const slugExecutor = new Executor(
+                state.config.claudeCode,
+                state.tokenManager
+            );
+            const slug = await slugExecutor.generateBranchSlug(
+                task.prompt,
+                taskId
+            );
             task.branch = `impl/${slug}-${taskId}`;
         }
 
         // Continue from the existing branch; if branch was just regenerated, checkoutBranch stays undefined
         // so executeTask creates it fresh rather than trying to checkout a non-existent branch.
-        const checkoutBranch: string | undefined = task.branch !== null ? task.branch : undefined;
+        const checkoutBranch: string | undefined =
+            task.branch !== null ? task.branch : undefined;
 
         // Reset task state
         task.status = "running";
@@ -754,17 +857,24 @@ export class TaskManager {
         task.startedAt = new Date().toISOString();
         task.attempt = 1;
 
-        console.log(`[${taskId}] Manual retry requested — branch: ${task.branch}`);
+        console.log(
+            `[${taskId}] Manual retry requested — branch: ${task.branch}`
+        );
 
         // If the PR is already active, queue the retry instead of running immediately
-        if (task.pullRequestNumber !== undefined && this.isPrActive(projectId, task.pullRequestNumber)) {
+        if (
+            task.pullRequestNumber !== undefined &&
+            this.isPrActive(projectId, task.pullRequestNumber)
+        ) {
             task.status = "queued";
             entry.executor = null;
             entry.workspaceId = null;
             entry.checkoutBranch = checkoutBranch;
             this.store.save({ ...task, workspaceId: null });
             this.enqueue(projectId, taskId);
-            console.log(`[${taskId}] Retry queued — PR #${task.pullRequestNumber} is already active`);
+            console.log(
+                `[${taskId}] Retry queued — PR #${task.pullRequestNumber} is already active`
+            );
             return task;
         }
 
@@ -784,13 +894,19 @@ export class TaskManager {
             this.markPrActive(projectId, task.pullRequestNumber);
         }
 
-        const executor = new Executor(state.config.claudeCode, state.tokenManager);
+        const executor = new Executor(
+            state.config.claudeCode,
+            state.tokenManager
+        );
         entry.executor = executor;
         entry.checkoutBranch = checkoutBranch;
 
         let workspace: { id: number; dir: string };
         try {
-            workspace = await state.pool.acquire(state.config.repositories, state.config.auth?.githubToken);
+            workspace = await state.pool.acquire(
+                state.config.repositories,
+                state.config.auth?.githubToken
+            );
         } catch (_err) {
             // Unmark PR before re-queuing so tryDequeue can pick it up correctly
             if (task.pullRequestNumber !== undefined) {
@@ -808,9 +924,11 @@ export class TaskManager {
         entry.workspaceId = workspace.id;
         this.store.save({ ...task, workspaceId: workspace.id });
 
-        this.executeTask(task, workspace, state, checkoutBranch).catch((err) => {
-            console.error(`Task ${taskId} retry failed unexpectedly:`, err);
-        });
+        this.executeTask(task, workspace, state, checkoutBranch).catch(
+            (err) => {
+                console.error(`Task ${taskId} retry failed unexpectedly:`, err);
+            }
+        );
 
         return task;
     }
@@ -828,7 +946,9 @@ export class TaskManager {
         const branchName = task.branch!;
         const githubToken = state.config.auth?.githubToken;
         // PR tasks always check out their existing branch; normal tasks create a new one.
-        const fromBranch = checkoutBranch ?? (task.pullRequestNumber !== undefined ? task.branch! : undefined);
+        const fromBranch =
+            checkoutBranch ??
+            (task.pullRequestNumber !== undefined ? task.branch! : undefined);
 
         try {
             // Step 1: Prepare branch in all repos
@@ -915,7 +1035,9 @@ export class TaskManager {
             // regardless of what Claude did. Runs even if no changes were made (no-op then).
             const protectedPaths = state.config.protectedPaths ?? [];
             if (protectedPaths.length > 0) {
-                console.log(`[${task.taskId}] Reverting protected path changes...`);
+                console.log(
+                    `[${task.taskId}] Reverting protected path changes...`
+                );
                 await this.gitManager.revertProtectedPathsAll(
                     workspace.dir,
                     repos,
@@ -1045,10 +1167,14 @@ export class TaskManager {
                     // Success with no commits
                     if (task.pullRequestNumber !== undefined) {
                         // PR task: keep the branch — the PR already exists on GitHub
-                        console.log(`[${task.taskId}] No new commits on PR branch — leaving branch intact.`);
+                        console.log(
+                            `[${task.taskId}] No new commits on PR branch — leaving branch intact.`
+                        );
                     } else {
                         // Normal task: delete remote branch and clear branch ref
-                        console.log(`[${task.taskId}] No new commits — cleaning up remote branch.`);
+                        console.log(
+                            `[${task.taskId}] No new commits — cleaning up remote branch.`
+                        );
                         await this.gitManager.deleteRemoteBranchAll(
                             workspace.dir,
                             repos,
@@ -1130,10 +1256,14 @@ export class TaskManager {
                     // Failure with no commits
                     if (task.pullRequestNumber !== undefined) {
                         // PR task: keep the branch — the PR already exists on GitHub
-                        console.log(`[${task.taskId}] Failed with no commits on PR branch — leaving branch intact.`);
+                        console.log(
+                            `[${task.taskId}] Failed with no commits on PR branch — leaving branch intact.`
+                        );
                     } else {
                         // Normal task: delete remote branch
-                        console.log(`[${task.taskId}] Failed with no commits — cleaning up remote branch.`);
+                        console.log(
+                            `[${task.taskId}] Failed with no commits — cleaning up remote branch.`
+                        );
                         await this.gitManager.deleteRemoteBranchAll(
                             workspace.dir,
                             repos,
@@ -1158,7 +1288,9 @@ export class TaskManager {
                 task.output = executor.getOutput();
                 console.error(`[${task.taskId}] Error:`, task.error);
             } else {
-                console.log(`[${task.taskId}] Task was cancelled (caught during execution).`);
+                console.log(
+                    `[${task.taskId}] Task was cancelled (caught during execution).`
+                );
             }
         } finally {
             // Preserve completedAt if already set by cancelTask
@@ -1184,9 +1316,14 @@ export class TaskManager {
                 // first failure so they get back to work immediately rather than waiting the
                 // full delaySeconds. Subsequent retries still use the configured delay.
                 const entry = this.tasks.get(task.taskId);
-                const wasResumedFromRestart = entry?.resumedFromRestart ?? false;
+                const wasResumedFromRestart =
+                    entry?.resumedFromRestart ?? false;
                 if (entry) entry.resumedFromRestart = false;
-                this.scheduleRetry(task, state, wasResumedFromRestart ? 0 : undefined);
+                this.scheduleRetry(
+                    task,
+                    state,
+                    wasResumedFromRestart ? 0 : undefined
+                );
                 return; // webhook will fire only on terminal failure
             }
         }
@@ -1215,7 +1352,11 @@ export class TaskManager {
 
         const task = entry.task;
 
-        if (task.status !== "queued" && task.status !== "running" && task.status !== "retrying") {
+        if (
+            task.status !== "queued" &&
+            task.status !== "running" &&
+            task.status !== "retrying"
+        ) {
             throw new TaskCancelError(task.status);
         }
 
@@ -1280,7 +1421,9 @@ export class TaskManager {
         const task = entry.task;
 
         if (task.status !== "queued") {
-            throw new TaskEditError(`Cannot edit task with status: ${task.status}. Only queued tasks can be edited.`);
+            throw new TaskEditError(
+                `Cannot edit task with status: ${task.status}. Only queued tasks can be edited.`
+            );
         }
 
         if (!newPrompt || !newPrompt.trim()) {

@@ -1,13 +1,20 @@
 import { createHash } from "node:crypto";
 import type express from "express";
-import { TaskManager, TaskActiveError, TaskCancelError, TaskEditError } from "./task-manager.js";
+import {
+    TaskManager,
+    TaskActiveError,
+    TaskCancelError,
+    TaskEditError
+} from "./task-manager/task-manager.js";
 import { UsageLimitError } from "./usage-limiter.js";
 import { extractLastAssistantMessage } from "./executor.js";
 import type { Config } from "./types.js";
 
 // ── Auth helpers ─────────────────────────────────────────────────────────────
 
-export function parseCookies(header: string | undefined): Record<string, string> {
+export function parseCookies(
+    header: string | undefined
+): Record<string, string> {
     const out: Record<string, string> = {};
     if (!header) return out;
     for (const part of header.split(";")) {
@@ -23,7 +30,10 @@ export function dashboardToken(password: string): string {
     return createHash("sha256").update(`impl:${password}`).digest("hex");
 }
 
-export function isDashboardAuthenticated(req: express.Request, adminPassword: string): boolean {
+export function isDashboardAuthenticated(
+    req: express.Request,
+    adminPassword: string
+): boolean {
     const cookies = parseCookies(req.headers.cookie);
     return cookies["impl_dash"] === dashboardToken(adminPassword);
 }
@@ -33,7 +43,11 @@ export function isDashboardAuthenticated(req: express.Request, adminPassword: st
 export function buildDashboardData(
     taskManager: TaskManager,
     config: Config
-): { tasks: object[]; stats: Record<string, number>; projects: Record<string, Record<string, number>> } {
+): {
+    tasks: object[];
+    stats: Record<string, number>;
+    projects: Record<string, Record<string, number>>;
+} {
     const allTasks = taskManager.listAllTasks();
     const tasks = allTasks.slice(0, 200).map((task) => ({
         taskId: task.taskId,
@@ -59,11 +73,25 @@ export function buildDashboardData(
 
     const projects: Record<string, Record<string, number>> = {};
     for (const projectId of Object.keys(config.projects)) {
-        projects[projectId] = { running: 0, queued: 0, retrying: 0, completed: 0, failed: 0, interrupted: 0 };
+        projects[projectId] = {
+            running: 0,
+            queued: 0,
+            retrying: 0,
+            completed: 0,
+            failed: 0,
+            interrupted: 0
+        };
     }
     for (const task of allTasks) {
         if (!projects[task.projectId]) {
-            projects[task.projectId] = { running: 0, queued: 0, retrying: 0, completed: 0, failed: 0, interrupted: 0 };
+            projects[task.projectId] = {
+                running: 0,
+                queued: 0,
+                retrying: 0,
+                completed: 0,
+                failed: 0,
+                interrupted: 0
+            };
         }
         const s = task.status as string;
         if (s in projects[task.projectId]) {
@@ -134,7 +162,9 @@ export function loginHtml(error = false): string {
 }
 
 export function dashboardHtml(hasPassword: boolean): string {
-    const signOutLink = hasPassword ? '<a href="/dashboard/logout" class="out">Sign out</a>' : '';
+    const signOutLink = hasPassword
+        ? '<a href="/dashboard/logout" class="out">Sign out</a>'
+        : "";
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -660,7 +690,10 @@ export function registerDashboardRoutes(
 
     // GET /dashboard — login form or live dashboard
     app.get("/dashboard", (req, res) => {
-        if (!adminPassword) { res.status(404).send("Not Found"); return; }
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
         if (!isDashboardAuthenticated(req, adminPassword)) {
             res.setHeader("Content-Type", "text/html; charset=utf-8");
             res.send(loginHtml());
@@ -671,11 +704,18 @@ export function registerDashboardRoutes(
     });
 
     app.post("/dashboard", (req, res) => {
-        if (!adminPassword) { res.status(404).send("Not Found"); return; }
-        const password = typeof req.body?.password === "string" ? req.body.password : "";
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        const password =
+            typeof req.body?.password === "string" ? req.body.password : "";
         if (password === adminPassword) {
             const token = dashboardToken(adminPassword);
-            res.setHeader("Set-Cookie", `${DASH_COOKIE}=${token}; Path=/dashboard; HttpOnly; SameSite=Strict`);
+            res.setHeader(
+                "Set-Cookie",
+                `${DASH_COOKIE}=${token}; Path=/dashboard; HttpOnly; SameSite=Strict`
+            );
             res.redirect("/dashboard");
         } else {
             res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -685,34 +725,63 @@ export function registerDashboardRoutes(
 
     // Logout is always available — just clears the cookie
     app.get("/dashboard/logout", (_req, res) => {
-        res.setHeader("Set-Cookie", `${DASH_COOKIE}=; Path=/dashboard; HttpOnly; SameSite=Strict; Max-Age=0`);
+        res.setHeader(
+            "Set-Cookie",
+            `${DASH_COOKIE}=; Path=/dashboard; HttpOnly; SameSite=Strict; Max-Age=0`
+        );
         res.redirect("/dashboard");
     });
 
     app.get("/dashboard/events", (req, res) => {
-        if (!adminPassword) { res.status(404).send("Not Found"); return; }
-        if (!isDashboardAuthenticated(req, adminPassword)) { res.status(401).send("Unauthorized"); return; }
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).send("Unauthorized");
+            return;
+        }
         res.setHeader("Content-Type", "text/event-stream");
         res.setHeader("Cache-Control", "no-cache");
         res.setHeader("Connection", "keep-alive");
         res.flushHeaders();
-        const send = () => res.write(`data: ${JSON.stringify(buildDashboardData(taskManager, config))}\n\n`);
+        const send = () =>
+            res.write(
+                `data: ${JSON.stringify(buildDashboardData(taskManager, config))}\n\n`
+            );
         send();
         const interval = setInterval(send, 3000);
         req.on("close", () => clearInterval(interval));
     });
 
     app.get("/dashboard/api/data", (req, res) => {
-        if (!adminPassword) { res.status(404).send("Not Found"); return; }
-        if (!isDashboardAuthenticated(req, adminPassword)) { res.status(401).json({ error: "Unauthorized" }); return; }
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
         res.json(buildDashboardData(taskManager, config));
     });
 
     app.get("/dashboard/api/task/:taskId", (req, res) => {
-        if (!adminPassword) { res.status(404).send("Not Found"); return; }
-        if (!isDashboardAuthenticated(req, adminPassword)) { res.status(401).json({ error: "Unauthorized" }); return; }
-        const task = taskManager.listAllTasks().find((t) => t.taskId === req.params.taskId);
-        if (!task) { res.status(404).json({ error: "Task not found" }); return; }
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        const task = taskManager
+            .listAllTasks()
+            .find((t) => t.taskId === req.params.taskId);
+        if (!task) {
+            res.status(404).json({ error: "Task not found" });
+            return;
+        }
         res.json({
             taskId: task.taskId,
             projectId: task.projectId,
@@ -724,9 +793,18 @@ export function registerDashboardRoutes(
             attempt: task.attempt,
             startedAt: task.startedAt,
             completedAt: task.completedAt,
-            durationSeconds: Math.round(((task.completedAt ? new Date(task.completedAt).getTime() : Date.now()) - new Date(task.startedAt).getTime()) / 1000),
+            durationSeconds: Math.round(
+                ((task.completedAt
+                    ? new Date(task.completedAt).getTime()
+                    : Date.now()) -
+                    new Date(task.startedAt).getTime()) /
+                    1000
+            ),
             output:
-                task.status === "queued" || task.status === "running" || task.status === "retrying" || task.status === "interrupted"
+                task.status === "queued" ||
+                task.status === "running" ||
+                task.status === "retrying" ||
+                task.status === "interrupted"
                     ? null
                     : extractLastAssistantMessage(task.output) || null,
             error: task.error ?? null,
@@ -735,87 +813,196 @@ export function registerDashboardRoutes(
     });
 
     app.post("/dashboard/api/task", async (req, res) => {
-        if (!adminPassword) { res.status(404).send("Not Found"); return; }
-        if (!isDashboardAuthenticated(req, adminPassword)) { res.status(401).json({ error: "Unauthorized" }); return; }
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
         const { projectId, prompt, pullRequestNumber } = req.body ?? {};
         if (typeof projectId !== "string" || !config.projects[projectId]) {
-            res.status(400).json({ error: "Invalid or missing project ID" }); return;
+            res.status(400).json({ error: "Invalid or missing project ID" });
+            return;
         }
         if (typeof prompt !== "string" || !prompt.trim()) {
-            res.status(400).json({ error: "Prompt is required" }); return;
+            res.status(400).json({ error: "Prompt is required" });
+            return;
         }
         const prNum =
             typeof pullRequestNumber === "number" && pullRequestNumber > 0
                 ? pullRequestNumber
-                : typeof pullRequestNumber === "string" && parseInt(pullRequestNumber, 10) > 0
+                : typeof pullRequestNumber === "string" &&
+                    parseInt(pullRequestNumber, 10) > 0
                   ? parseInt(pullRequestNumber, 10)
                   : undefined;
         try {
-            const task = await taskManager.startTask(projectId, { prompt: prompt.trim(), pullRequestNumber: prNum });
-            res.json({ taskId: task.taskId, branch: task.branch, status: task.status });
+            const task = await taskManager.startTask(projectId, {
+                prompt: prompt.trim(),
+                pullRequestNumber: prNum
+            });
+            res.json({
+                taskId: task.taskId,
+                branch: task.branch,
+                status: task.status
+            });
         } catch (err) {
-            if (err instanceof UsageLimitError) { res.status(429).json({ error: err.message }); return; }
-            res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+            if (err instanceof UsageLimitError) {
+                res.status(429).json({ error: err.message });
+                return;
+            }
+            res.status(500).json({
+                error:
+                    err instanceof Error ? err.message : "Internal server error"
+            });
         }
     });
 
     app.post("/dashboard/api/task/:taskId/cancel", (req, res) => {
-        if (!adminPassword) { res.status(404).send("Not Found"); return; }
-        if (!isDashboardAuthenticated(req, adminPassword)) { res.status(401).json({ error: "Unauthorized" }); return; }
-        const task = taskManager.listAllTasks().find((t) => t.taskId === req.params.taskId);
-        if (!task) { res.status(404).json({ error: "Task not found" }); return; }
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        const task = taskManager
+            .listAllTasks()
+            .find((t) => t.taskId === req.params.taskId);
+        if (!task) {
+            res.status(404).json({ error: "Task not found" });
+            return;
+        }
         try {
-            const cancelled = taskManager.cancelTask(task.projectId, task.taskId);
-            res.json({ taskId: cancelled.taskId, branch: cancelled.branch, status: cancelled.status });
+            const cancelled = taskManager.cancelTask(
+                task.projectId,
+                task.taskId
+            );
+            res.json({
+                taskId: cancelled.taskId,
+                branch: cancelled.branch,
+                status: cancelled.status
+            });
         } catch (err) {
-            if (err instanceof TaskCancelError) { res.status(409).json({ error: err.message }); return; }
-            res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+            if (err instanceof TaskCancelError) {
+                res.status(409).json({ error: err.message });
+                return;
+            }
+            res.status(500).json({
+                error:
+                    err instanceof Error ? err.message : "Internal server error"
+            });
         }
     });
 
     app.patch("/dashboard/api/task/:taskId", (req, res) => {
-        if (!adminPassword) { res.status(404).send("Not Found"); return; }
-        if (!isDashboardAuthenticated(req, adminPassword)) { res.status(401).json({ error: "Unauthorized" }); return; }
-        const task = taskManager.listAllTasks().find((t) => t.taskId === req.params.taskId);
-        if (!task) { res.status(404).json({ error: "Task not found" }); return; }
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        const task = taskManager
+            .listAllTasks()
+            .find((t) => t.taskId === req.params.taskId);
+        if (!task) {
+            res.status(404).json({ error: "Task not found" });
+            return;
+        }
         const { prompt } = req.body ?? {};
         if (typeof prompt !== "string" || !prompt.trim()) {
-            res.status(400).json({ error: "Prompt is required" }); return;
+            res.status(400).json({ error: "Prompt is required" });
+            return;
         }
         try {
-            const updated = taskManager.editTask(task.projectId, task.taskId, prompt);
-            res.json({ taskId: updated.taskId, projectId: updated.projectId, branch: updated.branch, prompt: updated.prompt, title: updated.title ?? null, status: updated.status });
+            const updated = taskManager.editTask(
+                task.projectId,
+                task.taskId,
+                prompt
+            );
+            res.json({
+                taskId: updated.taskId,
+                projectId: updated.projectId,
+                branch: updated.branch,
+                prompt: updated.prompt,
+                title: updated.title ?? null,
+                status: updated.status
+            });
         } catch (err) {
-            if (err instanceof TaskEditError) { res.status(409).json({ error: err.message }); return; }
-            res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+            if (err instanceof TaskEditError) {
+                res.status(409).json({ error: err.message });
+                return;
+            }
+            res.status(500).json({
+                error:
+                    err instanceof Error ? err.message : "Internal server error"
+            });
         }
     });
 
     app.post("/dashboard/api/task/:taskId/retry", async (req, res) => {
-        if (!adminPassword) { res.status(404).send("Not Found"); return; }
-        if (!isDashboardAuthenticated(req, adminPassword)) { res.status(401).json({ error: "Unauthorized" }); return; }
-        const task = taskManager.listAllTasks().find((t) => t.taskId === req.params.taskId);
-        if (!task) { res.status(404).json({ error: "Task not found" }); return; }
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        const task = taskManager
+            .listAllTasks()
+            .find((t) => t.taskId === req.params.taskId);
+        if (!task) {
+            res.status(404).json({ error: "Task not found" });
+            return;
+        }
         try {
-            const retried = await taskManager.retryTask(task.projectId, task.taskId);
-            res.json({ taskId: retried.taskId, branch: retried.branch, status: retried.status });
+            const retried = await taskManager.retryTask(
+                task.projectId,
+                task.taskId
+            );
+            res.json({
+                taskId: retried.taskId,
+                branch: retried.branch,
+                status: retried.status
+            });
         } catch (err) {
-            if (err instanceof TaskActiveError) { res.status(409).json({ error: err.message }); return; }
-            res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+            if (err instanceof TaskActiveError) {
+                res.status(409).json({ error: err.message });
+                return;
+            }
+            res.status(500).json({
+                error:
+                    err instanceof Error ? err.message : "Internal server error"
+            });
         }
     });
 
     app.post("/dashboard/api/tasks/retry-failed", async (req, res) => {
-        if (!adminPassword) { res.status(404).send("Not Found"); return; }
-        if (!isDashboardAuthenticated(req, adminPassword)) { res.status(401).json({ error: "Unauthorized" }); return; }
-        const failedTasks = taskManager.listAllTasks().filter((t) => t.status === "failed");
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        const failedTasks = taskManager
+            .listAllTasks()
+            .filter((t) => t.status === "failed");
         const results = await Promise.allSettled(
             failedTasks.map((t) => taskManager.retryTask(t.projectId, t.taskId))
         );
         const retried = results.filter((r) => r.status === "fulfilled").length;
         const errors = results
             .filter((r): r is PromiseRejectedResult => r.status === "rejected")
-            .map((r) => (r.reason instanceof Error ? r.reason.message : "Unknown error"));
+            .map((r) =>
+                r.reason instanceof Error ? r.reason.message : "Unknown error"
+            );
         res.json({ retried, errors });
     });
 }
