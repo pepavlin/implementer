@@ -554,7 +554,7 @@ function dashboardHtml(hasPassword: boolean): string {
     header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
     h1{font-size:1.4rem;font-weight:600}
     .live{display:flex;align-items:center;gap:8px;font-size:.78rem;color:var(--text2)}
-    .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite;flex-shrink:0}
+    .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite,dot-ring 2.5s ease-out 1.2s infinite;flex-shrink:0}
     .dot.err{background:#ef4444;animation:none}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
     @keyframes spin{to{transform:rotate(360deg)}}
@@ -564,8 +564,15 @@ function dashboardHtml(hasPassword: boolean): string {
     @keyframes stat-pop{0%{transform:scale(1.35)}60%{transform:scale(.95)}100%{transform:scale(1)}}
     @keyframes modal-in{from{opacity:0;transform:scale(.96) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}
     @keyframes row-in{from{opacity:0;transform:translateY(-2px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes row-breathe{0%,100%{background:rgba(34,197,94,.04)}60%{background:rgba(34,197,94,.13)}}
+    @keyframes row-breathe-r{0%,100%{background:rgba(96,165,250,.03)}60%{background:rgba(96,165,250,.1)}}
+    @keyframes border-breathe{0%,100%{box-shadow:-2px 0 6px rgba(34,197,94,.2)}60%{box-shadow:-3px 0 14px rgba(34,197,94,.6)}}
+    @keyframes dot-ring{0%{box-shadow:0 0 0 0 rgba(34,197,94,.7)}70%{box-shadow:0 0 0 10px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+    @keyframes dot-jump{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-3px)}}
+    @keyframes dur-tick{0%{color:inherit}20%{color:#22c55e}100%{color:inherit}}
+    @keyframes stat-glow{0%,100%{box-shadow:0 0 0 1px rgba(34,197,94,.15)}50%{box-shadow:0 0 0 1px rgba(34,197,94,.5),0 0 18px rgba(34,197,94,.15)}}
     .stats{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
-    .stat{background:var(--bg-card);border-radius:8px;padding:14px 20px;min-width:110px}
+    .stat{background:var(--bg-card);border-radius:8px;padding:14px 20px;min-width:110px;border:1px solid transparent;transition:border-color .3s}
     .stat-label{font-size:.68rem;color:var(--text2);text-transform:uppercase;letter-spacing:.05em}
     .stat-val{font-size:1.8rem;font-weight:700;margin-top:2px}
     .cr{color:#22c55e}.cq{color:#f59e0b}.ct{color:#60a5fa}.cc{color:var(--text2)}.cf{color:#ef4444}
@@ -593,17 +600,19 @@ function dashboardHtml(hasPassword: boolean): string {
     td{padding:12px 16px;border-top:1px solid var(--border);font-size:.85rem;vertical-align:middle}
     tr.clickable{cursor:pointer;animation:row-in .18s ease-out}
     tr.clickable:hover td{background:var(--hover-bg)}
-    tr.row-running>td{background:rgba(34,197,94,.04)}
-    tr.row-running>td:first-child{border-left:3px solid rgba(34,197,94,.75)}
-    tr.row-running:hover>td{background:rgba(34,197,94,.09)!important}
+    tr.row-running>td{background:rgba(34,197,94,.04);animation:row-breathe 2.5s ease-in-out infinite}
+    tr.row-running>td:first-child{border-left:3px solid rgba(34,197,94,.75);animation:row-breathe 2.5s ease-in-out infinite,border-breathe 2.5s ease-in-out infinite}
+    tr.row-running:hover>td{background:rgba(34,197,94,.09)!important;animation-play-state:paused}
     tr.row-queued>td:first-child{border-left:3px solid rgba(245,158,11,.55)}
+    tr.row-retrying>td{animation:row-breathe-r 2.5s ease-in-out infinite}
     tr.row-retrying>td:first-child{border-left:3px solid rgba(96,165,250,.6)}
+    tr.row-retrying:hover>td{background:#252a3a!important;animation-play-state:paused}
     tr.row-failed>td:first-child{border-left:3px solid rgba(239,68,68,.6)}
     tr.row-interrupted>td:first-child{border-left:3px solid rgba(167,139,250,.5)}
-    .running-bar{display:block;position:relative;overflow:hidden;height:2px;margin-top:5px;background:rgba(34,197,94,.15);border-radius:1px}
-    .running-bar::after{content:'';position:absolute;top:0;width:55%;height:100%;background:linear-gradient(90deg,transparent,#22c55e,transparent);animation:sweep 1.8s ease-in-out infinite}
-    .retrying-bar{display:block;position:relative;overflow:hidden;height:2px;margin-top:5px;background:rgba(96,165,250,.15);border-radius:1px}
-    .retrying-bar::after{content:'';position:absolute;top:0;width:55%;height:100%;background:linear-gradient(90deg,transparent,#60a5fa,transparent);animation:sweep 2.2s ease-in-out infinite}
+    .running-bar{display:block;position:relative;overflow:hidden;height:3px;margin-top:6px;background:rgba(34,197,94,.2);border-radius:2px;box-shadow:0 0 6px rgba(34,197,94,.25)}
+    .running-bar::after{content:'';position:absolute;top:0;width:55%;height:100%;background:linear-gradient(90deg,transparent,#22c55e,transparent);animation:sweep 1.8s ease-in-out infinite;box-shadow:0 0 8px #22c55e}
+    .retrying-bar{display:block;position:relative;overflow:hidden;height:3px;margin-top:6px;background:rgba(96,165,250,.2);border-radius:2px;box-shadow:0 0 6px rgba(96,165,250,.25)}
+    .retrying-bar::after{content:'';position:absolute;top:0;width:55%;height:100%;background:linear-gradient(90deg,transparent,#60a5fa,transparent);animation:sweep 2.2s ease-in-out infinite;box-shadow:0 0 8px #60a5fa}
     .stat-val.pop{animation:stat-pop .4s ease-out}
     .ps-running{animation:queued-pulse 1.5s ease-in-out infinite}
     .badge{display:inline-flex;align-items:center;padding:2px 10px;border-radius:999px;font-size:.7rem;font-weight:600;white-space:nowrap}
@@ -669,6 +678,13 @@ function dashboardHtml(hasPassword: boolean): string {
     textarea.form-inp{resize:vertical}
     select.form-inp option{background:var(--bg-card)}
     .form-err{background:var(--b-fail-bg);color:var(--b-fail-fg);padding:10px 14px;border-radius:6px;font-size:.8rem;margin-top:8px}
+    .dur-tick{animation:dur-tick .5s ease-out}
+    .act-dots{display:inline-flex;align-items:center;gap:3px;margin-left:7px;vertical-align:middle}
+    .act-dots span{display:inline-block;width:4px;height:4px;border-radius:50%;background:#22c55e;animation:dot-jump 1.2s ease-in-out infinite}
+    .act-dots span:nth-child(2){animation-delay:.18s}
+    .act-dots span:nth-child(3){animation-delay:.36s}
+    .act-dots-r span{background:#60a5fa}
+    .stat-active{animation:stat-glow 2s ease-in-out infinite;border-color:rgba(34,197,94,.3)!important}
   </style>
 </head>
 <body>
@@ -784,6 +800,7 @@ function dashboardHtml(hasPassword: boolean): string {
   <script>
     var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null;
     function setStatVal(id,val){var el=document.getElementById(id);if(el.textContent!==String(val)){el.textContent=val;el.classList.remove('pop');void el.offsetWidth;el.classList.add('pop');}}
+    function updateRunningGlow(n){var e=document.getElementById('sr');if(e){var s=e.closest('.stat');if(s)s.classList.toggle('stat-active',n>0);}}
     function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
     function badge(s){var m={running:['b-running','Running'],queued:['b-queued','Queued'],retrying:['b-retrying','Retrying'],completed:['b-completed','Completed'],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
     function dur(s){if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
@@ -842,12 +859,13 @@ function dashboardHtml(hasPassword: boolean): string {
         var started=new Date(t.startedAt).getTime();
         var isActive=t.status==='running'||t.status==='retrying';
         var bar=t.status==='running'?'<span class="running-bar"></span>':t.status==='retrying'?'<span class="retrying-bar"></span>':'';
+        var actDots=t.status==='running'?'<span class="act-dots"><span></span><span></span><span></span></span>':t.status==='retrying'?'<span class="act-dots act-dots-r"><span></span><span></span><span></span></span>':'';
         return '<tr class="clickable row-'+t.status+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'" data-status="'+t.status+'" data-started="'+started+'">'
           +'<td>'+badge(t.status)+'</td>'
           +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
           +'<td><span class="mono">'+esc(t.taskId)+'</span></td>'
           +'<td>'+(t.title?'<div class="ttitle">'+esc(t.title)+'</div>':'')+'<div class="tprompt">'+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+'</div></td>'
-          +'<td class="mono dur-cell"><span class="dur-val">'+dur(isActive?Math.floor((Date.now()-started)/1000):t.durationSeconds)+'</span>'+bar+'</td>'
+          +'<td class="mono dur-cell"><span class="dur-val">'+dur(isActive?Math.floor((Date.now()-started)/1000):t.durationSeconds)+'</span>'+actDots+bar+'</td>'
           +'<td class="mono">'+fmtDate(t.startedAt)+'</td>'
           +'</tr>';
       }).join('');
@@ -1023,6 +1041,7 @@ function dashboardHtml(hasPassword: boolean): string {
           setStatVal('st',d.stats.retrying);
           setStatVal('sc',d.stats.completed);
           setStatVal('sf',d.stats.failed);
+          updateRunningGlow(d.stats.running);
           renderProjects(d.projects);
           renderTasks(d.tasks);
           document.getElementById('dot').className='dot';
@@ -1040,6 +1059,7 @@ function dashboardHtml(hasPassword: boolean): string {
       setStatVal('st',d.stats.retrying);
       setStatVal('sc',d.stats.completed);
       setStatVal('sf',d.stats.failed);
+      updateRunningGlow(d.stats.running);
       renderProjects(d.projects);
       renderTasks(d.tasks);
       document.getElementById('dot').className='dot';
@@ -1057,7 +1077,7 @@ function dashboardHtml(hasPassword: boolean): string {
         if(!started)return;
         var secs=Math.floor((now-started)/1000);
         var dv=row.querySelector('.dur-val');
-        if(dv)dv.textContent=dur(secs);
+        if(dv){var t=dur(secs);if(dv.textContent!==t){dv.textContent=t;dv.classList.remove('dur-tick');void dv.offsetWidth;dv.classList.add('dur-tick');}}
       });
     },1000);
   </script>
