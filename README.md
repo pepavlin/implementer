@@ -320,6 +320,18 @@ When a task starts, the service either reuses a free workspace (resetting repos 
 
 Tasks for the same PR are always serialised: a second task waits in the queue until the first one completes.
 
+## Server restart recovery
+
+Task state is persisted to disk so the service survives restarts. On startup the following happens automatically:
+
+| State before restart | State after restart |
+|---|---|
+| `running` | Resumed immediately on the same branch. If the resumed attempt fails, the retry fires with **no delay** (delay = 0 s) so the task gets back to work right away instead of waiting for the configured `errorRetry.delaySeconds`. Subsequent automatic retries use the normal configured delay. |
+| `retrying` (waiting for the delay timer) | Re-queued immediately — the remaining delay is dropped. |
+| `queued` | Stays queued and runs as soon as capacity is available. |
+
+This means tasks that were in flight when the server stopped will restart automatically without getting stuck in a long retry wait.
+
 ## n8n integration
 
 Typical n8n workflow:
