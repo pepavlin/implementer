@@ -43,6 +43,9 @@ interface TaskEntry {
     workspaceId: number | null;
     /** Branch to check out when this task is dequeued (used for retried tasks). */
     checkoutBranch?: string;
+    /** True when this task was just resumed after a server restart. Causes the first post-restart
+     *  failure to retry immediately (delay=0) instead of waiting the full errorRetry.delaySeconds. */
+    resumedFromRestart?: boolean;
 }
 
 export class TaskActiveError extends Error {
@@ -229,6 +232,9 @@ export class TaskManager {
                 console.log(
                     `[task-manager] Resuming task ${entry.task.taskId} on workspace ${entry.workspaceId}`
                 );
+
+                // Mark this resumption so that a failure skips the normal retry delay
+                entry.resumedFromRestart = true;
 
                 // Fire in background — resume by checking out the existing branch
                 this.executeTask(
@@ -445,8 +451,9 @@ export class TaskManager {
             });
     }
 
-    private scheduleRetry(task: Task, state: ProjectState): void {
+    private scheduleRetry(task: Task, state: ProjectState, delayOverrideSeconds?: number): void {
         const retryConfig = state.config.errorRetry!;
+        const delaySeconds = delayOverrideSeconds ?? retryConfig.delaySeconds;
         task.attempt += 1;
         task.status = "retrying";
         task.completedAt = null;
@@ -457,7 +464,7 @@ export class TaskManager {
         }
 
         console.log(
-            `[${task.taskId}] Retrying in ${retryConfig.delaySeconds}s (attempt ${task.attempt}/${retryConfig.maxAttempts})`
+            `[${task.taskId}] Retrying in ${delaySeconds}s (attempt ${task.attempt}/${retryConfig.maxAttempts})`
         );
 
         setTimeout(async () => {
@@ -519,7 +526,7 @@ export class TaskManager {
             this.executeTask(task, workspace, state, task.branch ?? undefined).catch((err) => {
                 console.error(`[${task.taskId}] Retry execution failed:`, err);
             });
-        }, retryConfig.delaySeconds * 1000);
+        }, delaySeconds * 1000);
     }
 
     private fireWebhook(taskId: string, status: string, url: string): void {
@@ -1127,7 +1134,13 @@ export class TaskManager {
         if (task.status === "failed") {
             const retryConfig = state.config.errorRetry;
             if (retryConfig && task.attempt < retryConfig.maxAttempts) {
-                this.scheduleRetry(task, state);
+                // Tasks resumed after a server restart skip the normal retry delay on their
+                // first failure so they get back to work immediately rather than waiting the
+                // full delaySeconds. Subsequent retries still use the configured delay.
+                const entry = this.tasks.get(task.taskId);
+                const wasResumedFromRestart = entry?.resumedFromRestart ?? false;
+                if (entry) entry.resumedFromRestart = false;
+                this.scheduleRetry(task, state, wasResumedFromRestart ? 0 : undefined);
                 return; // webhook will fire only on terminal failure
             }
         }

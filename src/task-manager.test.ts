@@ -339,6 +339,141 @@ describe("TaskManager", () => {
       const task = tm.getTask(PROJECT_ID, "alien-task");
       expect(task).toBeUndefined();
     });
+
+    it("sets resumedFromRestart flag on task entries during resumption", async () => {
+      const { TaskManager } = await import("./task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({
+        taskId: "resumed-flag-task",
+        status: "running",
+        completedAt: null,
+        workspaceId: 0,
+      }));
+
+      mkdirSync(join(TMP, "projects", PROJECT_ID, "instances", "0"), { recursive: true });
+
+      const tm = new TaskManager(config);
+
+      await tm.init();
+
+      // The flag is set synchronously after acquireExisting succeeds and before
+      // executeTask() is fired. Checking immediately after init() captures it
+      // before the background async execution has a chance to clear it.
+      // @ts-expect-error - accessing private tasks map for testing
+      const entry = tm.tasks.get("resumed-flag-task");
+      expect(entry?.resumedFromRestart).toBe(true);
+    });
+  });
+
+  describe("restart resume — retry delay", () => {
+    it("tasks resumed after restart skip the retry delay on their first failure", async () => {
+      const { TaskManager } = await import("./task-manager.js");
+      const config = makeConfig({
+        projects: {
+          [PROJECT_ID]: {
+            maxConcurrentTasks: 4,
+            repositories: [
+              { name: "my-repo", url: "https://github.com/test/repo.git", defaultBranch: "main" },
+            ],
+            claudeCode: { command: "claude" },
+            // Very long delay to prove it was bypassed
+            errorRetry: { maxAttempts: 2, delaySeconds: 9999 },
+          },
+        },
+      });
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({
+        taskId: "restart-retry-task",
+        status: "running",
+        completedAt: null,
+        workspaceId: 0,
+        attempt: 1,
+        branch: "impl/test-restart-retry-task",
+      }));
+
+      // Workspace directory must exist so initFromDisk and acquireExisting succeed
+      mkdirSync(join(TMP, "projects", PROJECT_ID, "instances", "0"), { recursive: true });
+
+      const tm = new TaskManager(config);
+
+      // @ts-expect-error - accessing private projects map for testing
+      const state = tm.projects.get(PROJECT_ID)!;
+
+      // Keep hasFreeSlot = false so the 0-delay retry goes to "queued" rather than immediately
+      // attempting to re-run (which would trigger git/docker again in the background)
+      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(false);
+
+      await tm.init();
+
+      // Wait long enough for:
+      //   1. executeTask() to fail (git commands fail — no real repo)
+      //   2. scheduleRetry() with delay=0 to fire and transition the task to "queued"
+      await new Promise((r) => setTimeout(r, 1000));
+
+      const task = tm.getTask(PROJECT_ID, "restart-retry-task");
+      // With the fix: delay=0 → setTimeout fires immediately → task is "queued"
+      // Without the fix: delay=9999s → task is still "retrying" after 1s
+      expect(task?.status).toBe("queued");
+      expect(task?.attempt).toBe(2); // attempt counter was incremented by scheduleRetry
+    });
+
+    it("subsequent retries after a restart use the normal configured delay", async () => {
+      const { TaskManager } = await import("./task-manager.js");
+      const { Executor } = await import("./executor.js");
+      const config = makeConfig({
+        projects: {
+          [PROJECT_ID]: {
+            maxConcurrentTasks: 4,
+            repositories: [
+              { name: "my-repo", url: "https://github.com/test/repo.git", defaultBranch: "main" },
+            ],
+            claudeCode: { command: "claude" },
+            errorRetry: { maxAttempts: 3, delaySeconds: 60 },
+          },
+        },
+      });
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({
+        taskId: "multi-retry-task",
+        status: "running",
+        completedAt: null,
+        workspaceId: 0,
+        attempt: 1,
+        branch: "impl/test-multi-retry-task",
+      }));
+
+      mkdirSync(join(TMP, "projects", PROJECT_ID, "instances", "0"), { recursive: true });
+
+      const tm = new TaskManager(config);
+
+      // @ts-expect-error - accessing private projects map for testing
+      const state = tm.projects.get(PROJECT_ID)!;
+
+      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(false);
+
+      // Spy on scheduleRetry to capture how many times and with what delay it was called
+      const scheduleRetryCalls: Array<{ attempt: number; delay: number | undefined }> = [];
+      // @ts-expect-error - accessing private method for testing
+      const originalScheduleRetry = tm.scheduleRetry.bind(tm);
+      // @ts-expect-error - accessing private method for testing
+      vi.spyOn(tm, "scheduleRetry").mockImplementation((task, projState, delayOverride) => {
+        scheduleRetryCalls.push({ attempt: task.attempt + 1, delay: delayOverride });
+        return originalScheduleRetry(task, projState, delayOverride);
+      });
+
+      await tm.init();
+
+      // Wait for first failure (resume → fail → scheduleRetry with delay=0)
+      await new Promise((r) => setTimeout(r, 1000));
+
+      expect(scheduleRetryCalls).toHaveLength(1);
+      // First failure after restart: delay override should be 0
+      expect(scheduleRetryCalls[0].delay).toBe(0);
+    });
   });
 
   describe("startTask", () => {
