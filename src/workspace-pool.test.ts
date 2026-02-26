@@ -85,6 +85,62 @@ describe("WorkspacePool", () => {
     });
   });
 
+  describe("gh-pr-guard hook configuration", () => {
+    it("always writes .claude/settings.json with PreToolUse hook", async () => {
+      const pool = new WorkspacePool(TMP);
+
+      mkdirSync(join(TMP, "instances", "0"), { recursive: true });
+      pool.initFromDisk();
+      const ws = await pool.acquireExisting(0, fakeRepos);
+
+      const settingsPath = join(ws.dir, ".claude", "settings.json");
+      expect(existsSync(settingsPath)).toBe(true);
+
+      const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+      expect(settings.hooks).toBeDefined();
+      expect(settings.hooks.PreToolUse).toBeDefined();
+      const bashHook = settings.hooks.PreToolUse.find(
+        (h: { matcher: string }) => h.matcher === "Bash",
+      );
+      expect(bashHook).toBeDefined();
+      expect(bashHook.hooks[0].command).toBe("/usr/local/bin/gh-pr-guard");
+    });
+
+    it("writes hook even when no mcpServers configured", async () => {
+      const pool = new WorkspacePool(TMP);
+
+      mkdirSync(join(TMP, "instances", "0"), { recursive: true });
+      pool.initFromDisk();
+      const ws = await pool.acquireExisting(0, fakeRepos);
+
+      const settingsPath = join(ws.dir, ".claude", "settings.json");
+      expect(existsSync(settingsPath)).toBe(true);
+
+      const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+      expect(settings.hooks?.PreToolUse).toBeDefined();
+      // enableAllProjectMcpServers should NOT be set when no MCP servers
+      expect(settings.enableAllProjectMcpServers).toBeUndefined();
+    });
+
+    it("includes enableAllProjectMcpServers when mcpServers are configured", async () => {
+      const mcpServers = {
+        myServer: { command: "test-cmd", args: [] },
+      };
+      const pool = new WorkspacePool(TMP, mcpServers);
+
+      mkdirSync(join(TMP, "instances", "0"), { recursive: true });
+      pool.initFromDisk();
+      const ws = await pool.acquireExisting(0, fakeRepos);
+
+      const settingsPath = join(ws.dir, ".claude", "settings.json");
+      const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+
+      // Both hook AND MCP flag should be present
+      expect(settings.hooks?.PreToolUse).toBeDefined();
+      expect(settings.enableAllProjectMcpServers).toBe(true);
+    });
+  });
+
   describe("initFromDisk", () => {
     it("discovers existing workspace directories", () => {
       const pool = new WorkspacePool(TMP);

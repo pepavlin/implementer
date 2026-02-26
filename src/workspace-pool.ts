@@ -65,24 +65,45 @@ RULES:
   }
 
   /**
-   * Write .mcp.json and .claude/settings.json so Claude Code inside the
-   * container discovers the configured MCP servers automatically.
+   * Write .mcp.json (when MCP servers are configured) and .claude/settings.json
+   * so Claude Code inside the container:
+   *  1. Discovers the configured MCP servers automatically.
+   *  2. Runs the gh-pr-guard PreToolUse hook that hard-blocks destructive PR
+   *     operations (gh pr close / merge / delete) regardless of prompt instructions.
    */
   private writeMcpConfig(dir: string): void {
-    if (!this.mcpServers || Object.keys(this.mcpServers).length === 0) {
-      return;
+    const claudeDir = join(dir, ".claude");
+    mkdirSync(claudeDir, { recursive: true });
+
+    // Always configure the PreToolUse hook — this is a hard technical guard
+    // against the AI closing/merging/deleting pull requests.
+    const settings: Record<string, unknown> = {
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: "Bash",
+            hooks: [
+              {
+                type: "command",
+                command: "/usr/local/bin/gh-pr-guard",
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    if (this.mcpServers && Object.keys(this.mcpServers).length > 0) {
+      settings.enableAllProjectMcpServers = true;
+      writeFileSync(
+        join(dir, ".mcp.json"),
+        JSON.stringify({ mcpServers: this.mcpServers }, null, 2),
+      );
     }
 
     writeFileSync(
-      join(dir, ".mcp.json"),
-      JSON.stringify({ mcpServers: this.mcpServers }, null, 2),
-    );
-
-    const claudeDir = join(dir, ".claude");
-    mkdirSync(claudeDir, { recursive: true });
-    writeFileSync(
       join(claudeDir, "settings.json"),
-      JSON.stringify({ enableAllProjectMcpServers: true }, null, 2),
+      JSON.stringify(settings, null, 2),
     );
   }
 

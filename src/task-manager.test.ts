@@ -952,12 +952,18 @@ describe("buildSystemInstructions", () => {
     const instructions = buildSystemInstructions([{ name: "my-repo" }]);
     expect(instructions).toContain("gh pr close");
     expect(instructions).toContain("gh pr merge");
+    expect(instructions).toContain("gh pr delete");
     expect(instructions).toContain("NEVER close");
   });
 
   it("contains a rule prohibiting merging pull requests", () => {
     const instructions = buildSystemInstructions([{ name: "my-repo" }]);
     expect(instructions).toMatch(/NEVER close.*pull request/i);
+  });
+
+  it("mentions the technical enforcement layer", () => {
+    const instructions = buildSystemInstructions([{ name: "my-repo" }]);
+    expect(instructions).toContain("technical enforcement");
   });
 
   it("includes workspace repo name", () => {
