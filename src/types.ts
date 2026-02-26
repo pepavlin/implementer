@@ -56,7 +56,7 @@ export interface Config {
     projects: Record<string, ProjectConfig>;
 }
 
-export type TaskStatus = "queued" | "running" | "retrying" | "completed" | "failed" | "interrupted";
+export type TaskStatus = "queued" | "running" | "retrying" | "completed" | "failed" | "interrupted" | "cancelled";
 
 export interface ErrorRetryConfig {
     /** Total number of attempts including the first (e.g. 5 = 1 original + 4 retries). */

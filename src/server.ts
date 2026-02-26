@@ -532,7 +532,10 @@ function dashboardHtml(hasPassword: boolean): string {
       --b-run-bg:#14532d;--b-run-fg:#22c55e;--b-q-bg:#451a03;--b-q-fg:#f59e0b;
       --b-ret-bg:#1e3a5f;--b-ret-fg:#60a5fa;--b-done-bg:#1a2535;--b-done-fg:#64748b;
       --b-fail-bg:#3b0f0f;--b-fail-fg:#ef4444;--b-int-bg:#2a1f3a;--b-int-fg:#a78bfa;
+      --b-can-bg:#1a2535;--b-can-fg:#64748b;
       --btn-sec-bg:#252a3a;--btn-sec-fg:#94a3b8;--btn-sec-h:#2a2f42;--btn-ret-h:#78350f;
+      --btn-cancel-bg:#3b0f0f;--btn-cancel-fg:#ef4444;--btn-cancel-h:#7f1d1d;
+      --btn-edit-bg:#1e3a5f;--btn-edit-fg:#60a5fa;--btn-edit-h:#1e40af;
       --link:#60a5fa}
     [data-theme=light]{
       --bg:#f8fafc;--bg-card:#ffffff;--bg-head:#f1f5f9;--bg-code:#f1f5f9;--bg-inp:#ffffff;
@@ -542,7 +545,10 @@ function dashboardHtml(hasPassword: boolean): string {
       --b-run-bg:#dcfce7;--b-run-fg:#16a34a;--b-q-bg:#fef3c7;--b-q-fg:#d97706;
       --b-ret-bg:#dbeafe;--b-ret-fg:#2563eb;--b-done-bg:#f8fafc;--b-done-fg:#64748b;
       --b-fail-bg:#fee2e2;--b-fail-fg:#dc2626;--b-int-bg:#ede9fe;--b-int-fg:#7c3aed;
+      --b-can-bg:#f8fafc;--b-can-fg:#64748b;
       --btn-sec-bg:#f1f5f9;--btn-sec-fg:#475569;--btn-sec-h:#e2e8f0;--btn-ret-h:#fbbf24;
+      --btn-cancel-bg:#fee2e2;--btn-cancel-fg:#dc2626;--btn-cancel-h:#fca5a5;
+      --btn-edit-bg:#dbeafe;--btn-edit-fg:#2563eb;--btn-edit-h:#93c5fd;
       --link:#2563eb}
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);padding:24px}
     header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
@@ -586,6 +592,7 @@ function dashboardHtml(hasPassword: boolean): string {
     .b-completed{background:var(--b-done-bg);color:var(--b-done-fg)}
     .b-failed{background:var(--b-fail-bg);color:var(--b-fail-fg)}
     .b-interrupted{background:var(--b-int-bg);color:var(--b-int-fg)}
+    .b-cancelled{background:var(--b-can-bg);color:var(--b-can-fg)}
     .proj-tag{background:var(--tag-bg);padding:2px 8px;border-radius:4px;font-size:.73rem;color:var(--text2)}
     .mono{font-family:ui-monospace,'SF Mono',monospace;font-size:.76rem;color:var(--text2)}
     .ttitle{font-weight:500;color:var(--text5)}
@@ -622,6 +629,10 @@ function dashboardHtml(hasPassword: boolean): string {
     .btn-sec:hover:not(:disabled){background:var(--btn-sec-h)}
     .btn-ret{background:var(--b-q-bg);color:var(--b-q-fg)}
     .btn-ret:hover:not(:disabled){background:var(--btn-ret-h)}
+    .btn-cancel{background:var(--btn-cancel-bg);color:var(--btn-cancel-fg)}
+    .btn-cancel:hover:not(:disabled){background:var(--btn-cancel-h)}
+    .btn-edit{background:var(--btn-edit-bg);color:var(--btn-edit-fg)}
+    .btn-edit:hover:not(:disabled){background:var(--btn-edit-h)}
     .btn-pri{background:#3b82f6;color:#fff}
     .btn-pri:hover:not(:disabled){background:#2563eb}
     .form-g{margin-bottom:16px}
@@ -663,6 +674,7 @@ function dashboardHtml(hasPassword: boolean): string {
     <button class="filter-btn" data-filter="completed" onclick="setFilter('completed')">Completed</button>
     <button class="filter-btn" data-filter="failed" onclick="setFilter('failed')">Failed</button>
     <button class="filter-btn" data-filter="interrupted" onclick="setFilter('interrupted')">Interrupted</button>
+    <button class="filter-btn" data-filter="cancelled" onclick="setFilter('cancelled')">Cancelled</button>
   </div>
   <table>
     <thead><tr>
@@ -684,7 +696,30 @@ function dashboardHtml(hasPassword: boolean): string {
       <div class="modal-bd" id="task-bd"><div class="muted" style="text-align:center;padding:32px">Loading\u2026</div></div>
       <div class="modal-ft">
         <button class="btn btn-sec" onclick="closeTask()">Close</button>
+        <button class="btn btn-edit" id="task-edit" onclick="openEditTask()" style="display:none">Edit Task</button>
+        <button class="btn btn-cancel" id="task-cancel" onclick="cancelTask()" style="display:none">Cancel Task</button>
         <button class="btn btn-ret" id="task-retry" onclick="retryTask()" style="display:none">Retry Task</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Task Modal -->
+  <div id="et-overlay" class="overlay" style="display:none" onclick="if(event.target===this)closeEditTask()">
+    <div class="modal">
+      <div class="modal-hd">
+        <span class="modal-ttl">Edit Task</span>
+        <button class="modal-x" onclick="closeEditTask()">&#x2715;</button>
+      </div>
+      <div class="modal-bd">
+        <div class="form-g">
+          <label class="form-lbl" for="et-prompt">Prompt</label>
+          <textarea id="et-prompt" class="form-inp" rows="10" placeholder="Describe what to implement\u2026"></textarea>
+        </div>
+        <div id="et-err" class="form-err" style="display:none"></div>
+      </div>
+      <div class="modal-ft">
+        <button class="btn btn-sec" onclick="closeEditTask()">Cancel</button>
+        <button class="btn btn-pri" id="et-submit" onclick="submitEditTask()">Save Changes</button>
       </div>
     </div>
   </div>
@@ -1096,6 +1131,74 @@ export function createServer(
         }
     });
 
+    // POST /dashboard/api/task/:taskId/cancel — cancel a queued/running/retrying task (dashboard auth)
+    app.post("/dashboard/api/task/:taskId/cancel", (req, res) => {
+        if (!config.server.adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, config.server.adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        const allTasks = taskManager.listAllTasks();
+        const task = allTasks.find((t) => t.taskId === req.params.taskId);
+        if (!task) {
+            res.status(404).json({ error: "Task not found" });
+            return;
+        }
+        try {
+            const cancelled = taskManager.cancelTask(task.projectId, task.taskId);
+            res.json({ taskId: cancelled.taskId, branch: cancelled.branch, status: cancelled.status });
+        } catch (err) {
+            if (err instanceof TaskCancelError) {
+                res.status(409).json({ error: err.message });
+                return;
+            }
+            res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+        }
+    });
+
+    // PATCH /dashboard/api/task/:taskId — edit a queued task's prompt (dashboard auth)
+    app.patch("/dashboard/api/task/:taskId", (req, res) => {
+        if (!config.server.adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, config.server.adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        const allTasks = taskManager.listAllTasks();
+        const task = allTasks.find((t) => t.taskId === req.params.taskId);
+        if (!task) {
+            res.status(404).json({ error: "Task not found" });
+            return;
+        }
+        const { prompt } = req.body ?? {};
+        if (typeof prompt !== "string" || !prompt.trim()) {
+            res.status(400).json({ error: "Prompt is required" });
+            return;
+        }
+        try {
+            const updated = taskManager.editTask(task.projectId, task.taskId, prompt);
+            res.json({
+                taskId: updated.taskId,
+                projectId: updated.projectId,
+                branch: updated.branch,
+                prompt: updated.prompt,
+                title: updated.title ?? null,
+                status: updated.status
+            });
+        } catch (err) {
+            if (err instanceof TaskEditError) {
+                res.status(409).json({ error: err.message });
+                return;
+            }
+            res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+        }
+    });
+
     // POST /dashboard/api/task/:taskId/retry — retry a task (dashboard auth)
     app.post("/dashboard/api/task/:taskId/retry", async (req, res) => {
         if (!config.server.adminPassword) {
@@ -1261,6 +1364,68 @@ export function createServer(
             error: task.error ?? null,
             pullRequests: task.pullRequests ?? null
         });
+    });
+
+    // POST /task/:taskId/cancel - Cancel a queued, running, or retrying task
+    app.post("/task/:taskId/cancel", (req, res) => {
+        const projectId = res.locals.projectId as string;
+        const task = taskManager.getTask(projectId, req.params.taskId);
+        if (!task) {
+            res.status(404).json({ error: "Task not found" });
+            return;
+        }
+
+        try {
+            const cancelled = taskManager.cancelTask(projectId, req.params.taskId);
+            res.json({
+                taskId: cancelled.taskId,
+                branch: cancelled.branch,
+                status: cancelled.status
+            });
+        } catch (err) {
+            if (err instanceof TaskCancelError) {
+                res.status(409).json({ error: err.message });
+                return;
+            }
+            res.status(500).json({
+                error: err instanceof Error ? err.message : "Internal server error"
+            });
+        }
+    });
+
+    // PATCH /task/:taskId - Edit the prompt of a queued task
+    app.patch("/task/:taskId", (req, res) => {
+        const projectId = res.locals.projectId as string;
+        const task = taskManager.getTask(projectId, req.params.taskId);
+        if (!task) {
+            res.status(404).json({ error: "Task not found" });
+            return;
+        }
+
+        const parsed = z.object({ prompt: z.string().min(1) }).safeParse(req.body);
+        if (!parsed.success) {
+            res.status(400).json({ error: "Prompt is required", details: parsed.error.issues });
+            return;
+        }
+
+        try {
+            const updated = taskManager.editTask(projectId, req.params.taskId, parsed.data.prompt);
+            res.json({
+                taskId: updated.taskId,
+                branch: updated.branch,
+                prompt: updated.prompt,
+                title: updated.title ?? null,
+                status: updated.status
+            });
+        } catch (err) {
+            if (err instanceof TaskEditError) {
+                res.status(409).json({ error: err.message });
+                return;
+            }
+            res.status(500).json({
+                error: err instanceof Error ? err.message : "Internal server error"
+            });
+        }
     });
 
     // POST /task/:taskId/retry - Retry a task regardless of its current status
