@@ -2,7 +2,7 @@ import express from "express";
 import { createHash } from "node:crypto";
 import swaggerUi from "swagger-ui-express";
 import { z } from "zod";
-import { TaskManager, TaskActiveError } from "./task-manager.js";
+import { TaskManager, TaskActiveError, TaskCancelError, TaskEditError } from "./task-manager.js";
 import { UsageLimitError } from "./usage-limiter.js";
 import { extractLastAssistantMessage } from "./executor.js";
 import type { Config, TaskStatus } from "./types.js";
@@ -13,7 +13,7 @@ const TaskCreateSchema = z.object({
     callbackUrl: z.string().url().optional()
 });
 
-const TASK_STATUSES = ["queued", "running", "retrying", "completed", "failed", "interrupted"] as const;
+const TASK_STATUSES = ["queued", "running", "retrying", "completed", "failed", "interrupted", "cancelled"] as const;
 
 const TaskStatusEnum = z.enum(TASK_STATUSES);
 
@@ -111,7 +111,7 @@ const openApiSpec = {
                     },
                     status: {
                         type: "string",
-                        enum: ["queued", "running", "retrying", "completed", "failed", "interrupted"]
+                        enum: ["queued", "running", "retrying", "completed", "failed", "interrupted", "cancelled"]
                     },
                     startedAt: { type: "string", format: "date-time" },
                     completedAt: {
@@ -224,7 +224,7 @@ const openApiSpec = {
                             type: "array",
                             items: {
                                 type: "string",
-                                enum: ["queued", "running", "retrying", "completed", "failed", "interrupted"]
+                                enum: ["queued", "running", "retrying", "completed", "failed", "interrupted", "cancelled"]
                             }
                         },
                         style: "form",
@@ -456,6 +456,21 @@ function isDashboardAuthenticated(req: express.Request, adminPassword: string): 
     return cookies["impl_dash"] === dashboardToken(adminPassword);
 }
 
+const THEME_FOUC_SCRIPT = `<script>try{if(localStorage.getItem('impl-theme')==='light')document.documentElement.setAttribute('data-theme','light')}catch(e){}</script>`;
+
+const THEME_TOGGLE_JS = `
+    function toggleTheme(){
+      var html=document.documentElement,isLight=html.getAttribute('data-theme')==='light';
+      if(isLight){html.removeAttribute('data-theme');try{localStorage.removeItem('impl-theme')}catch(e){}}
+      else{html.setAttribute('data-theme','light');try{localStorage.setItem('impl-theme','light')}catch(e){}}
+      updateThemeBtn();
+    }
+    function updateThemeBtn(){
+      var btn=document.getElementById('theme-toggle'),isLight=document.documentElement.getAttribute('data-theme')==='light';
+      if(btn)btn.textContent=isLight?'\u263E':'\u2600';
+    }
+    updateThemeBtn();`;
+
 function loginHtml(error = false): string {
     return `<!DOCTYPE html>
 <html lang="en">
@@ -463,20 +478,26 @@ function loginHtml(error = false): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Implementer — Dashboard</title>
+  ${THEME_FOUC_SCRIPT}
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f1117;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh}
-    .card{background:#1e2130;border-radius:12px;padding:40px;width:360px}
+    :root{--bg:#0f1117;--bg-card:#1e2130;--border:#2a2f42;--text:#e2e8f0;--text2:#94a3b8;--bg-inp:#0f1117}
+    [data-theme=light]{--bg:#f8fafc;--bg-card:#ffffff;--border:#cbd5e1;--text:#0f172a;--text2:#475569;--bg-inp:#ffffff}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);display:flex;align-items:center;justify-content:center;min-height:100vh}
+    .card{background:var(--bg-card);border-radius:12px;padding:40px;width:360px}
     h2{font-size:1.2rem;font-weight:600;margin-bottom:24px}
-    label{display:block;font-size:.78rem;color:#94a3b8;margin-bottom:6px}
-    input{width:100%;background:#0f1117;border:1px solid #2a2f42;border-radius:6px;padding:10px 14px;color:#e2e8f0;font-size:.875rem;outline:none}
+    label{display:block;font-size:.78rem;color:var(--text2);margin-bottom:6px}
+    input{width:100%;background:var(--bg-inp);border:1px solid var(--border);border-radius:6px;padding:10px 14px;color:var(--text);font-size:.875rem;outline:none}
     input:focus{border-color:#3b82f6}
-    button{width:100%;margin-top:12px;background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:10px;font-size:.875rem;font-weight:600;cursor:pointer}
-    button:hover{background:#2563eb}
+    button[type=submit]{width:100%;margin-top:12px;background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:10px;font-size:.875rem;font-weight:600;cursor:pointer}
+    button[type=submit]:hover{background:#2563eb}
     .err{color:#f87171;font-size:.78rem;margin-top:10px}
+    .theme-btn{position:fixed;top:16px;right:16px;background:var(--bg-card);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:5px 10px;font-size:.85rem;cursor:pointer;transition:color .15s,background .15s;line-height:1}
+    .theme-btn:hover{color:var(--text)}
   </style>
 </head>
 <body>
+  <button class="theme-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">&#x2600;</button>
   <div class="card">
     <h2>Implementer Dashboard</h2>
     <form method="POST" action="/dashboard">
@@ -486,6 +507,8 @@ function loginHtml(error = false): string {
       ${error ? '<p class="err">Incorrect password.</p>' : ""}
     </form>
   </div>
+  <script>${THEME_TOGGLE_JS}
+  </script>
 </body>
 </html>`;
 }
@@ -498,92 +521,116 @@ function dashboardHtml(hasPassword: boolean): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Implementer Dashboard</title>
+  ${THEME_FOUC_SCRIPT}
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f1117;color:#e2e8f0;padding:24px}
+    :root{
+      --bg:#0f1117;--bg-card:#1e2130;--bg-head:#161925;--bg-code:#0f1117;--bg-inp:#0f1117;
+      --border:#252a3a;--border2:#2a2f42;--hover-bg:#252a3a;--hover-border:#3b4256;--proj-sel:#1a2035;
+      --text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--text4:#4a5568;--text5:#f1f5f9;--text-code:#cbd5e1;
+      --overlay:rgba(0,0,0,.75);--shadow:0 20px 60px rgba(0,0,0,.5);--tag-bg:#252a3a;
+      --b-run-bg:#14532d;--b-run-fg:#22c55e;--b-q-bg:#451a03;--b-q-fg:#f59e0b;
+      --b-ret-bg:#1e3a5f;--b-ret-fg:#60a5fa;--b-done-bg:#1a2535;--b-done-fg:#64748b;
+      --b-fail-bg:#3b0f0f;--b-fail-fg:#ef4444;--b-int-bg:#2a1f3a;--b-int-fg:#a78bfa;
+      --btn-sec-bg:#252a3a;--btn-sec-fg:#94a3b8;--btn-sec-h:#2a2f42;--btn-ret-h:#78350f;
+      --link:#60a5fa}
+    [data-theme=light]{
+      --bg:#f8fafc;--bg-card:#ffffff;--bg-head:#f1f5f9;--bg-code:#f1f5f9;--bg-inp:#ffffff;
+      --border:#e2e8f0;--border2:#cbd5e1;--hover-bg:#f1f5f9;--hover-border:#94a3b8;--proj-sel:#eff6ff;
+      --text:#0f172a;--text2:#475569;--text3:#64748b;--text4:#94a3b8;--text5:#1e293b;--text-code:#374151;
+      --overlay:rgba(0,0,0,.5);--shadow:0 20px 60px rgba(0,0,0,.15);--tag-bg:#f1f5f9;
+      --b-run-bg:#dcfce7;--b-run-fg:#16a34a;--b-q-bg:#fef3c7;--b-q-fg:#d97706;
+      --b-ret-bg:#dbeafe;--b-ret-fg:#2563eb;--b-done-bg:#f8fafc;--b-done-fg:#64748b;
+      --b-fail-bg:#fee2e2;--b-fail-fg:#dc2626;--b-int-bg:#ede9fe;--b-int-fg:#7c3aed;
+      --btn-sec-bg:#f1f5f9;--btn-sec-fg:#475569;--btn-sec-h:#e2e8f0;--btn-ret-h:#fbbf24;
+      --link:#2563eb}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);padding:24px}
     header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
     h1{font-size:1.4rem;font-weight:600}
-    .live{display:flex;align-items:center;gap:8px;font-size:.78rem;color:#94a3b8}
+    .live{display:flex;align-items:center;gap:8px;font-size:.78rem;color:var(--text2)}
     .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite;flex-shrink:0}
     .dot.err{background:#ef4444;animation:none}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
     .stats{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
-    .stat{background:#1e2130;border-radius:8px;padding:14px 20px;min-width:110px}
-    .stat-label{font-size:.68rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em}
+    .stat{background:var(--bg-card);border-radius:8px;padding:14px 20px;min-width:110px}
+    .stat-label{font-size:.68rem;color:var(--text2);text-transform:uppercase;letter-spacing:.05em}
     .stat-val{font-size:1.8rem;font-weight:700;margin-top:2px}
-    .cr{color:#22c55e}.cq{color:#f59e0b}.ct{color:#60a5fa}.cc{color:#94a3b8}.cf{color:#ef4444}
-    .section-title{font-size:.8rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
+    .cr{color:#22c55e}.cq{color:#f59e0b}.ct{color:#60a5fa}.cc{color:var(--text2)}.cf{color:#ef4444}
+    .section-title{font-size:.8rem;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
     .projects{display:flex;gap:10px;margin-bottom:8px;flex-wrap:wrap}
-    .proj-card{background:#1e2130;border-radius:8px;padding:14px 18px;min-width:160px;border:1px solid #252a3a;cursor:pointer;user-select:none;transition:border-color .15s,background .15s}
-    .proj-card:hover{border-color:#3b4256}
-    .proj-card.selected{border-color:#3b82f6;background:#1a2035}
-    .proj-name{font-size:.82rem;font-weight:600;color:#e2e8f0;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .proj-card{background:var(--bg-card);border-radius:8px;padding:14px 18px;min-width:160px;border:1px solid var(--border);cursor:pointer;user-select:none;transition:border-color .15s,background .15s}
+    .proj-card:hover{border-color:var(--hover-border)}
+    .proj-card.selected{border-color:#3b82f6;background:var(--proj-sel)}
+    .proj-name{font-size:.82rem;font-weight:600;color:var(--text);margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .proj-stats{display:flex;gap:8px;font-size:.72rem;flex-wrap:wrap}
     .ps{padding:1px 7px;border-radius:4px;font-weight:600}
-    .ps-running{background:#14532d;color:#22c55e}
-    .ps-queued{background:#451a03;color:#f59e0b}
-    .ps-retrying{background:#1e3a5f;color:#60a5fa}
-    .ps-completed{background:#1a2535;color:#64748b}
-    .ps-failed{background:#3b0f0f;color:#ef4444}
-    .proj-hint{font-size:.72rem;color:#4a5568;margin-bottom:18px;min-height:16px}
+    .ps-running{background:var(--b-run-bg);color:var(--b-run-fg)}
+    .ps-queued{background:var(--b-q-bg);color:var(--b-q-fg)}
+    .ps-retrying{background:var(--b-ret-bg);color:var(--b-ret-fg)}
+    .ps-completed{background:var(--b-done-bg);color:var(--b-done-fg)}
+    .ps-failed{background:var(--b-fail-bg);color:var(--b-fail-fg)}
+    .proj-hint{font-size:.72rem;color:var(--text4);margin-bottom:18px;min-height:16px}
+    .muted{color:var(--text4)}
     .filters{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
-    .filter-btn{padding:4px 12px;border-radius:6px;border:1px solid #2a2f42;background:transparent;color:#94a3b8;font-size:.75rem;cursor:pointer}
+    .filter-btn{padding:4px 12px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--text2);font-size:.75rem;cursor:pointer}
     .filter-btn.active{background:#3b82f6;border-color:#3b82f6;color:#fff}
-    table{width:100%;border-collapse:collapse;background:#1e2130;border-radius:12px;overflow:hidden}
-    th{background:#161925;color:#64748b;font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;padding:10px 16px;text-align:left;font-weight:600}
-    td{padding:12px 16px;border-top:1px solid #252a3a;font-size:.85rem;vertical-align:middle}
+    table{width:100%;border-collapse:collapse;background:var(--bg-card);border-radius:12px;overflow:hidden}
+    th{background:var(--bg-head);color:var(--text3);font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;padding:10px 16px;text-align:left;font-weight:600}
+    td{padding:12px 16px;border-top:1px solid var(--border);font-size:.85rem;vertical-align:middle}
     tr.clickable{cursor:pointer}
-    tr.clickable:hover td{background:#252a3a}
+    tr.clickable:hover td{background:var(--hover-bg)}
     .badge{display:inline-flex;align-items:center;padding:2px 10px;border-radius:999px;font-size:.7rem;font-weight:600;white-space:nowrap}
-    .b-running{background:#14532d;color:#22c55e}
-    .b-queued{background:#451a03;color:#f59e0b}
-    .b-retrying{background:#1e3a5f;color:#60a5fa}
-    .b-completed{background:#1a2535;color:#64748b}
-    .b-failed{background:#3b0f0f;color:#ef4444}
-    .b-interrupted{background:#2a1f3a;color:#a78bfa}
-    .proj-tag{background:#252a3a;padding:2px 8px;border-radius:4px;font-size:.73rem;color:#94a3b8}
-    .mono{font-family:ui-monospace,'SF Mono',monospace;font-size:.76rem;color:#94a3b8}
-    .ttitle{font-weight:500;color:#f1f5f9}
-    .tprompt{color:#64748b;font-size:.76rem;margin-top:2px}
-    .empty{text-align:center;color:#4a5568;padding:48px}
-    a.out{font-size:.76rem;color:#64748b;text-decoration:none}
-    a.out:hover{color:#94a3b8}
+    .b-running{background:var(--b-run-bg);color:var(--b-run-fg)}
+    .b-queued{background:var(--b-q-bg);color:var(--b-q-fg)}
+    .b-retrying{background:var(--b-ret-bg);color:var(--b-ret-fg)}
+    .b-completed{background:var(--b-done-bg);color:var(--b-done-fg)}
+    .b-failed{background:var(--b-fail-bg);color:var(--b-fail-fg)}
+    .b-interrupted{background:var(--b-int-bg);color:var(--b-int-fg)}
+    .proj-tag{background:var(--tag-bg);padding:2px 8px;border-radius:4px;font-size:.73rem;color:var(--text2)}
+    .mono{font-family:ui-monospace,'SF Mono',monospace;font-size:.76rem;color:var(--text2)}
+    .ttitle{font-weight:500;color:var(--text5)}
+    .tprompt{color:var(--text3);font-size:.76rem;margin-top:2px}
+    .empty{text-align:center;color:var(--text4);padding:48px}
+    a.out{font-size:.76rem;color:var(--text3);text-decoration:none}
+    a.out:hover{color:var(--text2)}
     .btn-new{padding:6px 14px;background:#3b82f6;color:#fff;border:none;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer}
     .btn-new:hover{background:#2563eb}
-    .btn-ref{padding:6px 14px;background:transparent;color:#94a3b8;border:1px solid #2a2f42;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
-    .btn-ref:hover:not(:disabled){background:#1e2130;color:#e2e8f0}
+    .btn-ref{padding:6px 14px;background:transparent;color:var(--text2);border:1px solid var(--border2);border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
+    .btn-ref:hover:not(:disabled){background:var(--bg-card);color:var(--text)}
     .btn-ref:disabled{opacity:.5;cursor:not-allowed}
+    .theme-btn{background:var(--bg-card);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:5px 10px;font-size:.85rem;cursor:pointer;transition:color .15s,background .15s;line-height:1}
+    .theme-btn:hover{color:var(--text)}
     /* Modals */
-    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}
-    .modal{background:#1e2130;border-radius:12px;width:100%;max-width:700px;max-height:90vh;display:flex;flex-direction:column;border:1px solid #2a2f42;box-shadow:0 20px 60px rgba(0,0,0,.5)}
-    .modal-hd{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #252a3a;flex-shrink:0;gap:12px}
+    .overlay{position:fixed;inset:0;background:var(--overlay);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}
+    .modal{background:var(--bg-card);border-radius:12px;width:100%;max-width:700px;max-height:90vh;display:flex;flex-direction:column;border:1px solid var(--border2);box-shadow:var(--shadow)}
+    .modal-hd{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0;gap:12px}
     .modal-ttl{font-size:1rem;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .modal-x{background:transparent;border:none;color:#64748b;font-size:1.1rem;cursor:pointer;padding:4px 8px;border-radius:4px;flex-shrink:0;line-height:1}
-    .modal-x:hover{background:#252a3a;color:#e2e8f0}
+    .modal-x{background:transparent;border:none;color:var(--text3);font-size:1.1rem;cursor:pointer;padding:4px 8px;border-radius:4px;flex-shrink:0;line-height:1}
+    .modal-x:hover{background:var(--hover-bg);color:var(--text)}
     .modal-bd{padding:20px;overflow-y:auto;flex:1}
-    .modal-ft{padding:14px 20px;border-top:1px solid #252a3a;display:flex;gap:8px;justify-content:flex-end;flex-shrink:0}
+    .modal-ft{padding:14px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;flex-shrink:0}
     .det-row{margin-bottom:14px}
-    .det-lbl{font-size:.7rem;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;font-weight:600}
-    .det-val{font-size:.875rem;color:#e2e8f0;word-break:break-word}
-    .det-pre{white-space:pre-wrap;word-break:break-word;background:#0f1117;padding:12px;border-radius:6px;font-family:ui-monospace,'SF Mono',monospace;font-size:.78rem;color:#cbd5e1;max-height:220px;overflow-y:auto;line-height:1.5}
-    .det-err{background:#3b0f0f;color:#ef4444;padding:10px 14px;border-radius:6px;font-size:.82rem;word-break:break-word}
-    .pr-link{color:#60a5fa;text-decoration:none;font-size:.82rem}
+    .det-lbl{font-size:.7rem;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;font-weight:600}
+    .det-val{font-size:.875rem;color:var(--text);word-break:break-word}
+    .det-pre{white-space:pre-wrap;word-break:break-word;background:var(--bg-code);padding:12px;border-radius:6px;font-family:ui-monospace,'SF Mono',monospace;font-size:.78rem;color:var(--text-code);max-height:220px;overflow-y:auto;line-height:1.5}
+    .det-err{background:var(--b-fail-bg);color:var(--b-fail-fg);padding:10px 14px;border-radius:6px;font-size:.82rem;word-break:break-word}
+    .pr-link{color:var(--link);text-decoration:none;font-size:.82rem}
     .pr-link:hover{text-decoration:underline}
     .btn{padding:8px 16px;border-radius:6px;border:none;font-size:.8rem;font-weight:600;cursor:pointer;transition:background .15s}
     .btn:disabled{opacity:.5;cursor:not-allowed}
-    .btn-sec{background:#252a3a;color:#94a3b8}
-    .btn-sec:hover:not(:disabled){background:#2a2f42}
-    .btn-ret{background:#451a03;color:#f59e0b}
-    .btn-ret:hover:not(:disabled){background:#78350f}
+    .btn-sec{background:var(--btn-sec-bg);color:var(--btn-sec-fg)}
+    .btn-sec:hover:not(:disabled){background:var(--btn-sec-h)}
+    .btn-ret{background:var(--b-q-bg);color:var(--b-q-fg)}
+    .btn-ret:hover:not(:disabled){background:var(--btn-ret-h)}
     .btn-pri{background:#3b82f6;color:#fff}
     .btn-pri:hover:not(:disabled){background:#2563eb}
     .form-g{margin-bottom:16px}
-    .form-lbl{display:block;font-size:.78rem;color:#94a3b8;margin-bottom:6px}
-    .form-inp{width:100%;background:#0f1117;border:1px solid #2a2f42;border-radius:6px;padding:10px 14px;color:#e2e8f0;font-size:.875rem;outline:none;font-family:inherit}
+    .form-lbl{display:block;font-size:.78rem;color:var(--text2);margin-bottom:6px}
+    .form-inp{width:100%;background:var(--bg-inp);border:1px solid var(--border2);border-radius:6px;padding:10px 14px;color:var(--text);font-size:.875rem;outline:none;font-family:inherit}
     .form-inp:focus{border-color:#3b82f6}
     textarea.form-inp{resize:vertical}
-    select.form-inp option{background:#1e2130}
-    .form-err{background:#3b0f0f;color:#ef4444;padding:10px 14px;border-radius:6px;font-size:.8rem;margin-top:8px}
+    select.form-inp option{background:var(--bg-card)}
+    .form-err{background:var(--b-fail-bg);color:var(--b-fail-fg);padding:10px 14px;border-radius:6px;font-size:.8rem;margin-top:8px}
   </style>
 </head>
 <body>
@@ -592,6 +639,7 @@ function dashboardHtml(hasPassword: boolean): string {
     <div style="display:flex;align-items:center;gap:12px">
       <button class="btn-new" onclick="openNewTask()">+ New Task</button>
       <button class="btn-ref" id="refresh-btn" onclick="refreshData()">\u21bb Refresh</button>
+      <button class="theme-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">&#x2600;</button>
       <div class="live"><span class="dot" id="dot"></span><span id="upd">Connecting\u2026</span></div>
       ${signOutLink}
     </div>
@@ -604,7 +652,7 @@ function dashboardHtml(hasPassword: boolean): string {
     <div class="stat"><div class="stat-label">Failed</div><div class="stat-val cf" id="sf">\u2014</div></div>
   </div>
   <div class="section-title">Projects</div>
-  <div class="projects" id="projects"><div style="color:#4a5568;font-size:.82rem">Loading\u2026</div></div>
+  <div class="projects" id="projects"><div class="muted" style="font-size:.82rem">Loading\u2026</div></div>
   <div class="proj-hint" id="proj-hint">Click a project card to filter tasks by project.</div>
   <div class="section-title">Tasks</div>
   <div class="filters" id="filters">
@@ -633,7 +681,7 @@ function dashboardHtml(hasPassword: boolean): string {
         </div>
         <button class="modal-x" onclick="closeTask()">&#x2715;</button>
       </div>
-      <div class="modal-bd" id="task-bd"><div style="color:#4a5568;text-align:center;padding:32px">Loading\u2026</div></div>
+      <div class="modal-bd" id="task-bd"><div class="muted" style="text-align:center;padding:32px">Loading\u2026</div></div>
       <div class="modal-ft">
         <button class="btn btn-sec" onclick="closeTask()">Close</button>
         <button class="btn btn-ret" id="task-retry" onclick="retryTask()" style="display:none">Retry Task</button>
@@ -658,7 +706,7 @@ function dashboardHtml(hasPassword: boolean): string {
           <textarea id="nt-prompt" class="form-inp" rows="8" placeholder="Describe what to implement\u2026"></textarea>
         </div>
         <div class="form-g">
-          <label class="form-lbl" for="nt-pr">Pull Request # <span style="color:#4a5568;font-weight:400">(optional)</span></label>
+          <label class="form-lbl" for="nt-pr">Pull Request # <span class="muted" style="font-weight:400">(optional)</span></label>
           <input type="number" id="nt-pr" class="form-inp" placeholder="42" min="1">
         </div>
         <div id="nt-err" class="form-err" style="display:none"></div>
@@ -694,7 +742,7 @@ function dashboardHtml(hasPassword: boolean): string {
     function renderProjects(projects){
       var el=document.getElementById('projects');
       var ids=Object.keys(projects);
-      if(!ids.length){el.innerHTML='<div style="color:#4a5568;font-size:.82rem">No projects</div>';return;}
+      if(!ids.length){el.innerHTML='<div class="muted" style="font-size:.82rem">No projects</div>';return;}
       el.innerHTML=ids.map(function(id){
         var p=projects[id],sel=selectedProjects.has(id);
         var parts=[];
@@ -703,7 +751,7 @@ function dashboardHtml(hasPassword: boolean): string {
         if(p.retrying)parts.push('<span class="ps ps-retrying">'+p.retrying+' retrying</span>');
         if(p.completed)parts.push('<span class="ps ps-completed">'+p.completed+' done</span>');
         if(p.failed)parts.push('<span class="ps ps-failed">'+p.failed+' failed</span>');
-        if(!parts.length)parts.push('<span style="color:#4a5568;font-size:.72rem">No tasks</span>');
+        if(!parts.length)parts.push('<span class="muted" style="font-size:.72rem">No tasks</span>');
         return '<div class="proj-card'+(sel?' selected':'')+'" data-proj="'+esc(id)+'">'
           +'<div class="proj-name" title="'+esc(id)+'">'+(sel?'\u2714 ':'')+esc(id)+'</div>'
           +'<div class="proj-stats">'+parts.join('')+'</div>'
@@ -744,7 +792,7 @@ function dashboardHtml(hasPassword: boolean): string {
       currentTaskId=taskId;
       document.getElementById('task-ttl').textContent='Task '+taskId;
       document.getElementById('task-badge').innerHTML='';
-      document.getElementById('task-bd').innerHTML='<div style="color:#4a5568;text-align:center;padding:32px">Loading\u2026</div>';
+      document.getElementById('task-bd').innerHTML='<div class="muted" style="text-align:center;padding:32px">Loading\u2026</div>';
       document.getElementById('task-retry').style.display='none';
       document.getElementById('task-overlay').style.display='flex';
       fetch('/dashboard/api/task/'+encodeURIComponent(taskId))
@@ -873,6 +921,7 @@ function dashboardHtml(hasPassword: boolean): string {
       document.getElementById('dot').className='dot err';
       document.getElementById('upd').textContent='Connection lost';
     };
+    ${THEME_TOGGLE_JS}
   </script>
 </body>
 </html>`;
