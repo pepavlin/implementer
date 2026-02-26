@@ -48,10 +48,34 @@ function makeMockTaskManager(overrides: Partial<TaskManager> = {}) {
         getTask: vi.fn(),
         listTasks: vi.fn().mockReturnValue([]),
         listAllActiveTasks: vi.fn().mockReturnValue([]),
+        listAllTasks: vi.fn().mockReturnValue([]),
         getOutput: vi.fn().mockReturnValue(""),
         retryTask: vi.fn(),
         ...overrides
     } as unknown as TaskManager;
+}
+
+function makeConfigWithAdmin(): Config {
+    return {
+        server: { workspaceDir: "/tmp/test", adminPassword: "secret" },
+        projects: {
+            [PROJECT_ID]: {
+                repositories: [{ name: "repo", url: "https://example.com/repo.git", defaultBranch: "main" }],
+                claudeCode: { command: "claude" }
+            }
+        }
+    };
+}
+
+async function getAdminCookie(app: ReturnType<typeof createServer>): Promise<string> {
+    const loginRes = await request(app)
+        .post("/dashboard")
+        .type("form")
+        .send({ password: "secret" })
+        .expect(302);
+    const setCookie = loginRes.headers["set-cookie"] as string[] | string;
+    const cookieHeader = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+    return cookieHeader?.split(";")[0] ?? "";
 }
 
 describe("server", () => {
@@ -728,6 +752,262 @@ describe("server", () => {
             expect(res.headers.location).toBe("/dashboard");
             const cookie = (res.headers["set-cookie"] as unknown as string[])?.[0] ?? "";
             expect(cookie).toContain("Max-Age=0");
+        });
+    });
+
+    describe("GET /dashboard/api/task/:taskId", () => {
+        it("returns 404 when adminPassword is not configured", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfig());
+            await request(app).get("/dashboard/api/task/abc123").expect(404);
+        });
+
+        it("returns 401 when not authenticated", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            await request(app).get("/dashboard/api/task/abc123").expect(401);
+        });
+
+        it("returns 404 for unknown task", async () => {
+            const tm = makeMockTaskManager({ listAllTasks: vi.fn().mockReturnValue([]) });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            await request(app).get("/dashboard/api/task/nonexistent").set("Cookie", cookie).expect(404);
+        });
+
+        it("returns full task details for a completed task", async () => {
+            const task = makeMockTask({
+                status: "completed",
+                completedAt: "2025-01-01T00:05:00.000Z",
+                pullRequests: [{ repo: "my-repo", url: "https://github.com/org/repo/pull/42" }]
+            });
+            const tm = makeMockTaskManager({ listAllTasks: vi.fn().mockReturnValue([task]) });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .get("/dashboard/api/task/abc123")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(res.body.taskId).toBe("abc123");
+            expect(res.body.prompt).toBe("Add a button");
+            expect(res.body.status).toBe("completed");
+            expect(res.body.projectId).toBe(PROJECT_ID);
+            expect(res.body.branch).toBe("impl/test-branch-abc123");
+            expect(res.body.durationSeconds).toBe(300);
+            expect(res.body.pullRequests).toEqual([
+                { repo: "my-repo", url: "https://github.com/org/repo/pull/42" }
+            ]);
+        });
+
+        it("returns null output for a running task", async () => {
+            const task = makeMockTask({ status: "running" });
+            const tm = makeMockTaskManager({ listAllTasks: vi.fn().mockReturnValue([task]) });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .get("/dashboard/api/task/abc123")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(res.body.output).toBeNull();
+        });
+
+        it("returns error field when task has error", async () => {
+            const task = makeMockTask({ status: "failed", error: "something went wrong" });
+            const tm = makeMockTaskManager({ listAllTasks: vi.fn().mockReturnValue([task]) });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .get("/dashboard/api/task/abc123")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(res.body.error).toBe("something went wrong");
+        });
+    });
+
+    describe("POST /dashboard/api/task", () => {
+        it("returns 404 when adminPassword is not configured", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfig());
+            await request(app).post("/dashboard/api/task").send({}).expect(404);
+        });
+
+        it("returns 401 when not authenticated", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            await request(app).post("/dashboard/api/task").send({}).expect(401);
+        });
+
+        it("returns 400 for invalid project ID", async () => {
+            const tm = makeMockTaskManager();
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .post("/dashboard/api/task")
+                .set("Cookie", cookie)
+                .send({ projectId: "nonexistent-project", prompt: "test" })
+                .expect(400);
+
+            expect(res.body.error).toMatch(/[Ii]nvalid/);
+        });
+
+        it("returns 400 for missing prompt", async () => {
+            const tm = makeMockTaskManager();
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .post("/dashboard/api/task")
+                .set("Cookie", cookie)
+                .send({ projectId: PROJECT_ID })
+                .expect(400);
+
+            expect(res.body.error).toMatch(/[Pp]rompt/);
+        });
+
+        it("returns 400 for empty prompt", async () => {
+            const tm = makeMockTaskManager();
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .post("/dashboard/api/task")
+                .set("Cookie", cookie)
+                .send({ projectId: PROJECT_ID, prompt: "   " })
+                .expect(400);
+
+            expect(res.body.error).toMatch(/[Pp]rompt/);
+        });
+
+        it("creates a task and returns taskId", async () => {
+            const task = makeMockTask({ status: "queued", branch: null });
+            const startTask = vi.fn().mockResolvedValue(task);
+            const tm = makeMockTaskManager({ startTask });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .post("/dashboard/api/task")
+                .set("Cookie", cookie)
+                .send({ projectId: PROJECT_ID, prompt: "Add a button" })
+                .expect(200);
+
+            expect(res.body.taskId).toBe("abc123");
+            expect(res.body.status).toBe("queued");
+            expect(startTask).toHaveBeenCalledWith(PROJECT_ID, { prompt: "Add a button", pullRequestNumber: undefined });
+        });
+
+        it("passes pullRequestNumber when provided as integer", async () => {
+            const task = makeMockTask({ status: "queued", branch: null, pullRequestNumber: 42 });
+            const startTask = vi.fn().mockResolvedValue(task);
+            const tm = makeMockTaskManager({ startTask });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            await request(app)
+                .post("/dashboard/api/task")
+                .set("Cookie", cookie)
+                .send({ projectId: PROJECT_ID, prompt: "Fix bug", pullRequestNumber: 42 })
+                .expect(200);
+
+            expect(startTask).toHaveBeenCalledWith(PROJECT_ID, {
+                prompt: "Fix bug",
+                pullRequestNumber: 42
+            });
+        });
+
+        it("returns 429 when token usage limit is exceeded", async () => {
+            const tm = makeMockTaskManager({
+                startTask: vi.fn().mockRejectedValue(new UsageLimitError(600_000, 500_000))
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .post("/dashboard/api/task")
+                .set("Cookie", cookie)
+                .send({ projectId: PROJECT_ID, prompt: "Do something" })
+                .expect(429);
+
+            expect(res.body.error).toContain("Token usage limit exceeded");
+        });
+    });
+
+    describe("POST /dashboard/api/task/:taskId/retry", () => {
+        it("returns 404 when adminPassword is not configured", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfig());
+            await request(app).post("/dashboard/api/task/abc123/retry").expect(404);
+        });
+
+        it("returns 401 when not authenticated", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            await request(app).post("/dashboard/api/task/abc123/retry").expect(401);
+        });
+
+        it("returns 404 for unknown task", async () => {
+            const tm = makeMockTaskManager({ listAllTasks: vi.fn().mockReturnValue([]) });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            await request(app)
+                .post("/dashboard/api/task/nonexistent/retry")
+                .set("Cookie", cookie)
+                .expect(404);
+        });
+
+        it("retries a failed task and returns the new task info", async () => {
+            const task = makeMockTask({ status: "failed" });
+            const retried = makeMockTask({ status: "queued" });
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue([task]),
+                retryTask: vi.fn().mockResolvedValue(retried)
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .post("/dashboard/api/task/abc123/retry")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(res.body.taskId).toBe("abc123");
+            expect(res.body.status).toBe("queued");
+        });
+
+        it("returns 409 when task is currently active", async () => {
+            const task = makeMockTask({ status: "running" });
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue([task]),
+                retryTask: vi.fn().mockRejectedValue(new TaskActiveError("running"))
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .post("/dashboard/api/task/abc123/retry")
+                .set("Cookie", cookie)
+                .expect(409);
+
+            expect(res.body.error).toContain("running");
+        });
+
+        it("returns 500 on unexpected error", async () => {
+            const task = makeMockTask({ status: "failed" });
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue([task]),
+                retryTask: vi.fn().mockRejectedValue(new Error("unexpected"))
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .post("/dashboard/api/task/abc123/retry")
+                .set("Cookie", cookie)
+                .expect(500);
+
+            expect(res.body.error).toBe("unexpected");
         });
     });
 });

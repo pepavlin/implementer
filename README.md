@@ -332,6 +332,35 @@ Task state is persisted to disk so the service survives restarts. On startup the
 
 This means tasks that were in flight when the server stopped will restart automatically without getting stuck in a long retry wait.
 
+## Admin Dashboard
+
+The admin dashboard is available at `/dashboard` when `server.adminPassword` is set in `config.yaml`:
+
+```yaml
+server:
+    workspaceDir: ./workspace
+    adminPassword: your-secure-password
+```
+
+### Features
+
+- **Live task list** — auto-refreshes every 3 seconds via Server-Sent Events; shows status, project, title, prompt preview, duration, and start time
+- **Task detail modal** — click any task row to see the full prompt, branch, duration, PR links, error, and output
+- **Retry task** — retry any completed, failed, or interrupted task directly from the task detail modal
+- **Create new task** — click **+ New Task** to open a form where you select a project, enter a prompt, and optionally link a pull request number
+- **Project filter** — click project cards to filter the task list to one or more projects; click again to deselect; the new-task form pre-selects the currently filtered project
+- **Status filter** — filter tasks by status: All, Running, Queued, Retrying, Completed, Failed, Interrupted
+
+### Dashboard-only API routes (requires admin auth cookie)
+
+| Route | Method | Description |
+|---|---|---|
+| `/dashboard/api/task/:taskId` | GET | Full task details (prompt, output, error, PRs) |
+| `/dashboard/api/task` | POST | Create a new task (`{ projectId, prompt, pullRequestNumber? }`) |
+| `/dashboard/api/task/:taskId/retry` | POST | Retry a task across all projects |
+
+These routes are separate from the project Bearer-token API and use the same cookie-based auth as the dashboard UI.
+
 ## n8n integration
 
 Typical n8n workflow:
