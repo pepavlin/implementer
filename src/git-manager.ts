@@ -66,6 +66,7 @@ export class GitManager {
     for (const repo of repos) {
       const repoDir = this.getRepoDir(baseDir, repo.name);
       await git(["fetch", "origin"], repoDir, githubToken);
+      await git(["reset", "--hard", "HEAD"], repoDir);
       await git(["checkout", repo.defaultBranch], repoDir);
       await git(["reset", "--hard", `origin/${repo.defaultBranch}`], repoDir);
       await git(["checkout", "-b", branchName], repoDir);
@@ -79,6 +80,7 @@ export class GitManager {
     for (const repo of repos) {
       const repoDir = this.getRepoDir(baseDir, repo.name);
       await git(["fetch", "origin"], repoDir, githubToken);
+      await git(["reset", "--hard", "HEAD"], repoDir);
 
       try {
         await git(["checkout", branchName], repoDir);
@@ -106,6 +108,7 @@ export class GitManager {
     for (const repo of repos) {
       const repoDir = this.getRepoDir(baseDir, repo.name);
       await git(["fetch", "origin"], repoDir, githubToken);
+      await git(["reset", "--hard", "HEAD"], repoDir);
       await git(["checkout", repo.defaultBranch], repoDir);
       await git(["reset", "--hard", `origin/${repo.defaultBranch}`], repoDir);
     }
