@@ -935,6 +935,96 @@ describe("server", () => {
         });
     });
 
+    describe("GET /dashboard/api/data", () => {
+        it("returns 404 when adminPassword is not configured", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfig());
+            await request(app).get("/dashboard/api/data").expect(404);
+        });
+
+        it("returns 401 when not authenticated", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            await request(app).get("/dashboard/api/data").expect(401);
+        });
+
+        it("returns tasks, stats, and projects when authenticated", async () => {
+            const task = makeMockTask({ status: "running" });
+            const tm = makeMockTaskManager({ listAllTasks: vi.fn().mockReturnValue([task]) });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .get("/dashboard/api/data")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(res.body.tasks).toHaveLength(1);
+            expect(res.body.tasks[0].taskId).toBe("abc123");
+            expect(res.body.tasks[0].status).toBe("running");
+            expect(res.body.stats.running).toBe(1);
+            expect(res.body.stats.queued).toBe(0);
+            expect(res.body.stats.completed).toBe(0);
+            expect(res.body.projects).toBeDefined();
+            expect(res.body.projects[PROJECT_ID]).toBeDefined();
+            expect(res.body.projects[PROJECT_ID].running).toBe(1);
+        });
+
+        it("returns empty tasks and zero stats when no tasks exist", async () => {
+            const tm = makeMockTaskManager({ listAllTasks: vi.fn().mockReturnValue([]) });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .get("/dashboard/api/data")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(res.body.tasks).toEqual([]);
+            expect(res.body.stats.running).toBe(0);
+            expect(res.body.stats.total).toBe(0);
+        });
+
+        it("includes durationSeconds in task list items", async () => {
+            const task = makeMockTask({
+                status: "completed",
+                completedAt: "2025-01-01T01:00:00.000Z"
+            });
+            const tm = makeMockTaskManager({ listAllTasks: vi.fn().mockReturnValue([task]) });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .get("/dashboard/api/data")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(typeof res.body.tasks[0].durationSeconds).toBe("number");
+        });
+
+        it("counts each status correctly in stats", async () => {
+            const tasks = [
+                makeMockTask({ taskId: "t1", status: "running" }),
+                makeMockTask({ taskId: "t2", status: "queued" }),
+                makeMockTask({ taskId: "t3", status: "queued" }),
+                makeMockTask({ taskId: "t4", status: "completed", completedAt: "2025-01-01T01:00:00.000Z" }),
+                makeMockTask({ taskId: "t5", status: "failed" })
+            ];
+            const tm = makeMockTaskManager({ listAllTasks: vi.fn().mockReturnValue(tasks) });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .get("/dashboard/api/data")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(res.body.stats.running).toBe(1);
+            expect(res.body.stats.queued).toBe(2);
+            expect(res.body.stats.completed).toBe(1);
+            expect(res.body.stats.failed).toBe(1);
+            expect(res.body.stats.total).toBe(5);
+        });
+    });
+
     describe("POST /dashboard/api/task/:taskId/retry", () => {
         it("returns 404 when adminPassword is not configured", async () => {
             const app = createServer(makeMockTaskManager(), makeConfig());
