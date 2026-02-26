@@ -391,6 +391,50 @@ function getDurationSeconds(task: {
 
 // ── Dashboard helpers ────────────────────────────────────────────────────────
 
+function buildDashboardData(
+    taskManager: TaskManager,
+    config: Config
+): { tasks: object[]; stats: Record<string, number>; projects: Record<string, Record<string, number>> } {
+    const allTasks = taskManager.listAllTasks();
+    const tasks = allTasks.slice(0, 200).map((task) => ({
+        taskId: task.taskId,
+        projectId: task.projectId,
+        title: task.title ?? null,
+        prompt: task.prompt,
+        status: task.status,
+        startedAt: task.startedAt,
+        durationSeconds: Math.round(
+            (Date.now() - new Date(task.startedAt).getTime()) / 1000
+        )
+    }));
+
+    const stats = {
+        running: allTasks.filter((t) => t.status === "running").length,
+        queued: allTasks.filter((t) => t.status === "queued").length,
+        retrying: allTasks.filter((t) => t.status === "retrying").length,
+        completed: allTasks.filter((t) => t.status === "completed").length,
+        failed: allTasks.filter((t) => t.status === "failed").length,
+        interrupted: allTasks.filter((t) => t.status === "interrupted").length,
+        total: allTasks.length
+    };
+
+    const projects: Record<string, Record<string, number>> = {};
+    for (const projectId of Object.keys(config.projects)) {
+        projects[projectId] = { running: 0, queued: 0, retrying: 0, completed: 0, failed: 0, interrupted: 0 };
+    }
+    for (const task of allTasks) {
+        if (!projects[task.projectId]) {
+            projects[task.projectId] = { running: 0, queued: 0, retrying: 0, completed: 0, failed: 0, interrupted: 0 };
+        }
+        const s = task.status as string;
+        if (s in projects[task.projectId]) {
+            projects[task.projectId][s]++;
+        }
+    }
+
+    return { tasks, stats, projects };
+}
+
 function parseCookies(header: string | undefined): Record<string, string> {
     const out: Record<string, string> = {};
     if (!header) return out;
@@ -506,6 +550,9 @@ function dashboardHtml(hasPassword: boolean): string {
     a.out:hover{color:#94a3b8}
     .btn-new{padding:6px 14px;background:#3b82f6;color:#fff;border:none;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer}
     .btn-new:hover{background:#2563eb}
+    .btn-ref{padding:6px 14px;background:transparent;color:#94a3b8;border:1px solid #2a2f42;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
+    .btn-ref:hover:not(:disabled){background:#1e2130;color:#e2e8f0}
+    .btn-ref:disabled{opacity:.5;cursor:not-allowed}
     /* Modals */
     .overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}
     .modal{background:#1e2130;border-radius:12px;width:100%;max-width:700px;max-height:90vh;display:flex;flex-direction:column;border:1px solid #2a2f42;box-shadow:0 20px 60px rgba(0,0,0,.5)}
@@ -544,6 +591,7 @@ function dashboardHtml(hasPassword: boolean): string {
     <h1>Implementer Dashboard</h1>
     <div style="display:flex;align-items:center;gap:12px">
       <button class="btn-new" onclick="openNewTask()">+ New Task</button>
+      <button class="btn-ref" id="refresh-btn" onclick="refreshData()">\u21bb Refresh</button>
       <div class="live"><span class="dot" id="dot"></span><span id="upd">Connecting\u2026</span></div>
       ${signOutLink}
     </div>
@@ -785,6 +833,28 @@ function dashboardHtml(hasPassword: boolean): string {
         else if(document.getElementById('nt-overlay').style.display!=='none')closeNewTask();
       }
     });
+    function refreshData(){
+      var btn=document.getElementById('refresh-btn');
+      if(btn.disabled)return;
+      btn.disabled=true;
+      btn.textContent='Refreshing\u2026';
+      fetch('/dashboard/api/data')
+        .then(function(r){return r.json();})
+        .then(function(d){
+          lastData=d;
+          document.getElementById('sr').textContent=d.stats.running;
+          document.getElementById('sq').textContent=d.stats.queued;
+          document.getElementById('st').textContent=d.stats.retrying;
+          document.getElementById('sc').textContent=d.stats.completed;
+          document.getElementById('sf').textContent=d.stats.failed;
+          renderProjects(d.projects);
+          renderTasks(d.tasks);
+          document.getElementById('dot').className='dot';
+          document.getElementById('upd').textContent='Updated '+new Date().toLocaleTimeString();
+        })
+        .catch(function(){document.getElementById('dot').className='dot err';})
+        .finally(function(){btn.disabled=false;btn.textContent='\u21bb Refresh';});
+    }
     var es=new EventSource('/dashboard/events');
     es.onmessage=function(e){
       var d=JSON.parse(e.data);
@@ -879,49 +949,25 @@ export function createServer(
         res.flushHeaders();
 
         const send = () => {
-            const allTasks = taskManager.listAllTasks();
-            const tasks = allTasks.slice(0, 200).map((task) => ({
-                taskId: task.taskId,
-                projectId: task.projectId,
-                title: task.title ?? null,
-                prompt: task.prompt,
-                status: task.status,
-                startedAt: task.startedAt,
-                durationSeconds: Math.round(
-                    (Date.now() - new Date(task.startedAt).getTime()) / 1000
-                )
-            }));
-
-            const stats = {
-                running: allTasks.filter((t) => t.status === "running").length,
-                queued: allTasks.filter((t) => t.status === "queued").length,
-                retrying: allTasks.filter((t) => t.status === "retrying").length,
-                completed: allTasks.filter((t) => t.status === "completed").length,
-                failed: allTasks.filter((t) => t.status === "failed").length,
-                interrupted: allTasks.filter((t) => t.status === "interrupted").length,
-                total: allTasks.length
-            };
-
-            const projects: Record<string, Record<string, number>> = {};
-            for (const projectId of Object.keys(config.projects)) {
-                projects[projectId] = { running: 0, queued: 0, retrying: 0, completed: 0, failed: 0, interrupted: 0 };
-            }
-            for (const task of allTasks) {
-                if (!projects[task.projectId]) {
-                    projects[task.projectId] = { running: 0, queued: 0, retrying: 0, completed: 0, failed: 0, interrupted: 0 };
-                }
-                const s = task.status as string;
-                if (s in projects[task.projectId]) {
-                    projects[task.projectId][s]++;
-                }
-            }
-
-            res.write(`data: ${JSON.stringify({ tasks, stats, projects })}\n\n`);
+            res.write(`data: ${JSON.stringify(buildDashboardData(taskManager, config))}\n\n`);
         };
 
         send();
         const interval = setInterval(send, 3000);
         req.on("close", () => clearInterval(interval));
+    });
+
+    // GET /dashboard/api/data — get current dashboard snapshot as JSON (dashboard auth)
+    app.get("/dashboard/api/data", (req, res) => {
+        if (!config.server.adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, config.server.adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        res.json(buildDashboardData(taskManager, config));
     });
 
     // GET /dashboard/api/task/:taskId — get full task details (dashboard auth)
