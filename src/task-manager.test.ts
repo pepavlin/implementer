@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Config, PersistedTask } from "./types.js";
 import { TaskStore } from "./task-store.js";
+import { buildSystemInstructions } from "./task-manager.js";
 
 const TMP = join(import.meta.dirname, "..", "tmp", "task-manager-test");
 const PROJECT_ID = "test-project";
@@ -943,5 +944,45 @@ describe("TaskManager", () => {
 
       expect(tm.getOutput(PROJECT_ID, "no-exec-task")).toBe("");
     });
+  });
+});
+
+describe("buildSystemInstructions", () => {
+  it("contains a rule prohibiting closing pull requests", () => {
+    const instructions = buildSystemInstructions([{ name: "my-repo" }]);
+    expect(instructions).toContain("gh pr close");
+    expect(instructions).toContain("gh pr merge");
+    expect(instructions).toContain("gh pr delete");
+    expect(instructions).toContain("NEVER close");
+  });
+
+  it("contains a rule prohibiting merging pull requests", () => {
+    const instructions = buildSystemInstructions([{ name: "my-repo" }]);
+    expect(instructions).toMatch(/NEVER close.*pull request/i);
+  });
+
+  it("mentions the technical enforcement layer", () => {
+    const instructions = buildSystemInstructions([{ name: "my-repo" }]);
+    expect(instructions).toContain("technical enforcement");
+  });
+
+  it("includes workspace repo name", () => {
+    const instructions = buildSystemInstructions([{ name: "awesome-repo" }]);
+    expect(instructions).toContain("awesome-repo");
+  });
+
+  it("includes protected paths rule when paths are provided", () => {
+    const instructions = buildSystemInstructions(
+      [{ name: "my-repo" }],
+      [".github", "Dockerfile"]
+    );
+    expect(instructions).toContain(".github");
+    expect(instructions).toContain("Dockerfile");
+    expect(instructions).toContain("PROTECTED");
+  });
+
+  it("omits protected paths rule when no paths provided", () => {
+    const instructions = buildSystemInstructions([{ name: "my-repo" }]);
+    expect(instructions).not.toContain("PROTECTED");
   });
 });
