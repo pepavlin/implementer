@@ -221,8 +221,6 @@ export function createServer(
     });
 
     // Central error handler — must be declared with 4 params for Express to
-    // recognize it as error middleware (not a regular route).
-    // Handles: HttpError subclasses, known domain errors, and unexpected errors.
     app.use(
         (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
             if (err instanceof HttpError) {
