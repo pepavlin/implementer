@@ -31,7 +31,12 @@ async function main() {
     const taskManager = new TaskManager(config);
     await taskManager.init();
 
-    // 5. Start API server
+    // 5. Periodically try to dequeue available tasks (every 2 minutes)
+    setInterval(() => {
+        taskManager.dequeueAvailableTasks();
+    }, 2 * 60 * 1000);
+
+    // 6. Start API server
     const app = createServer(taskManager, config);
     const port = Number(process.env.PORT) || 3000;
     app.listen(port, () => {
