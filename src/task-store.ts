@@ -39,7 +39,7 @@ export class TaskStore {
       try {
         const raw = readFileSync(join(this.dir, file), "utf-8");
         const task = JSON.parse(raw) as PersistedTask;
-        if (task.taskId && (typeof task.workspaceId === "number" || task.workspaceId === null) && task.projectId) {
+        if (task.taskId && (typeof task.workspaceId === "number" || task.workspaceId === null || task.workspaceId === undefined) && task.projectId) {
           tasks.push(task);
         }
       } catch (err) {

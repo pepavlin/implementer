@@ -131,20 +131,30 @@ describe("TaskStore", () => {
     expect(tmpFiles).toHaveLength(0);
   });
 
-  it("loadAll() skips files without workspaceId", () => {
+  it("loadAll() loads tasks without workspaceId (queued tasks)", () => {
     const store = new TaskStore(TMP);
 
     store.save(makeTask({ taskId: "valid-task" }));
 
-    // Write a valid JSON with taskId but missing workspaceId
+    // Write a valid JSON with taskId and projectId but no workspaceId
+    // (this is how queued tasks are persisted before workspace acquisition)
     writeFileSync(
-      join(TMP, "tasks", "no-ws.json"),
-      JSON.stringify({ taskId: "no-ws", status: "completed", prompt: "test" }),
+      join(TMP, "tasks", "queued-task.json"),
+      JSON.stringify({
+        taskId: "queued-task",
+        projectId: "test-project",
+        status: "queued",
+        prompt: "test",
+        startedAt: "2025-01-01T00:00:00.000Z",
+        output: "",
+        attempt: 1,
+      }),
     );
 
     const loaded = store.loadAll();
-    expect(loaded).toHaveLength(1);
-    expect(loaded[0].taskId).toBe("valid-task");
+    expect(loaded).toHaveLength(2);
+    const ids = loaded.map((t) => t.taskId).sort();
+    expect(ids).toEqual(["queued-task", "valid-task"]);
   });
 
   it("round-trips all task fields correctly", () => {
