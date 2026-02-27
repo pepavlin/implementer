@@ -140,7 +140,14 @@ RULES:
    * maximum number of concurrent tasks is reached.
    */
   async acquire(repos: RepositoryConfig[], githubToken?: string): Promise<{ id: number; dir: string }> {
-    // Look for a free instance
+    // Check concurrency limit before reusing or creating an instance.
+    // This must be checked first so that discovered-on-disk instances don't bypass the cap.
+    const inUseCount = Array.from(this.instances.values()).filter((i) => i.inUse).length;
+    if (inUseCount >= this.maxConcurrentTasks) {
+      throw new PoolExhaustedError(this.maxConcurrentTasks);
+    }
+
+    // Look for a free instance to reuse
     for (const [id, instance] of this.instances) {
       if (!instance.inUse) {
         console.log(`[pool] Reusing workspace instance ${id}`);
@@ -154,12 +161,6 @@ RULES:
         await chownRecursive(instance.dir);
         return { id, dir: instance.dir };
       }
-    }
-
-    // Check concurrency limit before creating a new instance
-    const inUseCount = Array.from(this.instances.values()).filter((i) => i.inUse).length;
-    if (inUseCount >= this.maxConcurrentTasks) {
-      throw new PoolExhaustedError(this.maxConcurrentTasks);
     }
 
     // No free instance — create a new one
@@ -178,12 +179,9 @@ RULES:
 
   /**
    * Returns true if the pool can accept another task right now
-   * (either a free instance exists or the concurrency cap hasn't been hit yet).
+   * (in-use count is below the concurrency cap).
    */
   hasFreeSlot(): boolean {
-    for (const instance of this.instances.values()) {
-      if (!instance.inUse) return true;
-    }
     const inUseCount = Array.from(this.instances.values()).filter((i) => i.inUse).length;
     return inUseCount < this.maxConcurrentTasks;
   }

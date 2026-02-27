@@ -128,13 +128,17 @@ export class TaskManager {
     }
 
     async dequeueAvailableTasks(): Promise<void> {
-        for (const taskInQueue of this.queue) {
+        // Snapshot the queue before iterating — dequeue() calls splice() which would
+        // shift elements and cause the for-of iterator to skip entries.
+        for (const taskInQueue of [...this.queue]) {
             let totalActive = 0;
             for (const chains of this.activeChains.values())
                 totalActive += chains.size;
             if (totalActive >= this.globalMaxConcurrentTasks) break;
             const entry = this.tasks.get(taskInQueue);
             if (!entry) continue;
+            // Skip tasks that were already dequeued by a concurrent call
+            if (!this.queue.includes(taskInQueue)) continue;
             if (!this.canTaskBeDequeued(entry)) continue;
 
             this.dequeue(entry.task.projectId, entry.task.taskId);
