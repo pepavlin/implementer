@@ -1,5 +1,5 @@
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import type { ClaudeCodeConfig } from "./config/config-types.js";
+import type { ClaudeCodeConfig, ServerConfig } from "./config/config-types.js";
 import type { TokenManager } from "./auth.js";
 
 export interface ExecutorResult {
@@ -42,10 +42,15 @@ export class Executor {
   /** Sandbox Docker image name from SANDBOX_IMAGE env var. */
   private sandboxImage: string;
 
-  constructor(config: ClaudeCodeConfig, tokenManager: TokenManager) {
+  private metaCpus: number;
+  private sandboxCpus: number;
+
+  constructor(config: ClaudeCodeConfig, tokenManager: TokenManager, serverConfig?: ServerConfig) {
     this.config = config;
     this.tokenManager = tokenManager;
     this.sandboxImage = process.env.SANDBOX_IMAGE || "implementer-sandbox";
+    this.metaCpus = serverConfig?.metaCpus ?? 0.4;
+    this.sandboxCpus = serverConfig?.sandboxCpus ?? 0.4;
   }
 
   getOutput(): string {
@@ -77,7 +82,7 @@ export class Executor {
       "run",
       "--rm",
       "--name", slugContainer,
-      "--cpus=0.4",
+      `--cpus=${this.metaCpus}`,
       "-e", `${creds.envName}=${creds.value}`,
       this.sandboxImage,
       ...claudeArgs,
@@ -140,7 +145,7 @@ Task: ${prompt}`,
       "run",
       "--rm",
       "--name", metaContainer,
-      "--cpus=0.4",
+      `--cpus=${this.metaCpus}`,
       "-e", `${creds.envName}=${creds.value}`,
       this.sandboxImage,
       ...claudeArgs,
@@ -198,7 +203,7 @@ Task: ${prompt}`,
       "run",
       "--rm",
       "--name", `${process.env.INSTANCE_NAME || "implementer"}-title-${taskId ?? Date.now()}`,
-      "--cpus=0.4",
+      `--cpus=${this.metaCpus}`,
       "-e", `${creds.envName}=${creds.value}`,
       this.sandboxImage,
       ...claudeArgs,
@@ -259,7 +264,7 @@ Task: ${prompt}`,
       "--rm",
       "--privileged",
       "--name", containerName,
-      "--cpus=0.4",
+      `--cpus=${this.sandboxCpus}`,
       "-v", volumeMount,
       "-w", workdir,
       "-e", `${creds.envName}=${creds.value}`,

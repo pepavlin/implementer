@@ -23,7 +23,7 @@ function makeConfig(projectOverrides: Record<string, unknown> = {}): Config {
         }
     };
     return {
-        server: { workspaceDir: "/tmp/test" },
+        server: { workspaceDir: "/tmp/test", metaCpus: 0.4, sandboxCpus: 0.4 },
         projects,
         configPath: "/tmp/test/config.yaml",
         getProjectIdByToken: (token: string) => {
@@ -72,7 +72,7 @@ function makeMockTaskManager(overrides: Partial<TaskManager> = {}) {
 
 function makeConfigWithAdmin(): Config {
     return {
-        server: { workspaceDir: "/tmp/test", adminPassword: "secret" },
+        server: { workspaceDir: "/tmp/test", adminPassword: "secret", metaCpus: 0.4, sandboxCpus: 0.4 },
         projects: {
             [PROJECT_ID]: {
                 repositories: [
@@ -720,7 +720,7 @@ describe("server", () => {
 
         it("returns login form when not authenticated", async () => {
             const config: Config = {
-                server: { workspaceDir: "/tmp/test", adminPassword: "secret" },
+                server: { workspaceDir: "/tmp/test", adminPassword: "secret", metaCpus: 0.4, sandboxCpus: 0.4 },
                 projects: {
                     [PROJECT_ID]: {
                         repositories: [
@@ -745,7 +745,7 @@ describe("server", () => {
 
         it("returns dashboard HTML when authenticated via cookie", async () => {
             const config: Config = {
-                server: { workspaceDir: "/tmp/test", adminPassword: "secret" },
+                server: { workspaceDir: "/tmp/test", adminPassword: "secret", metaCpus: 0.4, sandboxCpus: 0.4 },
                 projects: {
                     [PROJECT_ID]: {
                         repositories: [
@@ -797,7 +797,7 @@ describe("server", () => {
 
         it("sets auth cookie and redirects on correct password", async () => {
             const config: Config = {
-                server: { workspaceDir: "/tmp/test", adminPassword: "secret" },
+                server: { workspaceDir: "/tmp/test", adminPassword: "secret", metaCpus: 0.4, sandboxCpus: 0.4 },
                 projects: {
                     [PROJECT_ID]: {
                         repositories: [
@@ -827,7 +827,7 @@ describe("server", () => {
 
         it("returns login form with error on wrong password", async () => {
             const config: Config = {
-                server: { workspaceDir: "/tmp/test", adminPassword: "secret" },
+                server: { workspaceDir: "/tmp/test", adminPassword: "secret", metaCpus: 0.4, sandboxCpus: 0.4 },
                 projects: {
                     [PROJECT_ID]: {
                         repositories: [
@@ -861,7 +861,7 @@ describe("server", () => {
 
         it("returns 401 when not authenticated", async () => {
             const config: Config = {
-                server: { workspaceDir: "/tmp/test", adminPassword: "secret" },
+                server: { workspaceDir: "/tmp/test", adminPassword: "secret", metaCpus: 0.4, sandboxCpus: 0.4 },
                 projects: {
                     [PROJECT_ID]: {
                         repositories: [

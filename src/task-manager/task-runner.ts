@@ -438,7 +438,8 @@ export async function prepareMetadata(
             console.log(`[${taskId}] Generating branch name, title, and duration estimate...`);
             const metaExecutor = new Executor(
                 state.config.claudeCode,
-                state.tokenManager
+                state.tokenManager,
+                state.serverConfig
             );
             const { slug, title, estimatedDurationSeconds } = await metaExecutor.generateTaskMetadata(
                 task.prompt,
@@ -457,7 +458,8 @@ export async function prepareMetadata(
             console.log(`[${taskId}] Generating title and duration estimate...`);
             const metaExecutor = new Executor(
                 state.config.claudeCode,
-                state.tokenManager
+                state.tokenManager,
+                state.serverConfig
             );
             const { title, estimatedDurationSeconds } = await metaExecutor.generateTaskMetadata(
                 task.prompt,

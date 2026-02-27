@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as child_process from "node:child_process";
 import { EventEmitter } from "node:events";
-import type { ClaudeCodeConfig } from "../src/config/config-types.js";
+import type { ClaudeCodeConfig, ServerConfig } from "../src/config/config-types.js";
 import { TokenManager } from "../src/auth.js";
 import { Executor, extractLastAssistantMessage } from "../src/executor.js";
 
@@ -178,6 +178,18 @@ describe("Executor", () => {
       );
     });
 
+    it("uses custom sandboxCpus from server config", async () => {
+      spawnMock.mockReturnValue(makeFakeProc(0));
+
+      const serverConfig: ServerConfig = { workspaceDir: "/tmp", metaCpus: 0.4, sandboxCpus: 2 };
+      const executor = new Executor(makeConfig(), makeTokenManager(), serverConfig);
+      await executor.run("test prompt", "vol:/workspace", "/workspace", "task-cpus");
+
+      const args = spawnMock.mock.calls[0][1] as string[];
+      expect(args).toContain("--cpus=2");
+      expect(args).not.toContain("--cpus=0.4");
+    });
+
     it("uses sandbox image from SANDBOX_IMAGE env var", async () => {
       process.env.SANDBOX_IMAGE = "custom-sandbox-img";
       spawnMock.mockReturnValue(makeFakeProc(0));
@@ -262,6 +274,24 @@ describe("Executor", () => {
       const args = spawnMock.mock.calls[0][1] as string[];
       expect(args).not.toContain("--privileged");
       expect(args).toContain("haiku");
+    });
+
+    it("uses custom metaCpus from server config", async () => {
+      const proc = makeFakeProc(0, false);
+      spawnMock.mockReturnValue(proc);
+
+      const serverConfig: ServerConfig = { workspaceDir: "/tmp", metaCpus: 1.5, sandboxCpus: 0.4 };
+      const executor = new Executor(makeConfig(), makeTokenManager(), serverConfig);
+      const promise = executor.generateTaskMetadata("Some task", "meta-cpus");
+
+      await new Promise((r) => setTimeout(r, 5));
+      proc.stdout!.emit("data", Buffer.from("some-task\nSome Task\n600"));
+      proc.emit("close", 0);
+      await promise;
+
+      const args = spawnMock.mock.calls[0][1] as string[];
+      expect(args).toContain("--cpus=1.5");
+      expect(args).not.toContain("--cpus=0.4");
     });
 
     it("returns fallback slug, empty title, and default estimated seconds on non-zero exit", async () => {

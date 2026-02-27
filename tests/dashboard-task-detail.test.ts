@@ -32,7 +32,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 
 function makeConfig(maxAttempts?: number): Partial<Config> {
     return {
-        server: { workspaceDir: "/tmp/test", adminPassword: ADMIN_PASSWORD },
+        server: { workspaceDir: "/tmp/test", adminPassword: ADMIN_PASSWORD, metaCpus: 0.4, sandboxCpus: 0.4 },
         projects: {
             "my-project": {
                 repositories: [],

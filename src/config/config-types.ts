@@ -6,6 +6,10 @@ export interface ServerConfig {
     maxConcurrentTasks?: number;
     /** Password required to access the /dashboard admin UI. */
     adminPassword?: string;
+    /** CPU limit for lightweight metadata containers (slug, title generation). Defaults to 0.4. */
+    metaCpus: number;
+    /** CPU limit for the main sandbox container running Claude Code. Defaults to 0.4. */
+    sandboxCpus: number;
 }
 
 export interface RepositoryConfig {
@@ -72,7 +76,9 @@ const ServerSchema = z
     .object({
         workspaceDir: z.string().default("./workspace"),
         maxConcurrentTasks: z.number().int().min(1).optional(),
-        adminPassword: z.string().optional()
+        adminPassword: z.string().optional(),
+        metaCpus: z.number().positive().default(0.4),
+        sandboxCpus: z.number().positive().default(0.4)
     })
     .strict();
 

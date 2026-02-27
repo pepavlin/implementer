@@ -23,7 +23,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 
 function makeConfig(githubToken?: string): Config {
     return {
-        server: { workspaceDir: "/tmp", maxConcurrentTasks: 3, adminPassword: "pw" },
+        server: { workspaceDir: "/tmp", maxConcurrentTasks: 3, adminPassword: "pw", metaCpus: 0.4, sandboxCpus: 0.4 },
         projects: {
             proj: {
                 apiKey: "key",

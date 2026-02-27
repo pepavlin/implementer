@@ -10,7 +10,7 @@ const PROJECT_ID = "test-project";
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
-    server: { workspaceDir: TMP },
+    server: { workspaceDir: TMP, metaCpus: 0.4, sandboxCpus: 0.4 },
     projects: {
       [PROJECT_ID]: {
         maxConcurrentTasks: 4,
@@ -140,7 +140,7 @@ describe("TaskManager", () => {
   it("supports multiple projects in config", async () => {
     const { TaskManager } = await import("../src/task-manager/task-manager.js");
     const config: Config = {
-      server: { workspaceDir: TMP },
+      server: { workspaceDir: TMP, metaCpus: 0.4, sandboxCpus: 0.4 },
       projects: {
         "project-a": {
           repositories: [{ name: "repo-a", url: "https://example.com/a.git", defaultBranch: "main" }],
@@ -549,7 +549,7 @@ describe("TaskManager", () => {
     it("throws error for task belonging to another project", async () => {
       const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config: Config = {
-        server: { workspaceDir: TMP },
+        server: { workspaceDir: TMP, metaCpus: 0.4, sandboxCpus: 0.4 },
         projects: {
           [PROJECT_ID]: {
             repositories: [{ name: "my-repo", url: "https://github.com/test/repo.git", defaultBranch: "main" }],
@@ -707,7 +707,7 @@ describe("TaskManager", () => {
     it("getTask returns undefined for task belonging to another project", async () => {
       const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config: Config = {
-        server: { workspaceDir: TMP },
+        server: { workspaceDir: TMP, metaCpus: 0.4, sandboxCpus: 0.4 },
         projects: {
           "project-a": {
             repositories: [{ name: "repo-a", url: "https://example.com/a.git", defaultBranch: "main" }],
@@ -780,7 +780,7 @@ describe("TaskManager", () => {
     it("rejects continueTaskId for task in different project", async () => {
       const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config: Config = {
-        server: { workspaceDir: TMP },
+        server: { workspaceDir: TMP, metaCpus: 0.4, sandboxCpus: 0.4 },
         projects: {
           [PROJECT_ID]: {
             repositories: [{ name: "my-repo", url: "https://github.com/test/repo.git", defaultBranch: "main" }],
@@ -1529,7 +1529,7 @@ describe("TaskManager", () => {
     it("global concurrency counts total active chains, not project count", async () => {
       // Bug #2: activeChains.size counted Map entries (projects), not total chains
       const { TaskManager } = await import("../src/task-manager/task-manager.js");
-      const config = makeConfig({ server: { workspaceDir: TMP, maxConcurrentTasks: 2 } });
+      const config = makeConfig({ server: { workspaceDir: TMP, metaCpus: 0.4, sandboxCpus: 0.4, maxConcurrentTasks: 2 } });
       const tm = new TaskManager(config);
 
       // Mark two chains active under the same project

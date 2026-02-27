@@ -1,11 +1,12 @@
 import type { WorkspacePool } from "../workspace-pool.js";
 import type { TokenManager } from "../auth.js";
-import type { ProjectConfig } from "../config/config-types.js";
+import type { ProjectConfig, ServerConfig } from "../config/config-types.js";
 import type { Task } from "../types.js";
 import type { Executor } from "../executor.js";
 
 export interface ProjectState {
     config: ProjectConfig;
+    serverConfig: ServerConfig;
     pool: WorkspacePool;
     tokenManager: TokenManager;
 }

@@ -70,6 +70,7 @@ export class TaskManager {
 
             this.projects.set(projectId, {
                 config: projectConfig,
+                serverConfig: config.server,
                 pool,
                 tokenManager
             });
@@ -208,22 +209,35 @@ export class TaskManager {
         // If metadata not exist, generate
         if (!task.branch) {
             await prepareMetadata(task, state, this, entry);
-            // prepareMetadata catches its own errors and marks the task as "failed".
-            // If that happened, release the chain lock and bail out — don't acquire a workspace.
-            if (task.status === "failed") {
+            if ((task.status as string) === "failed") {
                 this.unmarkChainActive(projectId, task.chainId);
-                void this.dequeueAvailableTasks();
                 return;
             }
         }
+
+        // Check if task was cancelled while preparing metadata
+        if (entry.cancelled || (task.status as string) === "cancelled") {
+            this.unmarkChainActive(projectId, task.chainId);
+            return;
+        }
+
         entry.executor = new Executor(
             state.config.claudeCode,
-            state.tokenManager
+            state.tokenManager,
+            state.serverConfig
         );
 
         state.pool
             .acquire(state.config.repositories, state.config.auth?.githubToken)
             .then((workspace) => {
+                if (
+                    entry.cancelled ||
+                    (task.status as string) === "cancelled"
+                ) {
+                    state.pool.release(workspace.id);
+                    this.unmarkChainActive(projectId, task.chainId);
+                    return;
+                }
                 entry.workspaceId = workspace.id;
                 task.status = "running";
                 this.saveTask(entry);
@@ -311,7 +325,11 @@ export class TaskManager {
      * Update the state of a single pull request on a task. Called by the PR
      * poller when it detects a state change. Persists the updated task to disk.
      */
-    updatePrState(taskId: string, prUrl: string, state: PullRequestState): void {
+    updatePrState(
+        taskId: string,
+        prUrl: string,
+        state: PullRequestState
+    ): void {
         const entry = this.tasks.get(taskId as TaskId);
         if (!entry) return;
         const pr = entry.task.pullRequests?.find((p) => p.url === prUrl);
@@ -516,7 +534,9 @@ export class TaskManager {
         // Clear the scheduled timestamp — the retry is happening now
         task.nextRetryAt = undefined;
 
-        console.log(`[${taskId}] Immediate retry requested (bypassing scheduled delay)`);
+        console.log(
+            `[${taskId}] Immediate retry requested (bypassing scheduled delay)`
+        );
 
         // Push to front of queue for priority execution
         this.push_front(projectId, taskId);
@@ -537,7 +557,9 @@ export class TaskManager {
         const entry = this.getTaskEntry(projectId, taskId);
         const task = entry.task;
 
-        if (!["queued", "starting", "running", "retrying"].includes(task.status)) {
+        if (
+            !["queued", "starting", "running", "retrying"].includes(task.status)
+        ) {
             throw new TaskCancelError(task.status);
         }
 
