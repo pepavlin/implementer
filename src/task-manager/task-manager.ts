@@ -128,6 +128,7 @@ export class TaskManager {
             if (!entry) continue;
             if (!this.canTaskBeDequeued(entry)) continue;
 
+            this.dequeue(entry.task.projectId, entry.task.taskId);
             await this.runOrContinueTaskFromEntry(entry);
         }
     }
@@ -293,6 +294,13 @@ export class TaskManager {
         this.saveTask(entry);
 
         this.queue.push(taskId);
+    }
+
+    dequeue(projectId: ProjectId, taskId: TaskId): void {
+        const idx = this.queue.indexOf(taskId);
+        if (idx !== -1) {
+            this.queue.splice(idx, 1);
+        }
     }
 
     markChainActive(projectId: ProjectId, chainId: ChainId): void {
