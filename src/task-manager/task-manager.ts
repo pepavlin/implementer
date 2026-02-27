@@ -200,20 +200,6 @@ export class TaskManager {
     }
 
     private recoverTask(pt: PersistedTask): void {
-        // Tasks that were running when the server stopped are marked as interrupted
-        // so resumeInterruptedTasks() can pick them up and re-run them.
-        if (pt.status === "running") {
-            pt.status = "interrupted";
-            pt.output = "";
-            this.store.save(pt);
-        } else if (pt.status === "retrying") {
-            pt.status = "queued";
-            this.store.save(pt);
-        } else if (pt.status === "starting") {
-            pt.status = "queued";
-            this.store.save(pt);
-        }
-
         // Continue in branch if exists
         this.tasks.set(pt.taskId, {
             task: pt,
@@ -223,9 +209,14 @@ export class TaskManager {
         });
 
         switch (pt.status) {
+            case "starting":
+            case "retrying":
             case "queued":
                 this.enqueue(pt.projectId, pt.taskId);
                 break;
+            case "running":
+                pt.status = "interrupted";
+                this.saveTask(this.getTaskEntry(pt.projectId, pt.taskId));
             case "interrupted":
                 this.push_front(pt.projectId, pt.taskId);
                 break;
