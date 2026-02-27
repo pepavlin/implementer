@@ -1,10 +1,12 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import type { ClaudeCodeConfig } from "./types.js";
+import type { ClaudeCodeConfig } from "./config/config-types.js";
 import type { TokenManager } from "./auth.js";
 
 export interface ExecutorResult {
   exitCode: number | null;
   output: string;
+  /** True when the executor's timeout fired and killed the container before it finished naturally. */
+  timedOut: boolean;
 }
 
 /**
@@ -32,6 +34,8 @@ export class Executor {
   private config: ClaudeCodeConfig;
   private tokenManager: TokenManager;
   private process: ChildProcess | null = null;
+  /** Name of the currently running Docker container (set during run(), cleared on exit). */
+  private currentContainerName: string | null = null;
   private output = "";
   private runCounter = 0;
 
@@ -212,6 +216,10 @@ Task: ${prompt}`,
 
   /**
    * Run Claude Code CLI inside a Docker container with the workspace mounted.
+   *
+   * If `config.timeoutSeconds` is set, the container is killed after that many seconds
+   * and the returned exit code will be non-zero, causing the task to be marked as failed
+   * and triggering the configured retry logic.
    */
   async run(prompt: string, volumeMount: string, workdir = "/workspace", taskId?: string): Promise<ExecutorResult> {
     this.output = "";
@@ -255,6 +263,30 @@ Task: ${prompt}`,
       });
 
       this.process = proc;
+      this.currentContainerName = containerName;
+
+      let timeoutHandle: NodeJS.Timeout | undefined;
+      let timedOut = false;
+
+      const clearTimeoutHandle = () => {
+        if (timeoutHandle !== undefined) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = undefined;
+        }
+      };
+
+      if (this.config.timeoutSeconds) {
+        const timeoutMs = this.config.timeoutSeconds * 1000;
+        timeoutHandle = setTimeout(() => {
+          timedOut = true;
+          console.warn(
+            `[${taskId ?? containerName}] Execution timed out after ${this.config.timeoutSeconds}s — killing container "${containerName}"`
+          );
+          this.output += `\n\n[TIMEOUT] Task exceeded maximum runtime of ${this.config.timeoutSeconds} seconds and was killed.`;
+          // kill() handles both the Node child process and the Docker container
+          this.kill();
+        }, timeoutMs);
+      }
 
       proc.stdout?.on("data", (data: Buffer) => {
         this.output += data.toString();
@@ -265,24 +297,45 @@ Task: ${prompt}`,
       });
 
       proc.on("error", (err) => {
+        clearTimeoutHandle();
         this.process = null;
+        this.currentContainerName = null;
         reject(new Error(`Failed to start Docker container: ${err.message}`));
       });
 
       proc.on("close", (code) => {
+        clearTimeoutHandle();
         this.process = null;
+        this.currentContainerName = null;
         resolve({
           exitCode: code,
           output: this.output,
+          timedOut,
         });
       });
     });
   }
 
+  /**
+   * Kill the running executor process.
+   * Sends SIGTERM to the `docker run` child process AND issues `docker kill` directly
+   * against the container name to ensure the container stops even if signal forwarding fails.
+   */
   kill(): void {
+    const containerName = this.currentContainerName;
+
     if (this.process) {
       this.process.kill("SIGTERM");
       this.process = null;
+    }
+
+    // Directly kill the Docker container by name for reliability.
+    // This is a no-op if the container already exited.
+    if (containerName) {
+      this.currentContainerName = null;
+      spawn("docker", ["kill", containerName], { stdio: "ignore" }).on("error", () => {
+        // Ignore errors (container may have already stopped)
+      });
     }
   }
 }

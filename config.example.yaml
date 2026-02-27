@@ -49,6 +49,12 @@ projects:
             # systemPrompt: |
             #   Custom instructions applied to every task.
             #   e.g. "Always write tests. Follow existing code style."
+            # Maximum wall-clock seconds a single executor run may take.
+            # Defaults to 3600 (1 hour) — you do NOT need to set this unless you want a different value.
+            # On timeout the task is set to "retrying" (not failed) and its branch is preserved;
+            # after a server restart (or manual /retry) it resumes on the same branch from where it left off.
+            # Timeouts always retry regardless of whether errorRetry is configured. Minimum: 60.
+            # timeoutSeconds: 3600
             mcpServers:
                 playwright:
                     command: npx

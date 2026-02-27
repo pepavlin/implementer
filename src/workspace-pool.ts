@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { GitManager } from "./git-manager.js";
-import type { McpServerConfig, RepositoryConfig } from "./types.js";
+import type { McpServerConfig, RepositoryConfig } from "./config/config-types.js";
 
 const SANDBOX_UID = "1000";
 

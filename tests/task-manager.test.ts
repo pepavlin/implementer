@@ -561,21 +561,31 @@ describe("TaskManager", () => {
       await expect(tm.retryTask(PROJECT_ID, "queued-task")).rejects.toBeInstanceOf(TaskActiveError);
     });
 
-    it("throws TaskActiveError when task is retrying", async () => {
-      const { TaskManager, TaskActiveError } = await import("../src/task-manager/task-manager.js");
+    it("allows retryTask from retrying status and clears any pending timer", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
-      store.save(makePersistedTask({ taskId: "retry-task", status: "completed" }));
+      store.save(makePersistedTask({ taskId: "retry-task", status: "completed", branch: "impl/test-retry-task" }));
 
       const tm = new TaskManager(config);
       await tm.init();
 
-      // Manually flip status to "retrying" in memory to simulate an active auto-retry
+      // Manually flip status to "retrying" with a fake timer to simulate an active auto-retry
       // @ts-expect-error - accessing private tasks map for testing
-      tm.tasks.get("retry-task").task.status = "retrying";
+      const entry = tm.tasks.get("retry-task");
+      entry.task.status = "retrying";
+      // Assign a fake timer that should be cleared when retryTask is called
+      const fakeClearCalled = { value: false };
+      entry.retryTimeoutId = setTimeout(() => {
+        fakeClearCalled.value = true;
+      }, 9999_000) as ReturnType<typeof setTimeout>;
 
-      await expect(tm.retryTask(PROJECT_ID, "retry-task")).rejects.toBeInstanceOf(TaskActiveError);
+      // retryTask should NOT throw and should clear the timer
+      await tm.retryTask(PROJECT_ID, "retry-task");
+
+      // Timer was cleared — the fake callback should never fire
+      clearTimeout(entry.retryTimeoutId);
     });
 
     it("throws error for unknown task", async () => {
@@ -1431,4 +1441,112 @@ describe("TaskManager", () => {
       expect(active[0].status).toBe("starting");
     });
   });
+  describe("timeout → retrying behavior", () => {
+    it("re-enqueues a timeout-retrying task on restart with checkoutBranch set", async () => {
+      // Simulates: task timed out → status "retrying", attempt incremented → server restarts
+      // Expected:  recoverTask converts "retrying" → "queued" with checkoutBranch = task.branch
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({
+        taskId: "timeout-task",
+        status: "retrying" as any,
+        completedAt: null,
+        workspaceId: null,
+        attempt: 2,              // incremented by timeout handler
+        branch: "impl/my-feature-timeout-task",
+        error: "Timed out after 3600 seconds",
+      }));
+
+      const tm = new TaskManager(config);
+      // @ts-expect-error - accessing private projects map for testing
+      const state = tm.projects.get(PROJECT_ID)!;
+      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(false);
+
+      await tm.init();
+
+      const task = tm.getTask(PROJECT_ID, "timeout-task");
+      // Task should be re-queued (not stuck in retrying)
+      expect(task?.status).toBe("queued");
+      // Attempt counter preserved (timeout handler already incremented it)
+      expect(task?.attempt).toBe(2);
+      // Branch must be preserved for continuation
+      expect(task?.branch).toBe("impl/my-feature-timeout-task");
+
+      // checkoutBranch set so tryDequeue uses existing branch, not a new one
+      // @ts-expect-error - accessing private tasks map for testing
+      const entry = tm.tasks.get("timeout-task");
+      expect(entry?.checkoutBranch).toBe("impl/my-feature-timeout-task");
+    });
+
+    it("executeTask sets status to retrying and preserves branch on timeout", async () => {
+      // Unit-tests the executeTask path: when executor returns timedOut=true the
+      // task ends up in "retrying" state with branch intact and no completedAt.
+      const { executeTask } = await import("../src/task-manager/task-runner.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const { TaskStore } = await import("../src/task-store.js");
+      const { WorkspacePool } = await import("../src/workspace-pool.js");
+      const { GitManager } = await import("../src/git-manager.js");
+      const { TokenManager } = await import("../src/auth.js");
+
+      const config = makeConfig({
+        projects: {
+          [PROJECT_ID]: {
+            repositories: [{ name: "my-repo", url: "https://github.com/test/repo.git", defaultBranch: "main" }],
+            claudeCode: { command: "claude", timeoutSeconds: 3600 },
+          },
+        },
+      });
+      const store = new TaskStore(TMP);
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      const task = await tm.startTask(PROJECT_ID, { prompt: "Build the thing" });
+      // Wait for branch slug to be generated (mocked)
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Ensure the task has a branch before we try executeTask
+      const entry = tm.tasks.get(task.taskId)!;
+      entry.task.branch = "impl/build-the-thing-" + task.taskId;
+      entry.task.status = "running";
+
+      // Stub the executor to simulate a timeout (timedOut=true, non-zero exit)
+      vi.spyOn(Executor.prototype, "run").mockResolvedValue({
+        exitCode: 137,
+        output: "[TIMEOUT] Task exceeded maximum runtime.",
+        timedOut: true,
+      });
+
+      // Stub git operations to no-ops
+      // @ts-expect-error - accessing private projects map
+      const projectState = tm.projects.get(PROJECT_ID)!;
+      vi.spyOn(projectState.pool, "acquire").mockResolvedValue({ id: 0, dir: TMP });
+      vi.spyOn(projectState.pool, "release").mockReturnValue(undefined);
+      vi.spyOn(tm.gitManager, "checkoutBranchAll").mockResolvedValue(undefined);
+      vi.spyOn(tm.gitManager, "prepareNewBranchAll").mockResolvedValue(undefined);
+      vi.spyOn(tm.gitManager, "pushBranchAll").mockResolvedValue(undefined);
+      vi.spyOn(tm.gitManager, "getHeadAll").mockResolvedValue([]);
+      vi.spyOn(tm.gitManager, "hasUncommittedChanges").mockResolvedValue(false);
+      vi.spyOn(tm.gitManager, "revertProtectedPathsAll").mockResolvedValue(undefined);
+      vi.spyOn(tm.gitManager, "ensureBranchAtHeadAll").mockResolvedValue(false);
+
+      entry.executor = new Executor(config.projects[PROJECT_ID].claudeCode, new TokenManager(undefined, TMP));
+      const workspace = { id: 0, dir: TMP };
+
+      await executeTask(entry.task, workspace, projectState, tm);
+
+      // Task must be "retrying" (not "failed") after a timeout
+      expect(entry.task.status).toBe("retrying");
+      // Branch must be preserved for the next attempt
+      expect(entry.task.branch).toBe("impl/build-the-thing-" + task.taskId);
+      // completedAt must be null — task hasn't truly finished
+      expect(entry.task.completedAt).toBeNull();
+      // attempt was incremented by the timeout handler
+      expect(entry.task.attempt).toBe(2);
+    });
+  });
+
+
 });

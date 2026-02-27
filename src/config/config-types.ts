@@ -29,6 +29,12 @@ export interface ClaudeCodeConfig {
     systemPrompt?: string;
     mcpServers?: Record<string, McpServerConfig>;
     maxOutputTokens?: number;
+    /** Maximum wall-clock seconds a single executor.run() call may take before the container is killed.
+     *  Defaults to 3600 (1 hour). Minimum 60 seconds.
+     *  When exceeded the task is set to **retrying** (not failed) and its branch is preserved
+     *  so the next run (after server restart or manual /retry) continues from where it left off.
+     *  Unlike regular failures, timeouts always retry regardless of whether errorRetry is configured. */
+    timeoutSeconds?: number;
 }
 
 export interface ProjectAuth {
@@ -95,7 +101,8 @@ const ClaudeCodeSchema = z
         model: z.string().optional(),
         systemPrompt: z.string().optional(),
         mcpServers: z.record(McpServerSchema).optional(),
-        maxOutputTokens: z.number().int().min(1).optional()
+        maxOutputTokens: z.number().int().min(1).optional(),
+        timeoutSeconds: z.number().int().min(60).default(3600)
     })
     .strict();
 
