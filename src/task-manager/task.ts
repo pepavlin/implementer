@@ -163,16 +163,24 @@ export class Task {
 
     canBeStarted(): boolean {
         let totalActive = 0;
+        let inProject = 0;
         for (const task of this.manager.tasks.values()) {
-            if (
-                task.data.status === "running" ||
-                task.data.status === "starting"
-            ) {
+            if (task.isActive()) {
                 totalActive++;
+
+                if (task.data.projectId === this.data.projectId) {
+                    inProject++;
+                }
             }
         }
 
         if (totalActive >= this.manager.config.server.maxConcurrentTasks)
+            return false;
+
+        if (
+            this.project.data.maxConcurrentTasks &&
+            inProject >= this.project.data.maxConcurrentTasks
+        )
             return false;
 
         if (
