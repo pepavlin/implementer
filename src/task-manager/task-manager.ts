@@ -132,6 +132,44 @@ export class TaskManager {
             this.dequeue(entry.task.projectId, entry.task.taskId);
             await this.runOrContinueTaskFromEntry(entry);
         }
+
+        this.retryAvailableFailedTasks();
+    }
+
+    async retryAvailableFailedTasks(): Promise<void> {
+        for (const entry of this.tasks.values()) {
+            const state = this.requireProject(entry.task.projectId);
+            if (
+                entry.task.status === "failed" &&
+                entry.task.attempt <=
+                    (state.config.errorRetry?.maxAttempts ?? 0)
+            ) {
+                const delaySeconds = state.config.errorRetry?.delaySeconds ?? 0;
+
+                const retryConfig = state.config.errorRetry!;
+                entry.task.attempt += 1;
+                entry.task.status = "retrying";
+                entry.task.nextRetryAt = new Date(
+                    Date.now() + delaySeconds * 1000
+                ).toISOString();
+                entry.task.completedAt = null;
+
+                console.log(
+                    `[${entry.task.taskId}] Retrying in ${delaySeconds}s (attempt ${entry.task.attempt}/${retryConfig.maxAttempts})`
+                );
+
+                this.saveTask(entry);
+
+                const timeoutId = setTimeout(() => {
+                    entry.retryTimeoutId = undefined;
+                    this.enqueue(entry.task.projectId, entry.task.taskId);
+                    this.saveTask(entry);
+                    this.dequeueAvailableTasks();
+                }, delaySeconds * 1000);
+
+                entry.retryTimeoutId = timeoutId;
+            }
+        }
     }
 
     private canTaskBeDequeued(taskEntry: TaskEntry): boolean {

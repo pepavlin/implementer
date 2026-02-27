@@ -420,63 +420,6 @@ export async function executeTask(
         // Start next queued task for this project if capacity is now available
         tm.dequeueAvailableTasks();
     }
-
-    // Schedule retry if task failed and retries are configured
-    // (runs after finally — workspace already released back to pool)
-    if (task.status === "failed") {
-        const retryConfig = state.config.errorRetry;
-        if (retryConfig && task.attempt < retryConfig.maxAttempts) {
-            // Tasks resumed after a server restart skip the normal retry delay on their
-            // first failure so they get back to work immediately rather than waiting the
-            // full delaySeconds. Subsequent retries still use the configured delay.
-            const entry = tm.tasks.get(task.taskId);
-            const wasResumedFromRestart = entry?.resumedFromRestart ?? false;
-            if (entry) entry.resumedFromRestart = false;
-            scheduleRetry(
-                task,
-                state,
-                tm,
-                wasResumedFromRestart ? 0 : undefined
-            );
-            return; // webhook will fire only on terminal failure
-        }
-    }
-
-    // Fire webhook on terminal completion (not retrying — those resume later)
-    if (task.callbackUrl && task.status !== "retrying") {
-        fireWebhook(task.taskId, task.status, task.callbackUrl);
-    }
-}
-
-export function scheduleRetry(
-    task: Task,
-    state: ProjectState,
-    tm: TaskManager,
-    delayOverrideSeconds?: number
-): void {
-    const retryConfig = state.config.errorRetry!;
-    const delaySeconds = delayOverrideSeconds ?? retryConfig.delaySeconds;
-    task.attempt += 1;
-    task.status = "retrying";
-    task.nextRetryAt = new Date(Date.now() + delaySeconds * 1000).toISOString();
-    task.completedAt = null;
-
-    const entry = tm.getTaskEntry(task.projectId, task.taskId);
-
-    console.log(
-        `[${task.taskId}] Retrying in ${delaySeconds}s (attempt ${task.attempt}/${retryConfig.maxAttempts})`
-    );
-
-    const timeoutId = setTimeout(async () => {
-        entry.retryTimeoutId = undefined;
-        tm.saveTask(entry);
-
-        tm.enqueue(task.projectId, task.taskId); // Re-enqueue to ensure correct ordering with other tasks (e.g., if chain is active)
-    }, delaySeconds * 1000);
-
-    // Store timeout ID so it can be cancelled
-    entry.retryTimeoutId = timeoutId;
-    tm.saveTask(entry);
 }
 
 export async function prepareMetadata(
