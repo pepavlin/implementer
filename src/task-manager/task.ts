@@ -157,7 +157,8 @@ export class Task {
                 this.data.completedAt = new Date().toISOString();
             }
         }
-        this.unshift();
+        this.dequeue();
+        this.tickUpdate();
     }
 
     canBeStarted(): boolean {

@@ -181,24 +181,29 @@ RULES:
             if (!instance.inUse) {
                 console.log(`[pool] Reusing workspace instance ${id}`);
                 instance.inUse = true;
-                // Remove stray .git that Claude Code may have created at the instance root
-                rmSync(join(instance.dir, ".git"), {
-                    recursive: true,
-                    force: true
-                });
-                await this.gitManager.ensureAllRepos(
-                    instance.dir,
-                    repos,
-                    githubToken
-                );
-                await this.gitManager.resetToDefaultAll(
-                    instance.dir,
-                    repos,
-                    githubToken
-                );
-                this.writeClaude(instance.dir, repos);
-                this.writeMcpConfig(instance.dir);
-                await chownRecursive(instance.dir);
+                try {
+                    // Remove stray .git that Claude Code may have created at the instance root
+                    rmSync(join(instance.dir, ".git"), {
+                        recursive: true,
+                        force: true
+                    });
+                    await this.gitManager.ensureAllRepos(
+                        instance.dir,
+                        repos,
+                        githubToken
+                    );
+                    await this.gitManager.resetToDefaultAll(
+                        instance.dir,
+                        repos,
+                        githubToken
+                    );
+                    this.writeClaude(instance.dir, repos);
+                    this.writeMcpConfig(instance.dir);
+                    await chownRecursive(instance.dir);
+                } catch (err) {
+                    instance.inUse = false;
+                    throw err;
+                }
                 return { id, dir: instance.dir };
             }
         }
@@ -209,10 +214,15 @@ RULES:
         console.log(`[pool] Creating new workspace instance ${id} at ${dir}`);
 
         this.instances.set(id, { dir, inUse: true });
-        await this.gitManager.ensureAllRepos(dir, repos, githubToken);
-        this.writeClaude(dir, repos);
-        this.writeMcpConfig(dir);
-        await chownRecursive(dir);
+        try {
+            await this.gitManager.ensureAllRepos(dir, repos, githubToken);
+            this.writeClaude(dir, repos);
+            this.writeMcpConfig(dir);
+            await chownRecursive(dir);
+        } catch (err) {
+            this.instances.get(id)!.inUse = false;
+            throw err;
+        }
 
         return { id, dir };
     }
