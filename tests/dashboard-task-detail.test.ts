@@ -173,6 +173,100 @@ describe("buildDashboardData", () => {
         expect(data.projects["my-project"].completed).toBe(1);
         expect(data.projects["my-project"].running).toBe(1);
     });
+
+    it("places queued tasks before non-queued tasks regardless of startedAt order", () => {
+        // allTasks arrives already sorted by startedAt desc: completed (newest) first, then queued (oldest)
+        const tasks: Task[] = [
+            makeTask({
+                taskId: "completed1" as TaskId,
+                status: "completed",
+                startedAt: new Date("2024-01-01T12:00:00Z").toISOString()
+            }),
+            makeTask({
+                taskId: "running1" as TaskId,
+                status: "running",
+                startedAt: new Date("2024-01-01T11:00:00Z").toISOString()
+            }),
+            makeTask({
+                taskId: "queued1" as TaskId,
+                status: "queued",
+                startedAt: new Date("2024-01-01T10:00:00Z").toISOString()
+            })
+        ];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+        const taskList = data.tasks as Array<{ taskId: string; status: string }>;
+
+        // queued task must come first even though it has the oldest startedAt
+        expect(taskList[0].taskId).toBe("queued1");
+        expect(taskList[0].status).toBe("queued");
+        // non-queued tasks follow, newest first
+        expect(taskList[1].taskId).toBe("completed1");
+        expect(taskList[2].taskId).toBe("running1");
+    });
+
+    it("places starting tasks at top together with queued tasks", () => {
+        const tasks: Task[] = [
+            makeTask({
+                taskId: "completed1" as TaskId,
+                status: "completed",
+                startedAt: new Date("2024-01-01T13:00:00Z").toISOString()
+            }),
+            makeTask({
+                taskId: "starting1" as TaskId,
+                status: "starting",
+                startedAt: new Date("2024-01-01T11:00:00Z").toISOString()
+            }),
+            makeTask({
+                taskId: "queued1" as TaskId,
+                status: "queued",
+                startedAt: new Date("2024-01-01T10:00:00Z").toISOString()
+            })
+        ];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+        const taskList = data.tasks as Array<{ taskId: string; status: string }>;
+
+        // starting and queued tasks must both be at the top
+        expect(["starting", "queued"]).toContain(taskList[0].status);
+        expect(["starting", "queued"]).toContain(taskList[1].status);
+        // completed is last
+        expect(taskList[2].taskId).toBe("completed1");
+    });
+
+    it("sorts multiple queued tasks newest first within the queue group", () => {
+        const tasks: Task[] = [
+            makeTask({
+                taskId: "queued-old" as TaskId,
+                status: "queued",
+                startedAt: new Date("2024-01-01T09:00:00Z").toISOString()
+            }),
+            makeTask({
+                taskId: "queued-new" as TaskId,
+                status: "queued",
+                startedAt: new Date("2024-01-01T11:00:00Z").toISOString()
+            }),
+            makeTask({
+                taskId: "completed1" as TaskId,
+                status: "completed",
+                startedAt: new Date("2024-01-01T10:00:00Z").toISOString()
+            })
+        ];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+        const taskList = data.tasks as Array<{ taskId: string; status: string }>;
+
+        // newest queued task should be at the very top
+        expect(taskList[0].taskId).toBe("queued-new");
+        expect(taskList[1].taskId).toBe("queued-old");
+        expect(taskList[2].taskId).toBe("completed1");
+    });
 });
 
 describe("dashboard HTML - completed vs cancelled visual distinction", () => {

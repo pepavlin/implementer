@@ -48,7 +48,15 @@ export function buildDashboardData(
     projects: Record<string, Record<string, number>>;
 } {
     const allTasks = taskManager.listAllTasks();
-    const tasks = allTasks.slice(0, 200).map((task) => ({
+    // Sort: queued/starting tasks first (newest startedAt at top), then all others (newest startedAt at top)
+    const queuedStatuses = new Set(["queued", "starting"]);
+    const sortedTasks = allTasks.slice().sort((a, b) => {
+        const aQueued = queuedStatuses.has(a.status);
+        const bQueued = queuedStatuses.has(b.status);
+        if (aQueued !== bQueued) return aQueued ? -1 : 1;
+        return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
+    });
+    const tasks = sortedTasks.slice(0, 200).map((task) => ({
         taskId: task.taskId,
         projectId: task.projectId,
         title: task.title ?? null,
