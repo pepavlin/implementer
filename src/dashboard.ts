@@ -209,19 +209,52 @@ export function dashboardHtml(hasPassword: boolean): string {
     .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite;flex-shrink:0}
     .dot.err{background:#ef4444;animation:none}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes badge-run-pulse{0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}50%{box-shadow:0 0 0 5px rgba(34,197,94,0)}}
+    @keyframes badge-q-pulse{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,.45)}50%{box-shadow:0 0 0 5px rgba(245,158,11,0)}}
+    @keyframes badge-ret-pulse{0%,100%{box-shadow:0 0 0 0 rgba(96,165,250,.45)}50%{box-shadow:0 0 0 5px rgba(96,165,250,0)}}
+    @keyframes dot-bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-3px)}}
+    @keyframes run-row-glow{0%,100%{background:transparent}50%{background:rgba(34,197,94,.04)}}
+    @keyframes queued-row-pulse{0%,100%{background:transparent}50%{background:rgba(245,158,11,.04)}}
+    @keyframes starting-row-pulse{0%,100%{background:transparent}50%{background:rgba(34,211,238,.04)}}
+    @keyframes retrying-row-pulse{0%,100%{background:transparent}50%{background:rgba(96,165,250,.04)}}
+    .badge-spin{display:inline-block;width:9px;height:9px;border:1.5px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;margin-right:5px;vertical-align:middle;flex-shrink:0}
+    .badge-dots{display:inline-flex;gap:2px;margin-left:5px;align-items:center}
+    .badge-dots span{display:inline-block;width:3px;height:3px;border-radius:50%;background:currentColor;animation:dot-bounce 1.2s ease-in-out infinite}
+    .badge-dots span:nth-child(2){animation-delay:.16s}
+    .badge-dots span:nth-child(3){animation-delay:.32s}
+    .b-running{animation:badge-run-pulse 2s ease-in-out infinite}
+    .b-queued{animation:badge-q-pulse 1.6s ease-in-out infinite}
+    .b-retrying{animation:badge-ret-pulse 1.8s ease-in-out infinite}
+    .tr-running td{animation:run-row-glow 2.5s ease-in-out infinite}
+    .tr-running td:first-child{border-left:3px solid #22c55e80}
+    .tr-queued td{animation:queued-row-pulse 2s ease-in-out infinite}
+    .tr-queued td:first-child{border-left:3px solid #f59e0b80}
+    .tr-starting td{animation:starting-row-pulse 1.5s ease-in-out infinite}
+    .tr-starting td:first-child{border-left:3px solid #22d3ee80}
+    .tr-retrying td{animation:retrying-row-pulse 2s ease-in-out infinite}
+    .tr-retrying td:first-child{border-left:3px solid #60a5fa80}
     .stats{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
-    .stat{background:var(--bg-card);border-radius:8px;padding:14px 20px;min-width:110px}
-    .stat-label{font-size:.68rem;color:var(--text2);text-transform:uppercase;letter-spacing:.05em}
+    .stat{background:var(--bg-card);border-radius:8px;padding:14px 20px;min-width:110px;transition:box-shadow .3s}
+    .stat.stat-has-running{box-shadow:0 0 0 1px rgba(34,197,94,.3),0 0 12px rgba(34,197,94,.1)}
+    .stat.stat-has-queued{box-shadow:0 0 0 1px rgba(245,158,11,.3),0 0 12px rgba(245,158,11,.08)}
+    .stat-label{font-size:.68rem;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;display:flex;align-items:center;gap:5px}
+    .stat-active-dot{width:6px;height:6px;border-radius:50%;background:currentColor;animation:pulse 1.5s ease-in-out infinite;flex-shrink:0}
     .stat-val{font-size:1.8rem;font-weight:700;margin-top:2px}
     .cr{color:#22c55e}.cq{color:#f59e0b}.ct{color:#60a5fa}.cc{color:var(--text2)}.cf{color:#ef4444}
     .section-title{font-size:.8rem;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
     .projects{display:flex;gap:10px;margin-bottom:8px;flex-wrap:wrap}
-    .proj-card{background:var(--bg-card);border-radius:8px;padding:14px 18px;min-width:160px;border:1px solid var(--border);cursor:pointer;user-select:none;transition:border-color .15s,background .15s}
+    .proj-card{background:var(--bg-card);border-radius:8px;padding:14px 18px;min-width:160px;border:1px solid var(--border);cursor:pointer;user-select:none;transition:border-color .3s,background .3s,box-shadow .3s}
     .proj-card:hover{border-color:var(--hover-border)}
     .proj-card.selected{border-color:#3b82f6;background:var(--proj-sel)}
+    .proj-card.proj-active{border-color:rgba(34,197,94,.4);box-shadow:0 0 10px rgba(34,197,94,.1)}
+    .proj-card.proj-queued{border-color:rgba(245,158,11,.35);box-shadow:0 0 8px rgba(245,158,11,.08)}
     .proj-name{font-size:.82rem;font-weight:600;color:var(--text);margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .proj-stats{display:flex;gap:8px;font-size:.72rem;flex-wrap:wrap}
-    .ps{padding:1px 7px;border-radius:4px;font-weight:600}
+    .ps{padding:1px 7px;border-radius:4px;font-weight:600;display:inline-flex;align-items:center;gap:3px}
+    .ps .badge-spin{width:7px;height:7px;border-width:1.5px;margin-right:0}
+    .ps .badge-dots{margin-left:3px}
+    .ps .badge-dots span{width:2px;height:2px}
     .ps-running{background:var(--b-run-bg);color:var(--b-run-fg)}
     .ps-starting{background:var(--b-start-bg);color:var(--b-start-fg)}
     .ps-queued{background:var(--b-q-bg);color:var(--b-q-fg)}
@@ -314,8 +347,8 @@ export function dashboardHtml(hasPassword: boolean): string {
     </div>
   </header>
   <div class="stats">
-    <div class="stat"><div class="stat-label">Running</div><div class="stat-val cr" id="sr">\u2014</div></div>
-    <div class="stat"><div class="stat-label">Queued</div><div class="stat-val cq" id="sq">\u2014</div></div>
+    <div class="stat" id="stat-running"><div class="stat-label cr" id="sr-lbl">Running</div><div class="stat-val cr" id="sr">\u2014</div></div>
+    <div class="stat" id="stat-queued"><div class="stat-label cq" id="sq-lbl">Queued</div><div class="stat-val cq" id="sq">\u2014</div></div>
     <div class="stat"><div class="stat-label">Retrying</div><div class="stat-val ct" id="st">\u2014</div></div>
     <div class="stat"><div class="stat-label">Completed</div><div class="stat-val cc" id="sc">\u2014</div></div>
     <div class="stat"><div class="stat-label">Failed</div><div class="stat-val cf" id="sf">\u2014</div></div>
@@ -415,7 +448,9 @@ export function dashboardHtml(hasPassword: boolean): string {
   <script>
     var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null;
     function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-    function badge(s){var m={running:['b-running','Running'],starting:['b-starting','Starting'],queued:['b-queued','Queued'],retrying:['b-retrying','Retrying'],completed:['b-completed','Completed'],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
+    var _spin='<span class="badge-spin"></span>';
+    var _dots='<span class="badge-dots"><span></span><span></span><span></span></span>';
+    function badge(s){var m={running:['b-running',_spin+'Running'],starting:['b-starting',_spin+'Starting'],queued:['b-queued','Queued'+_dots],retrying:['b-retrying',_spin+'Retrying'],completed:['b-completed','Completed'],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
     function dur(s){if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
     function fmtDate(d){try{return new Date(d).toLocaleString();}catch(e){return String(d);}}
     function setFilter(f){
@@ -439,15 +474,18 @@ export function dashboardHtml(hasPassword: boolean): string {
       if(!ids.length){el.innerHTML='<div class="muted" style="font-size:.82rem">No projects</div>';return;}
       el.innerHTML=ids.map(function(id){
         var p=projects[id],sel=selectedProjects.has(id);
+        var hasActive=(p.running||0)+(p.starting||0)+(p.retrying||0)>0;
+        var hasQueued=(p.queued||0)>0;
         var parts=[];
-        if(p.running)parts.push('<span class="ps ps-running">'+p.running+' running</span>');
-        if(p.starting)parts.push('<span class="ps ps-starting">'+p.starting+' starting</span>');
-        if(p.queued)parts.push('<span class="ps ps-queued">'+p.queued+' queued</span>');
-        if(p.retrying)parts.push('<span class="ps ps-retrying">'+p.retrying+' retrying</span>');
+        if(p.running)parts.push('<span class="ps ps-running">'+_spin+p.running+' running</span>');
+        if(p.starting)parts.push('<span class="ps ps-starting">'+_spin+p.starting+' starting</span>');
+        if(p.queued)parts.push('<span class="ps ps-queued">'+p.queued+' queued'+_dots+'</span>');
+        if(p.retrying)parts.push('<span class="ps ps-retrying">'+_spin+p.retrying+' retrying</span>');
         if(p.completed)parts.push('<span class="ps ps-completed">'+p.completed+' done</span>');
         if(p.failed)parts.push('<span class="ps ps-failed">'+p.failed+' failed</span>');
         if(!parts.length)parts.push('<span class="muted" style="font-size:.72rem">No tasks</span>');
-        return '<div class="proj-card'+(sel?' selected':'')+'" data-proj="'+esc(id)+'">'
+        var extraClass=hasActive?' proj-active':hasQueued?' proj-queued':'';
+        return '<div class="proj-card'+(sel?' selected':'')+extraClass+'" data-proj="'+esc(id)+'">'
           +'<div class="proj-name" title="'+esc(id)+'">'+(sel?'\u2714 ':'')+esc(id)+'</div>'
           +'<div class="proj-stats">'+parts.join('')+'</div>'
           +'</div>';
@@ -470,7 +508,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         tb.innerHTML='<tr><td colspan="6" class="empty">'+msg+'</td></tr>';return;
       }
       tb.innerHTML=filtered.map(function(t){
-        return '<tr class="clickable" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'">'
+        return '<tr class="clickable tr-'+esc(t.status)+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'">'
           +'<td>'+badge(t.status)+'</td>'
           +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
           +'<td><span class="mono">'+esc(t.taskId)+'</span></td>'
@@ -638,6 +676,31 @@ export function dashboardHtml(hasPassword: boolean): string {
         else if(document.getElementById('nt-overlay').style.display!=='none')closeNewTask();
       }
     });
+    function updateStats(stats){
+      document.getElementById('sr').textContent=stats.running;
+      document.getElementById('sq').textContent=stats.queued;
+      document.getElementById('st').textContent=stats.retrying;
+      document.getElementById('sc').textContent=stats.completed;
+      document.getElementById('sf').textContent=stats.failed;
+      var srCard=document.getElementById('stat-running');
+      var sqCard=document.getElementById('stat-queued');
+      var srLbl=document.getElementById('sr-lbl');
+      var sqLbl=document.getElementById('sq-lbl');
+      if(stats.running>0){
+        srCard.className='stat stat-has-running';
+        srLbl.innerHTML='<span class="stat-active-dot cr"></span>Running';
+      }else{
+        srCard.className='stat';
+        srLbl.innerHTML='Running';
+      }
+      if(stats.queued>0){
+        sqCard.className='stat stat-has-queued';
+        sqLbl.innerHTML='<span class="stat-active-dot cq"></span>Queued';
+      }else{
+        sqCard.className='stat';
+        sqLbl.innerHTML='Queued';
+      }
+    }
     function refreshData(){
       var btn=document.getElementById('refresh-btn');
       if(btn.disabled)return;
@@ -647,11 +710,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         .then(function(r){return r.json();})
         .then(function(d){
           lastData=d;
-          document.getElementById('sr').textContent=d.stats.running;
-          document.getElementById('sq').textContent=d.stats.queued;
-          document.getElementById('st').textContent=d.stats.retrying;
-          document.getElementById('sc').textContent=d.stats.completed;
-          document.getElementById('sf').textContent=d.stats.failed;
+          updateStats(d.stats);
           renderProjects(d.projects);
           renderTasks(d.tasks);
           document.getElementById('dot').className='dot';
@@ -664,11 +723,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     es.onmessage=function(e){
       var d=JSON.parse(e.data);
       lastData=d;
-      document.getElementById('sr').textContent=d.stats.running;
-      document.getElementById('sq').textContent=d.stats.queued;
-      document.getElementById('st').textContent=d.stats.retrying;
-      document.getElementById('sc').textContent=d.stats.completed;
-      document.getElementById('sf').textContent=d.stats.failed;
+      updateStats(d.stats);
       renderProjects(d.projects);
       renderTasks(d.tasks);
       document.getElementById('dot').className='dot';
