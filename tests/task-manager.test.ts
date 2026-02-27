@@ -313,7 +313,7 @@ describe("TaskManager", () => {
 
       // Mock metadata generation (task has branch from defaults, so this won't be called,
       // but mock it to be safe)
-      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test" });
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test", estimatedDurationSeconds: 600 });
 
       // @ts-expect-error - accessing private projects map for testing
       const state = tm.projects.get(PROJECT_ID)!;
@@ -446,7 +446,7 @@ describe("TaskManager", () => {
       const config = makeConfig();
       const tm = new TaskManager(config);
 
-      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "add-button", title: "Add a Button" });
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "add-button", title: "Add a Button", estimatedDurationSeconds: 600 });
 
       // @ts-expect-error - private
       const state = tm.projects.get(PROJECT_ID)!;
@@ -754,7 +754,7 @@ describe("TaskManager", () => {
       await tm.init();
 
       // Mock metadata generation
-      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "continue", title: "Continue" });
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "continue", title: "Continue", estimatedDurationSeconds: 600 });
 
       // @ts-expect-error - private
       const state = tm.projects.get(PROJECT_ID)!;
@@ -817,7 +817,7 @@ describe("TaskManager", () => {
       const tm = new TaskManager(config);
       await tm.init();
 
-      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test" });
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test", estimatedDurationSeconds: 600 });
 
       // Trying to continue from chain-a (not the tip) should fail mentioning chain-b
       await expect(
@@ -851,7 +851,7 @@ describe("TaskManager", () => {
       const tm = new TaskManager(config);
       await tm.init();
 
-      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test" });
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test", estimatedDurationSeconds: 600 });
 
       // @ts-expect-error - private
       const state = tm.projects.get(PROJECT_ID)!;
@@ -928,7 +928,7 @@ describe("TaskManager", () => {
       const tm = new TaskManager(config);
       await tm.init();
 
-      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test" });
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test", estimatedDurationSeconds: 600 });
 
       // @ts-expect-error - private
       const state = tm.projects.get(PROJECT_ID)!;
@@ -955,7 +955,7 @@ describe("TaskManager", () => {
       const tm = new TaskManager(config);
       await tm.init();
 
-      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test" });
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test", estimatedDurationSeconds: 600 });
 
       // @ts-expect-error - private
       const state = tm.projects.get(PROJECT_ID)!;
@@ -1159,7 +1159,7 @@ describe("TaskManager", () => {
       const state = tm.projects.get(PROJECT_ID)!;
 
       // Mock slug generation to succeed
-      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "fix-bug", title: "Fix Bug" });
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "fix-bug", title: "Fix Bug", estimatedDurationSeconds: 600 });
 
       // Allow dequeue (hasFreeSlot=true) so tryDequeue reaches the branchless task,
       // but reject acquire so prepareAndRunTask queues the task instead of running it
@@ -1239,7 +1239,7 @@ describe("TaskManager", () => {
       const config = makeConfig();
       const tm = new TaskManager(config);
 
-      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "add-button", title: "Add a Button" });
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "add-button", title: "Add a Button", estimatedDurationSeconds: 600 });
 
       // @ts-expect-error - private
       const state = tm.projects.get(PROJECT_ID)!;
@@ -1262,7 +1262,7 @@ describe("TaskManager", () => {
       const config = makeConfig();
       const tm = new TaskManager(config);
 
-      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "add-button", title: "Add a Button" });
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "add-button", title: "Add a Button", estimatedDurationSeconds: 600 });
 
       // @ts-expect-error - private
       const state = tm.projects.get(PROJECT_ID)!;
@@ -1417,7 +1417,7 @@ describe("TaskManager", () => {
       const tm = new TaskManager(config);
 
       // Mock metadata generation so createNewTask doesn't call real CLI
-      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "build-the-thing", title: "Build the Thing" });
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "build-the-thing", title: "Build the Thing", estimatedDurationSeconds: 600 });
 
       // @ts-expect-error - accessing private projects map
       const projectState = tm.projects.get(PROJECT_ID)!;
@@ -1585,7 +1585,7 @@ describe("TaskManager", () => {
       // @ts-expect-error - accessing private projects map
       const projectState = tm.projects.get(PROJECT_ID)!;
 
-      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "new-task", title: "New Task" });
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "new-task", title: "New Task", estimatedDurationSeconds: 600 });
       vi.spyOn(projectState.pool, "hasFreeSlot").mockReturnValue(true);
       vi.spyOn(projectState.pool, "acquire").mockResolvedValue({ id: 0, dir: TMP });
       vi.spyOn(projectState.pool, "release").mockReturnValue(undefined);

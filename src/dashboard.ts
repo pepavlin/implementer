@@ -73,6 +73,7 @@ export function buildDashboardData(
                     new Date(task.startedAt).getTime()) /
                     1000
             ),
+        estimatedDurationSeconds: task.estimatedDurationSeconds ?? null,
         // Include minimal PR info for table-level indicators
         pullRequests: task.pullRequests?.map((pr) => ({
             repo: pr.repo,
@@ -390,6 +391,13 @@ export function dashboardHtml(hasPassword: boolean): string {
     textarea.form-inp{resize:vertical}
     select.form-inp option{background:var(--bg-card)}
     .form-err{background:var(--b-fail-bg);color:var(--b-fail-fg);padding:10px 14px;border-radius:6px;font-size:.8rem;margin-top:8px}
+    /* ── Progress bar ──────────────────────────────────────────────────────── */
+    .task-progress{margin-top:5px;display:flex;align-items:center;gap:6px}
+    .progress-track{flex:1;height:4px;background:var(--border2);border-radius:2px;overflow:hidden;min-width:60px}
+    .progress-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,#22c55e,#16a34a);transition:width .5s ease}
+    .progress-fill.overrun{background:linear-gradient(90deg,#f59e0b,#d97706)}
+    .progress-pct{font-size:.65rem;color:var(--text3);white-space:nowrap;min-width:28px;text-align:right}
+    .progress-est{font-size:.65rem;color:var(--text4);white-space:nowrap}
     /* ── Responsive ────────────────────────────────────────────────────────── */
     .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
     @media(max-width:767px){
@@ -660,11 +668,19 @@ export function dashboardHtml(hasPassword: boolean): string {
             +t.pullRequests.map(function(pr){return prStateBadge(pr.state);}).join('')
             +'</span>';
         }
+        var progressHtml='';
+        if((t.status==='running'||t.status==='starting')&&t.estimatedDurationSeconds&&t.durationSeconds!==null){
+          var pct=Math.min(100,Math.round((t.durationSeconds/t.estimatedDurationSeconds)*100));
+          var isOverrun=pct>=100;
+          var fillClass='progress-fill'+(isOverrun?' overrun':'');
+          var estLabel=dur(t.estimatedDurationSeconds);
+          progressHtml='<div class="task-progress"><div class="progress-track"><div class="'+fillClass+'" style="width:'+pct+'%"></div></div><span class="progress-pct">'+pct+'%</span><span class="progress-est">/ '+estLabel+'</span></div>';
+        }
         return '<tr class="'+rowClass+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'">'
           +'<td>'+badge(t.status,t.completedAt,t.taskId)+'</td>'
           +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
           +'<td class="td-taskid"><span class="mono">'+esc(t.taskId)+'</span></td>'
-          +'<td>'+(t.title?'<div class="ttitle">'+esc(t.title)+prIndicators+'</div>':'<div class="ttitle">'+prIndicators+'</div>')+'<div class="tprompt">'+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+'</div></td>'
+          +'<td>'+(t.title?'<div class="ttitle">'+esc(t.title)+prIndicators+'</div>':'<div class="ttitle">'+prIndicators+'</div>')+'<div class="tprompt">'+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+'</div>'+progressHtml+'</td>'
           +'<td class="td-dur mono">'+dur(t.durationSeconds)+'</td>'
           +'<td class="td-started mono">'+fmtDate(t.startedAt)+'</td>'
           +'</tr>';
@@ -721,7 +737,15 @@ export function dashboardHtml(hasPassword: boolean): string {
           var attemptLabel=t.maxAttempts?('Attempt '+t.attempt+' / '+t.maxAttempts):('Attempt '+t.attempt);
           html+='<div class="det-row"><div class="det-lbl">Attempts</div><div class="det-val mono">'+esc(attemptLabel)+'</div></div>';
           if(t.status==='retrying'&&t.nextRetryAt)html+='<div class="det-row"><div class="det-lbl">Next Retry</div><div class="det-val mono"><span id="retry-countdown">…</span> &nbsp;<span class="muted" style="font-size:.8em">(at '+esc(fmtDate(t.nextRetryAt))+')</span></div></div>';
-          html+='<div class="det-row"><div class="det-lbl">Duration</div><div class="det-val mono">'+dur(t.durationSeconds)+'</div></div>';
+          var durationHtml=dur(t.durationSeconds);
+          if(t.estimatedDurationSeconds){
+            var dPct=t.durationSeconds!==null?Math.min(100,Math.round((t.durationSeconds/t.estimatedDurationSeconds)*100)):0;
+            var dIsOver=dPct>=100;
+            durationHtml+=' <span class="muted" style="font-size:.8em">(est. '+dur(t.estimatedDurationSeconds)+'</span>'
+              +' <span style="font-size:.8em;color:'+(dIsOver?'var(--b-q-fg)':'var(--b-done-fg)')+'">'+dPct+'%</span>'
+              +'<span class="muted" style="font-size:.8em">)</span>';
+          }
+          html+='<div class="det-row"><div class="det-lbl">Duration</div><div class="det-val mono">'+durationHtml+'</div></div>';
           html+='<div class="det-row"><div class="det-lbl">Started</div><div class="det-val mono">'+fmtDate(t.startedAt)+'</div></div>';
           if(t.completedAt)html+='<div class="det-row"><div class="det-lbl">Completed</div><div class="det-val mono">'+fmtDate(t.completedAt)+'</div></div>';
           html+='<div class="det-row"><div class="det-lbl">Pull Requests</div><div class="det-val">'+prsHtml+'</div></div>';
@@ -1089,6 +1113,7 @@ export function registerDashboardRoutes(
                         new Date(task.startedAt).getTime()) /
                         1000
                 ),
+            estimatedDurationSeconds: task.estimatedDurationSeconds ?? null,
             output:
                 task.status === "queued" ||
                 task.status === "starting" ||

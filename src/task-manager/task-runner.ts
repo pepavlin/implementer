@@ -434,36 +434,40 @@ export async function prepareMetadata(
 
         // Resolve branch and title based on task type
         if (!task.branch) {
-            // Normal task: generate branch slug and title
-            console.log(`[${taskId}] Generating branch name and title...`);
+            // Normal task: generate branch slug, title, and duration estimate
+            console.log(`[${taskId}] Generating branch name, title, and duration estimate...`);
             const metaExecutor = new Executor(
                 state.config.claudeCode,
                 state.tokenManager
             );
-            const { slug, title } = await metaExecutor.generateTaskMetadata(
+            const { slug, title, estimatedDurationSeconds } = await metaExecutor.generateTaskMetadata(
                 task.prompt,
                 taskId
             );
             task.branch = `impl/${slug}-${taskId}`;
             if (title) task.title = title;
+            task.estimatedDurationSeconds = estimatedDurationSeconds;
             console.log(
-                `[${taskId}] Branch: ${task.branch}, Title: ${task.title}`
+                `[${taskId}] Branch: ${task.branch}, Title: ${task.title}, Estimated: ${estimatedDurationSeconds}s`
             );
             tm.saveTask(entry);
         }
         if (!task.title) {
             // Branch already set (e.g., after restart), but title not yet generated
-            console.log(`[${taskId}] Generating title...`);
+            console.log(`[${taskId}] Generating title and duration estimate...`);
             const metaExecutor = new Executor(
                 state.config.claudeCode,
                 state.tokenManager
             );
-            const { title } = await metaExecutor.generateTaskMetadata(
+            const { title, estimatedDurationSeconds } = await metaExecutor.generateTaskMetadata(
                 task.prompt,
                 taskId
             );
             if (title) task.title = title;
-            console.log(`[${taskId}] Title: ${task.title}`);
+            if (!task.estimatedDurationSeconds) {
+                task.estimatedDurationSeconds = estimatedDurationSeconds;
+            }
+            console.log(`[${taskId}] Title: ${task.title}, Estimated: ${task.estimatedDurationSeconds}s`);
             tm.saveTask(entry);
         }
     } catch (err) {

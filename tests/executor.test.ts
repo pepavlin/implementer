@@ -213,7 +213,7 @@ describe("Executor", () => {
   });
 
   describe("generateTaskMetadata", () => {
-    it("parses slug from line 1 and title from line 2", async () => {
+    it("parses slug from line 1, title from line 2, and estimated seconds from line 3", async () => {
       const proc = makeFakeProc(0, false);
       spawnMock.mockReturnValue(proc);
 
@@ -221,12 +221,13 @@ describe("Executor", () => {
       const promise = executor.generateTaskMetadata("Add dark mode toggle", "meta-1");
 
       await new Promise((r) => setTimeout(r, 5));
-      proc.stdout!.emit("data", Buffer.from("add-dark-mode-toggle\nAdd Dark Mode Toggle"));
+      proc.stdout!.emit("data", Buffer.from("add-dark-mode-toggle\nAdd Dark Mode Toggle\n300"));
       proc.emit("close", 0);
 
-      const { slug, title } = await promise;
+      const { slug, title, estimatedDurationSeconds } = await promise;
       expect(slug).toBe("add-dark-mode-toggle");
       expect(title).toBe("Add Dark Mode Toggle");
+      expect(estimatedDurationSeconds).toBe(300);
     });
 
     it("sanitises slug to lowercase hyphens", async () => {
@@ -237,7 +238,7 @@ describe("Executor", () => {
       const promise = executor.generateTaskMetadata("Some task", "meta-2");
 
       await new Promise((r) => setTimeout(r, 5));
-      proc.stdout!.emit("data", Buffer.from("Add_Feature_123\nAdd Feature 123"));
+      proc.stdout!.emit("data", Buffer.from("Add_Feature_123\nAdd Feature 123\n600"));
       proc.emit("close", 0);
 
       const { slug } = await promise;
@@ -252,7 +253,7 @@ describe("Executor", () => {
       const promise = executor.generateTaskMetadata("Some task", "meta-3");
 
       await new Promise((r) => setTimeout(r, 5));
-      proc.stdout!.emit("data", Buffer.from("some-task\nSome Task"));
+      proc.stdout!.emit("data", Buffer.from("some-task\nSome Task\n600"));
       proc.emit("close", 0);
       await promise;
 
@@ -263,7 +264,7 @@ describe("Executor", () => {
       expect(args).toContain("haiku");
     });
 
-    it("returns fallback slug and empty title on non-zero exit", async () => {
+    it("returns fallback slug, empty title, and default estimated seconds on non-zero exit", async () => {
       const proc = makeFakeProc(1, false);
       spawnMock.mockReturnValue(proc);
 
@@ -273,9 +274,10 @@ describe("Executor", () => {
       await new Promise((r) => setTimeout(r, 5));
       proc.emit("close", 1);
 
-      const { slug, title } = await promise;
+      const { slug, title, estimatedDurationSeconds } = await promise;
       expect(slug).toBe("task");
       expect(title).toBe("");
+      expect(estimatedDurationSeconds).toBe(600);
     });
 
     it("returns fallback on spawn error", async () => {
@@ -287,9 +289,10 @@ describe("Executor", () => {
       spawnMock.mockReturnValue(proc);
 
       const executor = new Executor(makeConfig(), makeTokenManager());
-      const { slug, title } = await executor.generateTaskMetadata("Some task", "meta-5");
+      const { slug, title, estimatedDurationSeconds } = await executor.generateTaskMetadata("Some task", "meta-5");
       expect(slug).toBe("task");
       expect(title).toBe("");
+      expect(estimatedDurationSeconds).toBe(600);
     });
 
     it("truncates slug to 40 chars and title to 60 chars", async () => {
@@ -300,12 +303,59 @@ describe("Executor", () => {
       const promise = executor.generateTaskMetadata("Some task", "meta-6");
 
       await new Promise((r) => setTimeout(r, 5));
-      proc.stdout!.emit("data", Buffer.from(`${"a".repeat(60)}\n${"B".repeat(80)}`));
+      proc.stdout!.emit("data", Buffer.from(`${"a".repeat(60)}\n${"B".repeat(80)}\n1800`));
       proc.emit("close", 0);
 
-      const { slug, title } = await promise;
+      const { slug, title, estimatedDurationSeconds } = await promise;
       expect(slug.length).toBeLessThanOrEqual(40);
       expect(title).toHaveLength(60);
+      expect(estimatedDurationSeconds).toBe(1800);
+    });
+
+    it("falls back to 600s when estimated seconds line is missing", async () => {
+      const proc = makeFakeProc(0, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const promise = executor.generateTaskMetadata("Some task", "meta-7");
+
+      await new Promise((r) => setTimeout(r, 5));
+      // Only two lines — no estimated seconds
+      proc.stdout!.emit("data", Buffer.from("some-task\nSome Task"));
+      proc.emit("close", 0);
+
+      const { estimatedDurationSeconds } = await promise;
+      expect(estimatedDurationSeconds).toBe(600);
+    });
+
+    it("falls back to 600s when estimated seconds line is not a valid number", async () => {
+      const proc = makeFakeProc(0, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const promise = executor.generateTaskMetadata("Some task", "meta-8");
+
+      await new Promise((r) => setTimeout(r, 5));
+      proc.stdout!.emit("data", Buffer.from("some-task\nSome Task\nnot-a-number"));
+      proc.emit("close", 0);
+
+      const { estimatedDurationSeconds } = await promise;
+      expect(estimatedDurationSeconds).toBe(600);
+    });
+
+    it("falls back to 600s when estimated seconds is zero or negative", async () => {
+      const proc = makeFakeProc(0, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const promise = executor.generateTaskMetadata("Some task", "meta-9");
+
+      await new Promise((r) => setTimeout(r, 5));
+      proc.stdout!.emit("data", Buffer.from("some-task\nSome Task\n0"));
+      proc.emit("close", 0);
+
+      const { estimatedDurationSeconds } = await promise;
+      expect(estimatedDurationSeconds).toBe(600);
     });
   });
 

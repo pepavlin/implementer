@@ -19,6 +19,7 @@ The dashboard uses a cookie-based session (`impl_dash`). On successful login, a 
 - **Pull request state tracking** — PRs show their current state (open, draft, merged, closed) with color-coded badges
 - **Open PRs counter** — a dedicated stat card shows the count of open/draft PRs; clicking it filters to tasks with open PRs
 - **Open PR row highlighting** — tasks with open or draft pull requests have a distinct left-border highlight in the task table
+- **Task duration progress bar** — running tasks with an AI-estimated duration show a linear progress bar in the task list row, indicating what percentage of the estimated time has elapsed. The bar turns amber when the task exceeds the estimate.
 
 ## Light/Dark Mode
 

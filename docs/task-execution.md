@@ -77,7 +77,24 @@ On server restart:
 - `retrying` → `queued`: dropped delay, retried as soon as capacity is available.
 - `queued` → `queued`: stays in queue, re-enqueued on startup.
 
+## Task Duration Estimation
+
+When metadata (branch slug + title) is generated before a task runs, the same Claude Haiku call also produces an estimated duration for the task. The estimate is a rough heuristic:
+
+| Complexity | Estimated seconds |
+|---|---|
+| Trivial (1-liner fix) | ~60s |
+| Simple | ~180s |
+| Medium | ~600s |
+| Complex | ~1800s |
+| Very complex | ~3600s |
+
+The estimate is stored as `estimatedDurationSeconds` on the task and persisted to disk. The admin dashboard uses it to render a **progress bar** next to running tasks (elapsed time / estimated time). The bar is informational only — the task continues past 100%.
+
+If estimation fails (Docker error, non-numeric response), the system defaults to **600 seconds**.
+
 ## Known Limitations
 
 - `timeoutSeconds` governs each individual `executor.run()` call. A single task execution may involve multiple `run()` calls (main run + commit fix + rebase conflict resolution). Each call has its own timer.
 - The metadata generation calls (`generateTaskMetadata`) do not have a configurable timeout; they use a lightweight Haiku model and are expected to complete quickly.
+- Duration estimates are rough heuristics from the Haiku model and may not be accurate for all tasks. They are intended as orientation only.

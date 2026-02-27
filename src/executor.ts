@@ -107,17 +107,19 @@ export class Executor {
   }
 
   /**
-   * Generate branch slug and title in a single Docker call to avoid spawning two containers.
-   * Uses Claude Haiku with a two-line output format: line 1 = slug, line 2 = title.
+   * Generate branch slug, title, and estimated duration in a single Docker call.
+   * Uses Claude Haiku with a three-line output format:
+   *   line 1 = slug, line 2 = title, line 3 = estimated duration in seconds.
    */
-  async generateTaskMetadata(prompt: string, taskId?: string): Promise<{ slug: string; title: string }> {
+  async generateTaskMetadata(prompt: string, taskId?: string): Promise<{ slug: string; title: string; estimatedDurationSeconds: number }> {
     const creds = await this.tokenManager.getCredentials();
 
     const claudeArgs = [
       "-p",
-      `Reply with EXACTLY two lines and nothing else:
+      `Reply with EXACTLY three lines and nothing else:
 Line 1: a git branch slug (lowercase, hyphens only, max 40 chars)
 Line 2: a short human-readable title (max 60 chars)
+Line 3: estimated seconds for an AI coding assistant to complete this task (integer only, consider: trivial=60, simple=180, medium=600, complex=1800, very complex=3600)
 
 Task: ${prompt}`,
       "--output-format",
@@ -147,10 +149,10 @@ Task: ${prompt}`,
       proc.stdout?.on("data", (data: Buffer) => { output += data.toString(); });
       proc.stderr?.on("data", (data: Buffer) => { output += data.toString(); });
 
-      proc.on("error", () => resolve({ slug: "task", title: "" }));
+      proc.on("error", () => resolve({ slug: "task", title: "", estimatedDurationSeconds: 600 }));
       proc.on("close", (code) => {
         if (code !== 0) {
-          resolve({ slug: "task", title: "" });
+          resolve({ slug: "task", title: "", estimatedDurationSeconds: 600 });
           return;
         }
         const lines = output.trim().split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
@@ -161,7 +163,9 @@ Task: ${prompt}`,
           .replace(/^-+|-+$/g, "")
           .slice(0, 40) || "task";
         const title = (lines[1] ?? "").trim().slice(0, 60);
-        resolve({ slug, title });
+        const rawSeconds = parseInt((lines[2] ?? "").trim(), 10);
+        const estimatedDurationSeconds = Number.isFinite(rawSeconds) && rawSeconds > 0 ? rawSeconds : 600;
+        resolve({ slug, title, estimatedDurationSeconds });
       });
     });
   }

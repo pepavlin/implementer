@@ -44,6 +44,8 @@ export interface Task {
     chainId: ChainId;
     /** Current attempt number (1-indexed). Incremented on each retry. */
     attempt: number;
+    /** AI-estimated duration of this task in seconds, generated before execution starts. */
+    estimatedDurationSeconds?: number;
 }
 
 export interface PersistedTask extends Task {
