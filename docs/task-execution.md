@@ -8,11 +8,11 @@ Tasks are executed by spawning a Docker container that runs Claude Code CLI agai
 
 **Problem addressed:** Without a timeout, a task that hangs (e.g., Claude Code waiting for a tool response that never arrives, an infinite loop, or a network stall) would remain in `running` status indefinitely. The workspace slot would be occupied forever, and no retry or failure would ever trigger.
 
-**Solution:** The `timeoutSeconds` field in `claudeCode` config sets a wall-clock limit per executor run.
+**Solution:** `timeoutSeconds` in `claudeCode` config sets a wall-clock limit per executor run. It **defaults to 3600 (1 hour)** — you do not need to set it manually unless you want a different value.
 
 ```yaml
 claudeCode:
-  timeoutSeconds: 3600  # Kill after 1 hour
+  # timeoutSeconds: 3600  # default — omit to keep the 1-hour limit
 ```
 
 When the timeout fires:
@@ -21,10 +21,10 @@ When the timeout fires:
    - Sends `SIGTERM` to the `docker run` child process.
    - Calls `docker kill <containerName>` directly for reliability (handles cases where signal forwarding fails).
 3. The container exits with a non-zero code (typically 137).
-4. The task is marked `failed` with the error message.
-5. If `errorRetry` is configured, the task is automatically retried.
+4. The task is automatically set to **`retrying`** status. Its branch is preserved so the next run can continue exactly where it left off.
+5. On the next server restart (or manual `/retry` call) the task is re-queued and resumes on the same branch.
 
-**Recommended value:** `3600` (1 hour). Adjust based on your typical task durations.
+**Key difference from a regular failure:** A regular failure (non-zero exit, not a timeout) goes to `failed` and only retries if `errorRetry` is configured. A timeout always goes to `retrying`, regardless of the `errorRetry` setting, because the task simply ran out of time rather than encountering a permanent error.
 
 ## Kill Reliability
 
@@ -32,19 +32,23 @@ The `kill()` method was improved to always kill the Docker container by name in 
 - The `docker run` process is slow to forward signals.
 - The container process ignores SIGTERM.
 
-## Retry on Timeout
+## Retry on Timeout vs Regular Errors
 
-Configure `errorRetry` alongside `timeoutSeconds` to automatically retry timed-out tasks:
+Timeout and regular failures are handled differently:
+
+| Scenario | Status after | Retry behaviour |
+|---|---|---|
+| Timeout (any config) | `retrying` | Resumes on same branch after server restart or manual `/retry` |
+| Regular failure + `errorRetry` configured | `retrying` | Scheduled delay then auto-retry |
+| Regular failure, no `errorRetry` | `failed` | No automatic retry; manual `/retry` resets |
+
+Configure `errorRetry` for regular error retries (separate from timeout):
 
 ```yaml
-claudeCode:
-  timeoutSeconds: 3600
 errorRetry:
   maxAttempts: 3       # 1 original + 2 retries
   delaySeconds: 60     # Wait 1 minute before retrying
 ```
-
-A timed-out task gets exit code 137 (non-zero), which triggers the retry logic exactly like any other failure.
 
 ## Task State Machine
 
@@ -60,9 +64,9 @@ States:
 - `starting` – metadata (branch slug, title) being generated
 - `queued` – waiting for a free workspace slot
 - `running` – Docker container active
-- `retrying` – waiting for `delaySeconds` before next attempt
+- `retrying` – either: (a) waiting for `delaySeconds` before next auto-retry, or (b) timed out, waiting for server restart or manual `/retry`
 - `completed` – Claude exited 0, PR created
-- `failed` – terminal failure (all retries exhausted or no retry configured)
+- `failed` – terminal failure (all retries exhausted or no retry configured; never set on timeout)
 - `interrupted` – server restarted while task was running; will be resumed on next boot
 - `cancelled` – manually cancelled via API
 

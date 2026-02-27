@@ -262,6 +262,81 @@ export async function executeTask(
                 }
                 task.status = "completed";
             }
+        } else if (result.timedOut) {
+            // Timeout: push any partial work, preserve the branch, and set to retrying
+            // so the task is automatically resumed on the next server start (or manual retry).
+            if (hasCommits) {
+                console.log(
+                    `[${task.taskId}] Timed out with partial commits — pushing work...`
+                );
+                await tm.gitManager.pushBranchAll(
+                    workspace.dir,
+                    repos,
+                    branchName,
+                    true,
+                    githubToken
+                );
+
+                const assistantMessage = extractLastAssistantMessage(
+                    task.output
+                );
+                const commitLogs = await tm.gitManager.getCommitLogAll(
+                    workspace.dir,
+                    repos,
+                    branchName,
+                    preRunHeads
+                );
+                const prBody = buildPrBody(assistantMessage, commitLogs);
+
+                console.log(
+                    `[${task.taskId}] Creating draft pull request(s) for partial work...`
+                );
+                const prTitle = task.prompt.split("\n")[0].slice(0, 120);
+                try {
+                    const pullRequests =
+                        await tm.gitManager.createPullRequestAll(
+                            workspace.dir,
+                            repos,
+                            branchName,
+                            prTitle,
+                            prBody,
+                            true,
+                            githubToken
+                        );
+                    if (pullRequests.length > 0) {
+                        task.pullRequests = pullRequests;
+                        console.log(
+                            `[${task.taskId}] Created ${pullRequests.length} draft PR(s): ${pullRequests.map((pr) => pr.url).join(", ")}`
+                        );
+
+                        const taskComment = `## Task\n\n${task.prompt}`;
+                        await tm.gitManager.commentOnPullRequestAll(
+                            workspace.dir,
+                            pullRequests,
+                            taskComment,
+                            githubToken
+                        );
+                    }
+                } catch (prErr) {
+                    console.error(
+                        `[${task.taskId}] Draft PR creation failed:`,
+                        prErr instanceof Error ? prErr.message : String(prErr)
+                    );
+                }
+            } else {
+                console.log(
+                    `[${task.taskId}] Timed out with no commits — branch preserved for continuation.`
+                );
+            }
+
+            // Always preserve the branch so the next attempt can continue from where we left off.
+            // Increment attempt so recoverTask() knows to check out the existing branch on restart.
+            task.attempt += 1;
+            task.status = "retrying";
+            task.error = `Timed out after ${state.config.claudeCode.timeoutSeconds} seconds`;
+            console.log(
+                `[${task.taskId}] Timed out — status set to retrying. Will resume on next server start or manual retry.`
+            );
         } else {
             if (hasCommits) {
                 // Failure with commits: force-push partial work and create draft PR
@@ -365,8 +440,9 @@ export async function executeTask(
             );
         }
     } finally {
-        // Preserve completedAt if already set by cancelTask
-        if (!task.completedAt) {
+        // Preserve completedAt if already set by cancelTask.
+        // Tasks in "retrying" state haven't finished — they'll resume later, so completedAt stays null.
+        if (!task.completedAt && task.status !== "retrying") {
             task.completedAt = new Date().toISOString();
         }
         tm.persistEntry(entry);
@@ -395,8 +471,8 @@ export async function executeTask(
         }
     }
 
-    // Fire webhook on terminal completion (not retrying)
-    if (task.callbackUrl) {
+    // Fire webhook on terminal completion (not retrying — those resume later)
+    if (task.callbackUrl && task.status !== "retrying") {
         fireWebhook(task.taskId, task.status, task.callbackUrl);
     }
 }

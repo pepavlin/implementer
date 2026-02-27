@@ -5,6 +5,8 @@ import type { TokenManager } from "./auth.js";
 export interface ExecutorResult {
   exitCode: number | null;
   output: string;
+  /** True when the executor's timeout fired and killed the container before it finished naturally. */
+  timedOut: boolean;
 }
 
 /**
@@ -264,6 +266,7 @@ Task: ${prompt}`,
       this.currentContainerName = containerName;
 
       let timeoutHandle: NodeJS.Timeout | undefined;
+      let timedOut = false;
 
       const clearTimeoutHandle = () => {
         if (timeoutHandle !== undefined) {
@@ -275,6 +278,7 @@ Task: ${prompt}`,
       if (this.config.timeoutSeconds) {
         const timeoutMs = this.config.timeoutSeconds * 1000;
         timeoutHandle = setTimeout(() => {
+          timedOut = true;
           console.warn(
             `[${taskId ?? containerName}] Execution timed out after ${this.config.timeoutSeconds}s — killing container "${containerName}"`
           );
@@ -306,6 +310,7 @@ Task: ${prompt}`,
         resolve({
           exitCode: code,
           output: this.output,
+          timedOut,
         });
       });
     });

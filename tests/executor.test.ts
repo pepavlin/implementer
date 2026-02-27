@@ -467,6 +467,9 @@ describe("Executor", () => {
       expect(result.output).toContain("[TIMEOUT]");
       expect(result.output).toContain("120 seconds");
 
+      // timedOut flag must be true
+      expect(result.timedOut).toBe(true);
+
       // docker kill should have been spawned
       expect(spawnMock).toHaveBeenCalledTimes(2);
       const [cmd, args] = spawnMock.mock.calls[1];
@@ -497,6 +500,7 @@ describe("Executor", () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.output).not.toContain("[TIMEOUT]");
+      expect(result.timedOut).toBe(false);
       // Only one spawn call (the docker run), no docker kill
       expect(spawnMock).toHaveBeenCalledTimes(1);
 
@@ -512,6 +516,7 @@ describe("Executor", () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.output).not.toContain("[TIMEOUT]");
+      expect(result.timedOut).toBe(false);
       // Only the docker run spawn, no docker kill
       expect(spawnMock).toHaveBeenCalledTimes(1);
     });

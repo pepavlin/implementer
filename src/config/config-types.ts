@@ -100,7 +100,7 @@ const ClaudeCodeSchema = z
         systemPrompt: z.string().optional(),
         mcpServers: z.record(McpServerSchema).optional(),
         maxOutputTokens: z.number().int().min(1).optional(),
-        timeoutSeconds: z.number().int().min(60).optional()
+        timeoutSeconds: z.number().int().min(60).default(3600)
     })
     .strict();
 

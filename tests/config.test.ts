@@ -43,6 +43,58 @@ projects:
         expect(project.claudeCode.command).toBe("claude");
     });
 
+
+    it("defaults timeoutSeconds to 3600 when not specified", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: my-repo
+        url: https://github.com/test/repo.git
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.projects["my-project"].claudeCode.timeoutSeconds).toBe(3600);
+    });
+
+    it("respects explicit timeoutSeconds when provided", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: my-repo
+        url: https://github.com/test/repo.git
+    claudeCode:
+      timeoutSeconds: 600
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.projects["my-project"].claudeCode.timeoutSeconds).toBe(600);
+    });
+
+    it("rejects timeoutSeconds below 60", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: my-repo
+        url: https://github.com/test/repo.git
+    claudeCode:
+      timeoutSeconds: 30
+`
+        );
+
+        expect(() => Config.load(path)).toThrow();
+    });
+
     it("loads maxConcurrentTasks per project", () => {
         const path = writeYaml(
             "config.yaml",

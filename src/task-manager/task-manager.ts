@@ -544,10 +544,19 @@ export class TaskManager {
         if (
             task.status === "queued" ||
             task.status === "starting" ||
-            task.status === "running" ||
-            task.status === "retrying"
+            task.status === "running"
         ) {
             throw new TaskActiveError(task.status);
+        }
+
+        // For "retrying" status: a scheduled timer may or may not be active.
+        // Clear it if present (e.g. errorRetry-scheduled retry) so we can restart immediately.
+        // A timeout-induced "retrying" has no timer — this is a no-op in that case.
+        if (task.status === "retrying") {
+            if (entry.retryTimeoutId !== undefined) {
+                clearTimeout(entry.retryTimeoutId);
+                entry.retryTimeoutId = undefined;
+            }
         }
 
         // For normal tasks: if branch was cleaned up (no commits), regenerate a slug so
