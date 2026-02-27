@@ -157,8 +157,7 @@ export class Task {
                 this.data.completedAt = new Date().toISOString();
             }
         }
-
-        this.tickUpdate();
+        this.unshift();
     }
 
     canBeStarted(): boolean {
@@ -175,7 +174,13 @@ export class Task {
         if (totalActive >= this.manager.config.server.maxConcurrentTasks)
             return false;
 
-        if (this.manager.isChainActive(this.data.projectId, this.data.chainId, this.id))
+        if (
+            this.manager.isChainActive(
+                this.data.projectId,
+                this.data.chainId,
+                this.id
+            )
+        )
             return false;
 
         // Check project capacity
