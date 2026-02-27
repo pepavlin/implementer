@@ -388,6 +388,28 @@ describe("Executor", () => {
     });
   });
 
+  describe("container name uniqueness", () => {
+    it("different Executor instances use different container names for the same taskId", async () => {
+      spawnMock.mockReturnValue(makeFakeProc(0));
+
+      const executor1 = new Executor(makeConfig(), makeTokenManager());
+      const executor2 = new Executor(makeConfig(), makeTokenManager());
+
+      await executor1.run("test", "vol:/ws", "/ws", "same-task");
+      spawnMock.mockReturnValue(makeFakeProc(0));
+      await executor2.run("test", "vol:/ws", "/ws", "same-task");
+
+      const name1 = (spawnMock.mock.calls[0][1] as string[])[
+        (spawnMock.mock.calls[0][1] as string[]).indexOf("--name") + 1
+      ];
+      const name2 = (spawnMock.mock.calls[1][1] as string[])[
+        (spawnMock.mock.calls[1][1] as string[]).indexOf("--name") + 1
+      ];
+
+      expect(name1).not.toBe(name2);
+    });
+  });
+
   describe("kill", () => {
     it("sends SIGTERM to running process", async () => {
       const proc = makeFakeProc(0, false);
