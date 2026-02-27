@@ -29,6 +29,10 @@ export interface ClaudeCodeConfig {
     systemPrompt?: string;
     mcpServers?: Record<string, McpServerConfig>;
     maxOutputTokens?: number;
+    /** Maximum wall-clock seconds a single executor.run() call may take before the container is killed.
+     *  When exceeded the task is marked failed and the normal retry logic applies.
+     *  Minimum 60 seconds. Recommended: 3600 (1 hour) to catch runaway tasks. */
+    timeoutSeconds?: number;
 }
 
 export interface ProjectAuth {
@@ -95,7 +99,8 @@ const ClaudeCodeSchema = z
         model: z.string().optional(),
         systemPrompt: z.string().optional(),
         mcpServers: z.record(McpServerSchema).optional(),
-        maxOutputTokens: z.number().int().min(1).optional()
+        maxOutputTokens: z.number().int().min(1).optional(),
+        timeoutSeconds: z.number().int().min(60).optional()
     })
     .strict();
 

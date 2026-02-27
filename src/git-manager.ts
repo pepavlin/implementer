@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { PullRequest, RepositoryConfig } from "./types.js";
+import type { PullRequest } from "./types.js";
+import type { RepositoryConfig } from "./config/config-types.js";
 
 function git(args: string[], cwd: string, githubToken?: string): Promise<string> {
   return new Promise((resolve, reject) => {

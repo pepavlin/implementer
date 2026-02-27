@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
-import type { ProjectAuth } from "./types.js";
+import type { ProjectAuth } from "./config/config-types.js";
 
 const OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token";
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";

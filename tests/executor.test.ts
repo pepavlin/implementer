@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as child_process from "node:child_process";
 import { EventEmitter } from "node:events";
-import type { ClaudeCodeConfig } from "../src/types.js";
+import type { ClaudeCodeConfig } from "../src/config/config-types.js";
 import { TokenManager } from "../src/auth.js";
 import { Executor, extractLastAssistantMessage } from "../src/executor.js";
 
@@ -406,6 +406,114 @@ describe("Executor", () => {
       // Clean up - close the process
       proc.emit("close", 1);
       await runPromise;
+    });
+
+    it("also spawns docker kill against container name for reliability", async () => {
+      const proc = makeFakeProc(0, false);
+      // Second spawn call is for `docker kill <name>`
+      const killProc = new EventEmitter() as child_process.ChildProcess;
+      Object.assign(killProc, { stdout: null, stderr: null, stdin: null, stdio: [], pid: 999, kill: vi.fn() });
+      spawnMock
+        .mockReturnValueOnce(proc)      // first call: docker run
+        .mockReturnValueOnce(killProc); // second call: docker kill
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const runPromise = executor.run("test", "vol:/ws", "/ws", "task-kill-direct");
+
+      await new Promise((r) => setTimeout(r, 5));
+
+      executor.kill();
+
+      // docker kill should have been called with the container name
+      expect(spawnMock).toHaveBeenCalledTimes(2);
+      const [killCmd, killArgs] = spawnMock.mock.calls[1];
+      expect(killCmd).toBe("docker");
+      expect(killArgs[0]).toBe("kill");
+      // Container name follows the pattern implementer-<taskId>-<counter>
+      expect(killArgs[1]).toMatch(/task-kill-direct/);
+
+      proc.emit("close", 137);
+      await runPromise;
+    });
+  });
+
+  describe("timeout", () => {
+    it("kills the container after timeoutSeconds and appends timeout message to output", async () => {
+      vi.useFakeTimers();
+
+      const proc = makeFakeProc(0, false);
+      const killProc = new EventEmitter() as child_process.ChildProcess;
+      Object.assign(killProc, { stdout: null, stderr: null, stdin: null, stdio: [], pid: 999, kill: vi.fn() });
+      spawnMock
+        .mockReturnValueOnce(proc)
+        .mockReturnValueOnce(killProc);
+
+      const executor = new Executor(makeConfig({ timeoutSeconds: 120 }), makeTokenManager());
+      const runPromise = executor.run("test", "vol:/ws", "/ws", "task-timeout");
+
+      // Wait for spawn to be called
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Advance timer past the timeout
+      vi.advanceTimersByTime(120_001);
+
+      // The kill() should have been called — simulate container dying
+      proc.emit("close", 137);
+
+      const result = await runPromise;
+
+      // Output should contain the timeout message
+      expect(result.output).toContain("[TIMEOUT]");
+      expect(result.output).toContain("120 seconds");
+
+      // docker kill should have been spawned
+      expect(spawnMock).toHaveBeenCalledTimes(2);
+      const [cmd, args] = spawnMock.mock.calls[1];
+      expect(cmd).toBe("docker");
+      expect(args[0]).toBe("kill");
+
+      vi.useRealTimers();
+    });
+
+    it("clears the timeout timer if the process exits before deadline", async () => {
+      vi.useFakeTimers();
+
+      const proc = makeFakeProc(0, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig({ timeoutSeconds: 300 }), makeTokenManager());
+      const runPromise = executor.run("test", "vol:/ws", "/ws", "task-no-timeout");
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Process exits naturally well before the timeout
+      proc.emit("close", 0);
+      const result = await runPromise;
+
+      // Advance past what would have been the timeout — should not trigger
+      vi.advanceTimersByTime(400_000);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).not.toContain("[TIMEOUT]");
+      // Only one spawn call (the docker run), no docker kill
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+
+      vi.useRealTimers();
+    });
+
+    it("does not set a timeout timer when timeoutSeconds is not configured", async () => {
+      const proc = makeFakeProc(0, true);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const result = await executor.run("test", "vol:/ws", "/ws", "task-notimeout");
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).not.toContain("[TIMEOUT]");
+      // Only the docker run spawn, no docker kill
+      expect(spawnMock).toHaveBeenCalledTimes(1);
     });
   });
 });

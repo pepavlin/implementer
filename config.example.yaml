@@ -49,6 +49,11 @@ projects:
             # systemPrompt: |
             #   Custom instructions applied to every task.
             #   e.g. "Always write tests. Follow existing code style."
+            # Maximum wall-clock seconds a single executor run may take before the
+            # container is killed and the task is marked as failed (triggering retries
+            # if errorRetry is configured). Recommended for production to prevent tasks
+            # from hanging indefinitely. Minimum 60. Example: 3600 = 1 hour.
+            # timeoutSeconds: 3600
             mcpServers:
                 playwright:
                     command: npx
