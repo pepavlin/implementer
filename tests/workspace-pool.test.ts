@@ -229,4 +229,54 @@ describe("WorkspacePool", () => {
       expect(() => pool.release(999)).not.toThrow();
     });
   });
+
+  describe("maxConcurrentTasks cap enforcement", () => {
+    it("hasFreeSlot respects cap even when free instances exist on disk", () => {
+      // Simulate 3 workspace instances discovered from a previous run
+      mkdirSync(join(TMP, "instances", "0"), { recursive: true });
+      mkdirSync(join(TMP, "instances", "1"), { recursive: true });
+      mkdirSync(join(TMP, "instances", "2"), { recursive: true });
+
+      const pool = new WorkspacePool(TMP, undefined, 1); // maxConcurrentTasks = 1
+      pool.initFromDisk();
+
+      // Before any task: slot is free
+      expect(pool.hasFreeSlot()).toBe(true);
+
+      // Manually mark instance 0 as in-use (simulating one running task)
+      // We do this via acquireExisting so the inUse flag is set
+      return pool.acquireExisting(0, fakeRepos).then(() => {
+        // Now the cap (1) is reached — hasFreeSlot must return false
+        // even though instances 1 and 2 are still free
+        expect(pool.hasFreeSlot()).toBe(false);
+      });
+    });
+
+    it("acquire throws PoolExhaustedError when cap reached even if free instances exist", async () => {
+      mkdirSync(join(TMP, "instances", "0"), { recursive: true });
+      mkdirSync(join(TMP, "instances", "1"), { recursive: true });
+
+      const pool = new WorkspacePool(TMP, undefined, 1); // maxConcurrentTasks = 1
+      pool.initFromDisk();
+
+      // Acquire instance 0 — this succeeds (inUse count goes to 1)
+      await pool.acquireExisting(0, fakeRepos);
+
+      // Second acquire must throw PoolExhaustedError, even though instance 1 is free
+      await expect(pool.acquire(fakeRepos)).rejects.toThrow(PoolExhaustedError);
+    });
+
+    it("hasFreeSlot returns true after release brings inUse count below cap", async () => {
+      mkdirSync(join(TMP, "instances", "0"), { recursive: true });
+
+      const pool = new WorkspacePool(TMP, undefined, 1);
+      pool.initFromDisk();
+
+      await pool.acquireExisting(0, fakeRepos);
+      expect(pool.hasFreeSlot()).toBe(false);
+
+      pool.release(0);
+      expect(pool.hasFreeSlot()).toBe(true);
+    });
+  });
 });

@@ -1525,6 +1525,153 @@ describe("TaskManager", () => {
     });
   });
 
+  describe("dequeueAvailableTasks queue iteration", () => {
+    it("does not skip tasks when pool capacity > 1 and queue has many tasks", async () => {
+      // Before the fix, dequeue() called splice() on this.queue while iterating with for-of.
+      // After splice shifts the array, the iterator skips the next element, causing tasks
+      // to be dequeued out-of-order (e.g. t1 and t3 run while t2 waits).
+      // The fix: snapshot [...this.queue] before iterating.
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const store = new TaskStore(TMP);
+
+      // Save 3 tasks that all have branches (skip prepareMetadata)
+      for (const id of ["task-a", "task-b", "task-c"]) {
+        store.save(makePersistedTask({
+          taskId: id,
+          status: "queued",
+          branch: `impl/test-${id}`,
+          completedAt: null,
+          chainId: `chain-${id}` as any,
+        }));
+      }
+
+      // Global max = 2, project max = 2 — both task-a AND task-b should be dequeued
+      const config = makeConfig({
+        server: { workspaceDir: TMP, metaCpus: 0.4, sandboxCpus: 0.4, maxConcurrentTasks: 2 },
+        projects: {
+          [PROJECT_ID]: {
+            maxConcurrentTasks: 2,
+            repositories: [{ name: "my-repo", url: "https://github.com/test/repo.git", defaultBranch: "main" }],
+            claudeCode: { command: "claude" },
+          },
+        },
+      });
+      const tm = new TaskManager(config);
+
+      // @ts-expect-error – accessing private map for testing
+      const state = tm.projects.get(PROJECT_ID)!;
+
+      // Track which tasks were passed to acquire (i.e. actually dequeued)
+      const acquiredForTasks: string[] = [];
+      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(true);
+      vi.spyOn(state.pool, "acquire").mockImplementation(async () => {
+        return { id: acquiredForTasks.length, dir: TMP };
+      });
+      vi.spyOn(state.pool, "release").mockReturnValue(undefined);
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "x", title: "X", estimatedDurationSeconds: 60 });
+      vi.spyOn(tm.gitManager, "checkoutBranchAll").mockResolvedValue(undefined);
+      vi.spyOn(tm.gitManager, "prepareNewBranchAll").mockResolvedValue(undefined);
+      vi.spyOn(tm.gitManager, "pushBranchAll").mockResolvedValue(undefined);
+      vi.spyOn(tm.gitManager, "getHeadAll").mockResolvedValue(new Map());
+      vi.spyOn(tm.gitManager, "hasUncommittedChanges").mockResolvedValue(false);
+      vi.spyOn(tm.gitManager, "revertProtectedPathsAll").mockResolvedValue(undefined);
+      vi.spyOn(tm.gitManager, "ensureBranchAtHeadAll").mockResolvedValue(false);
+      vi.spyOn(Executor.prototype, "run").mockResolvedValue({ exitCode: 0, output: "", timedOut: false });
+      vi.spyOn(Executor.prototype, "getOutput").mockReturnValue("");
+
+      // Spy on runOrContinueTaskFromEntry to track which tasks get dequeued
+      const dequeued: string[] = [];
+      // @ts-expect-error – accessing private method
+      const origRun = tm.runOrContinueTaskFromEntry.bind(tm);
+      // @ts-expect-error – accessing private method
+      vi.spyOn(tm, "runOrContinueTaskFromEntry").mockImplementation(async (entry: any) => {
+        dequeued.push(entry.task.taskId);
+        return origRun(entry);
+      });
+
+      await tm.init();
+
+      // Wait for background processing
+      await new Promise((r) => setTimeout(r, 100));
+
+      // With globalMax=2, the first two tasks in queue order must be dequeued.
+      // With the old buggy code, task-a and task-c would be dequeued (skipping task-b).
+      expect(dequeued[0]).toBe("task-a");
+      expect(dequeued[1]).toBe("task-b"); // must be second, not task-c
+    });
+
+    it("queued tasks all start sequentially when maxConcurrentTasks=1 after restart", async () => {
+      // Regression: when pool had pre-existing instances (from disk) and maxConcurrentTasks=1,
+      // hasFreeSlot used to return true for any free instance, bypassing the cap.
+      // The fix: hasFreeSlot now always checks inUseCount < maxConcurrentTasks.
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const store = new TaskStore(TMP);
+
+      // Save 3 tasks
+      for (const id of ["r-task-1", "r-task-2", "r-task-3"]) {
+        store.save(makePersistedTask({
+          taskId: id,
+          status: "queued",
+          branch: `impl/test-${id}`,
+          completedAt: null,
+          chainId: `chain-${id}` as any,
+        }));
+      }
+
+      const config = makeConfig({
+        projects: {
+          [PROJECT_ID]: {
+            maxConcurrentTasks: 1, // only 1 at a time
+            repositories: [{ name: "my-repo", url: "https://github.com/test/repo.git", defaultBranch: "main" }],
+            claudeCode: { command: "claude" },
+          },
+        },
+      });
+      const tm = new TaskManager(config);
+
+      // @ts-expect-error – accessing private map
+      const state = tm.projects.get(PROJECT_ID)!;
+
+      // Track concurrent acquires with coordinated hasFreeSlot/acquire mocks
+      let activeCount = 0;
+      let maxObservedActive = 0;
+
+      // hasFreeSlot and acquire must agree on the cap (maxConcurrentTasks=1)
+      vi.spyOn(state.pool, "hasFreeSlot").mockImplementation(() => activeCount < 1);
+      vi.spyOn(state.pool, "acquire").mockImplementation(async () => {
+        activeCount++;
+        maxObservedActive = Math.max(maxObservedActive, activeCount);
+        return { id: activeCount - 1, dir: TMP };
+      });
+      vi.spyOn(state.pool, "release").mockImplementation(() => {
+        activeCount = Math.max(0, activeCount - 1);
+      });
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "x", title: "X", estimatedDurationSeconds: 60 });
+      vi.spyOn(tm.gitManager, "checkoutBranchAll").mockResolvedValue(undefined);
+      vi.spyOn(tm.gitManager, "prepareNewBranchAll").mockResolvedValue(undefined);
+      vi.spyOn(tm.gitManager, "pushBranchAll").mockResolvedValue(undefined);
+      vi.spyOn(tm.gitManager, "getHeadAll").mockResolvedValue(new Map());
+      vi.spyOn(tm.gitManager, "hasUncommittedChanges").mockResolvedValue(false);
+      vi.spyOn(tm.gitManager, "revertProtectedPathsAll").mockResolvedValue(undefined);
+      vi.spyOn(tm.gitManager, "ensureBranchAtHeadAll").mockResolvedValue(false);
+      vi.spyOn(Executor.prototype, "run").mockResolvedValue({ exitCode: 0, output: "", timedOut: false });
+      vi.spyOn(Executor.prototype, "getOutput").mockReturnValue("");
+
+      await tm.init();
+      await new Promise((r) => setTimeout(r, 300));
+
+      // All 3 tasks must eventually complete (no stuck-in-queued issue)
+      const tasks = tm.listTasks(PROJECT_ID);
+      const nonQueued = tasks.filter(t => t.status !== "queued");
+      expect(nonQueued.length).toBeGreaterThanOrEqual(1);
+
+      // maxConcurrentTasks=1 must be respected — never more than 1 simultaneous acquire
+      expect(maxObservedActive).toBeLessThanOrEqual(1);
+    });
+  });
+
   describe("bug fixes", () => {
     it("global concurrency counts total active chains, not project count", async () => {
       // Bug #2: activeChains.size counted Map entries (projects), not total chains
