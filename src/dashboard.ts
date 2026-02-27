@@ -194,6 +194,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       --btn-sec-bg:#252a3a;--btn-sec-fg:#94a3b8;--btn-sec-h:#2a2f42;--btn-ret-h:#78350f;
       --btn-cancel-bg:#3b0f0f;--btn-cancel-fg:#ef4444;--btn-cancel-h:#7f1d1d;
       --btn-edit-bg:#1e3a5f;--btn-edit-fg:#60a5fa;--btn-edit-h:#1e40af;
+      --btn-cont-bg:#064e3b;--btn-cont-fg:#34d399;--btn-cont-h:#065f46;
       --link:#60a5fa}
     [data-theme=light]{
       --bg:#f8fafc;--bg-card:#ffffff;--bg-head:#f1f5f9;--bg-code:#f1f5f9;--bg-inp:#ffffff;
@@ -207,6 +208,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       --btn-sec-bg:#f1f5f9;--btn-sec-fg:#475569;--btn-sec-h:#e2e8f0;--btn-ret-h:#fbbf24;
       --btn-cancel-bg:#fee2e2;--btn-cancel-fg:#dc2626;--btn-cancel-h:#fca5a5;
       --btn-edit-bg:#dbeafe;--btn-edit-fg:#2563eb;--btn-edit-h:#93c5fd;
+      --btn-cont-bg:#d1fae5;--btn-cont-fg:#059669;--btn-cont-h:#a7f3d0;
       --link:#2563eb}
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);padding:24px}
     header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
@@ -326,6 +328,8 @@ export function dashboardHtml(hasPassword: boolean): string {
     .btn-cancel:hover:not(:disabled){background:var(--btn-cancel-h)}
     .btn-edit{background:var(--btn-edit-bg);color:var(--btn-edit-fg)}
     .btn-edit:hover:not(:disabled){background:var(--btn-edit-h)}
+    .btn-cont{background:var(--btn-cont-bg);color:var(--btn-cont-fg)}
+    .btn-cont:hover:not(:disabled){background:var(--btn-cont-h)}
     .btn-pri{background:#3b82f6;color:#fff}
     .btn-pri:hover:not(:disabled){background:#2563eb}
     .form-g{margin-bottom:16px}
@@ -426,6 +430,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         <button class="btn btn-edit" id="task-edit" onclick="openEditTask()" style="display:none">Edit Task</button>
         <button class="btn btn-cancel" id="task-cancel" onclick="cancelTask()" style="display:none">Cancel Task</button>
         <button class="btn btn-ret" id="task-retry" onclick="retryTask()" style="display:none">Retry Task</button>
+        <button class="btn btn-cont" id="task-continue" onclick="openContinueTask()" style="display:none">Continue Task</button>
       </div>
     </div>
   </div>
@@ -447,6 +452,31 @@ export function dashboardHtml(hasPassword: boolean): string {
       <div class="modal-ft">
         <button class="btn btn-sec" onclick="closeEditTask()">Cancel</button>
         <button class="btn btn-pri" id="et-submit" onclick="submitEditTask()">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Continue Task Modal -->
+  <div id="ct-overlay" class="overlay" style="display:none" onclick="if(event.target===this)closeContinueTask()">
+    <div class="modal">
+      <div class="modal-hd">
+        <span class="modal-ttl">Continue Task</span>
+        <button class="modal-x" onclick="closeContinueTask()">&#x2715;</button>
+      </div>
+      <div class="modal-bd">
+        <div class="form-g">
+          <label class="form-lbl">Continuing task</label>
+          <div class="mono" id="ct-taskid" style="font-size:.82rem;padding:6px 0;color:var(--text2)"></div>
+        </div>
+        <div class="form-g">
+          <label class="form-lbl" for="ct-prompt">What should be done next?</label>
+          <textarea id="ct-prompt" class="form-inp" rows="8" placeholder="Describe what to implement next\u2026"></textarea>
+        </div>
+        <div id="ct-err" class="form-err" style="display:none"></div>
+      </div>
+      <div class="modal-ft">
+        <button class="btn btn-sec" onclick="closeContinueTask()">Cancel</button>
+        <button class="btn btn-cont" id="ct-submit" onclick="submitContinueTask()">Continue Task</button>
       </div>
     </div>
   </div>
@@ -565,6 +595,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       document.getElementById('task-retry').style.display='none';
       document.getElementById('task-cancel').style.display='none';
       document.getElementById('task-edit').style.display='none';
+      document.getElementById('task-continue').style.display='none';
       document.getElementById('task-overlay').style.display='flex';
       fetch('/dashboard/api/task/'+encodeURIComponent(taskId))
         .then(function(r){return r.json();})
@@ -575,6 +606,7 @@ export function dashboardHtml(hasPassword: boolean): string {
           document.getElementById('task-retry').style.display=active.includes(t.status)?'none':'';
           document.getElementById('task-cancel').style.display=active.includes(t.status)?'':'none';
           document.getElementById('task-edit').style.display=(t.status==='queued'||t.status==='starting')?'':'none';
+          document.getElementById('task-continue').style.display=(t.status==='completed')?'':'none';
           var prsHtml='None';
           if(t.pullRequests&&t.pullRequests.length){
             prsHtml=t.pullRequests.map(function(pr){
@@ -658,6 +690,34 @@ export function dashboardHtml(hasPassword: boolean): string {
         })
         .catch(function(){btn.disabled=false;alert('Failed to retry task');});
     }
+    function openContinueTask(){
+      if(!currentTaskData)return;
+      document.getElementById('ct-taskid').textContent=currentTaskId+(currentTaskData.title?' — '+currentTaskData.title:'');
+      document.getElementById('ct-prompt').value='';
+      document.getElementById('ct-err').style.display='none';
+      document.getElementById('ct-submit').disabled=false;
+      document.getElementById('ct-overlay').style.display='flex';
+      setTimeout(function(){document.getElementById('ct-prompt').focus();},50);
+    }
+    function closeContinueTask(){document.getElementById('ct-overlay').style.display='none';}
+    function submitContinueTask(){
+      var prompt=document.getElementById('ct-prompt').value.trim();
+      var errEl=document.getElementById('ct-err');
+      errEl.style.display='none';
+      if(!prompt){errEl.textContent='Prompt is required.';errEl.style.display='block';return;}
+      var btn=document.getElementById('ct-submit');
+      btn.disabled=true;
+      var body={projectId:currentTaskData.projectId,prompt:prompt,continueTaskId:currentTaskId};
+      fetch('/dashboard/api/task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          btn.disabled=false;
+          if(d.error){errEl.textContent='Error: '+d.error;errEl.style.display='block';return;}
+          closeContinueTask();
+          closeTask();
+        })
+        .catch(function(){btn.disabled=false;errEl.textContent='Failed to create continuation task.';errEl.style.display='block';});
+    }
     function retryAllFailed(){
       if(!confirm('Retry all failed tasks?'))return;
       var btn=document.getElementById('retry-failed-btn');
@@ -707,6 +767,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     document.addEventListener('keydown',function(e){
       if(e.key==='Escape'){
         if(document.getElementById('et-overlay').style.display!=='none')closeEditTask();
+        else if(document.getElementById('ct-overlay').style.display!=='none')closeContinueTask();
         else if(document.getElementById('task-overlay').style.display!=='none')closeTask();
         else if(document.getElementById('nt-overlay').style.display!=='none')closeNewTask();
       }
