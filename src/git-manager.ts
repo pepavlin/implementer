@@ -7,10 +7,10 @@ import type { RepositoryConfig } from "./config/config-types.js";
 function git(args: string[], cwd: string, githubToken?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     // When a GitHub token is provided, inject it via http.extraHeader using
-    // Basic auth (x-oauth-basic:TOKEN), which is what GitHub expects for git
-    // HTTPS operations (not Bearer, which is for the REST API).
+    // Basic auth (x-access-token:TOKEN), the format GitHub expects for PATs
+    // and fine-grained tokens in git HTTPS operations.
     const fullArgs = githubToken
-      ? ["-c", `http.https://github.com/.extraHeader=Authorization: Basic ${Buffer.from(`x-oauth-basic:${githubToken}`).toString("base64")}`, ...args]
+      ? ["-c", `http.https://github.com/.extraHeader=Authorization: Basic ${Buffer.from(`x-access-token:${githubToken}`).toString("base64")}`, ...args]
       : args;
     execFile("git", fullArgs, { cwd, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {

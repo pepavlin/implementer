@@ -74,7 +74,11 @@ export class TaskManager {
     dequeueAvailableTasks(): void {
         // Promote retrying tasks whose nextRetryAt has passed back into the queue
         const now = Date.now();
-        for (const task of this.tasks.values()) {
+        for (const task of Array.from(this.tasks.values()).sort(
+            (a, b) =>
+                new Date(a.data.startedAt).getTime() -
+                new Date(b.data.startedAt).getTime()
+        )) {
             if (
                 task.data.status === "retrying" &&
                 task.data.nextRetryAt &&
