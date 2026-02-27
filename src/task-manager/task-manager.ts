@@ -121,7 +121,7 @@ export class TaskManager {
         await this.dequeueAvailableTasks();
     }
 
-    private async dequeueAvailableTasks(): Promise<void> {
+    async dequeueAvailableTasks(): Promise<void> {
         for (const taskInQueue of this.queue) {
             if (this.activeChains.size >= this.globalMaxConcurrentTasks) break; // If any chain is active, skip dequeueing to respect serial constraint
             const entry = this.tasks.get(taskInQueue);
@@ -237,7 +237,7 @@ export class TaskManager {
         return entry.task;
     }
 
-    private getTaskEntry(projectId: ProjectId, taskId: TaskId): TaskEntry {
+    getTaskEntry(projectId: ProjectId, taskId: TaskId): TaskEntry {
         const entry = this.tasks.get(taskId);
         if (!entry || entry.task.projectId !== projectId) {
             throw new Error(`Task not found: ${taskId}`);

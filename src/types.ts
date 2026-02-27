@@ -27,6 +27,7 @@ export interface Task {
     status: TaskStatus;
     startedAt: string;
     completedAt: string | null;
+    nextRetryAt?: string; // ISO timestamp for when the next retry will be attempted, if status is "retrying"
     output: string;
     error?: string;
     pullRequests?: PullRequest[];
