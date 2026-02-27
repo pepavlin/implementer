@@ -633,6 +633,76 @@ describe("TaskManager", () => {
     });
   });
 
+  describe("retryTaskNow", () => {
+    it("throws TaskActiveError when task is not in retrying status (failed)", async () => {
+      const { TaskManager, TaskActiveError } = await import("../src/task-manager/task-manager.js");
+      const store = new TaskStore(TMP);
+      store.save(makePersistedTask({ taskId: "fail-task", status: "failed" }));
+
+      const tm = new TaskManager(makeConfig());
+      await tm.init();
+
+      await expect(tm.retryTaskNow(PROJECT_ID, "fail-task")).rejects.toBeInstanceOf(TaskActiveError);
+    });
+
+    it("throws TaskActiveError when task is queued", async () => {
+      const { TaskManager, TaskActiveError } = await import("../src/task-manager/task-manager.js");
+      const store = new TaskStore(TMP);
+      store.save(makePersistedTask({ taskId: "queued-task", status: "completed" }));
+
+      const tm = new TaskManager(makeConfig());
+      await tm.init();
+
+      tm.tasks.get("queued-task")!.task.status = "queued";
+
+      await expect(tm.retryTaskNow(PROJECT_ID, "queued-task")).rejects.toBeInstanceOf(TaskActiveError);
+    });
+
+    it("throws for unknown task", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const tm = new TaskManager(makeConfig());
+
+      await expect(tm.retryTaskNow(PROJECT_ID, "nonexistent")).rejects.toThrow("Task not found");
+    });
+
+    it("clears the retry timer and enqueues the task immediately", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const store = new TaskStore(TMP);
+      store.save(makePersistedTask({
+        taskId: "retrying-task",
+        status: "completed",
+        branch: "impl/test-retrying-task",
+        attempt: 2,
+      }));
+
+      const tm = new TaskManager(makeConfig());
+
+      // @ts-expect-error - accessing private projects map for testing
+      const state = tm.projects.get(PROJECT_ID)!;
+      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(false);
+
+      await tm.init();
+
+      // Simulate retrying state with a pending timeout
+      const entry = tm.tasks.get("retrying-task")!;
+      entry.task.status = "retrying";
+      entry.task.nextRetryAt = new Date(Date.now() + 60_000).toISOString();
+      const fakeTimeout = setTimeout(() => {}, 99999);
+      entry.retryTimeoutId = fakeTimeout;
+
+      const result = await tm.retryTaskNow(PROJECT_ID, "retrying-task");
+
+      // Timeout should be cleared and entry removed
+      expect(entry.retryTimeoutId).toBeUndefined();
+      // nextRetryAt should be cleared
+      expect(entry.task.nextRetryAt).toBeUndefined();
+      // Task should be queued
+      expect(result.status).toBe("queued");
+      // Task should be in the queue
+      expect(tm.queue).toContain("retrying-task");
+    });
+  });
+
   describe("project isolation", () => {
     it("getTask returns undefined for task belonging to another project", async () => {
       const { TaskManager } = await import("../src/task-manager/task-manager.js");

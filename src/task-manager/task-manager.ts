@@ -465,6 +465,37 @@ export class TaskManager {
     }
 
     /**
+     * Immediately retry a task that is currently in "retrying" state (waiting for its
+     * scheduled delay). Clears the pending retry timer and enqueues the task right away,
+     * bypassing the configured delay. Throws TaskActiveError for any other status.
+     */
+    async retryTaskNow(projectId: ProjectId, taskId: TaskId): Promise<Task> {
+        const entry = this.getTaskEntry(projectId, taskId);
+        const task = entry.task;
+
+        if (task.status !== "retrying") {
+            throw new TaskActiveError(task.status);
+        }
+
+        // Clear the scheduled retry timer so it doesn't fire later
+        if (entry.retryTimeoutId !== undefined) {
+            clearTimeout(entry.retryTimeoutId);
+            entry.retryTimeoutId = undefined;
+        }
+
+        // Clear the scheduled timestamp — the retry is happening now
+        task.nextRetryAt = undefined;
+
+        console.log(`[${taskId}] Immediate retry requested (bypassing scheduled delay)`);
+
+        // Push to front of queue for priority execution
+        this.push_front(projectId, taskId);
+        this.dequeueAvailableTasks();
+
+        return task;
+    }
+
+    /**
      * Cancel a task that is queued, running, or retrying.
      * - Queued: removed from the queue immediately, marked as cancelled.
      * - Running: executor process is killed; executeTask will detect the cancelled flag and clean up.

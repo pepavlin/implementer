@@ -442,6 +442,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         <button class="btn btn-edit" id="task-edit" onclick="openEditTask()" style="display:none">Edit Task</button>
         <button class="btn btn-cancel" id="task-cancel" onclick="cancelTask()" style="display:none">Cancel Task</button>
         <button class="btn btn-ret" id="task-retry" onclick="retryTask()" style="display:none">Retry Task</button>
+        <button class="btn btn-ret" id="task-retry-now" onclick="retryNow()" style="display:none">Retry Now</button>
         <button class="btn btn-cont" id="task-continue" onclick="openContinueTask()" style="display:none">Continue Task</button>
       </div>
     </div>
@@ -619,6 +620,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       document.getElementById('task-badge').innerHTML='';
       document.getElementById('task-bd').innerHTML='<div class="muted" style="text-align:center;padding:32px">Loading\u2026</div>';
       document.getElementById('task-retry').style.display='none';
+      document.getElementById('task-retry-now').style.display='none';
       document.getElementById('task-cancel').style.display='none';
       document.getElementById('task-edit').style.display='none';
       document.getElementById('task-continue').style.display='none';
@@ -630,6 +632,7 @@ export function dashboardHtml(hasPassword: boolean): string {
           document.getElementById('task-badge').innerHTML=badge(t.status,t.completedAt);
           var active=['queued','starting','running','retrying'];
           document.getElementById('task-retry').style.display=active.includes(t.status)?'none':'';
+          document.getElementById('task-retry-now').style.display=(t.status==='retrying')?'':'none';
           document.getElementById('task-cancel').style.display=active.includes(t.status)?'':'none';
           document.getElementById('task-edit').style.display=(t.status==='queued'||t.status==='starting')?'':'none';
           document.getElementById('task-continue').style.display=(t.status==='completed')?'':'none';
@@ -721,6 +724,19 @@ export function dashboardHtml(hasPassword: boolean): string {
           closeTask();
         })
         .catch(function(){btn.disabled=false;alert('Failed to retry task');});
+    }
+    function retryNow(){
+      if(!currentTaskId)return;
+      var btn=document.getElementById('task-retry-now');
+      btn.disabled=true;
+      fetch('/dashboard/api/task/'+encodeURIComponent(currentTaskId)+'/retry-now',{method:'POST',headers:{'Content-Type':'application/json'}})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          btn.disabled=false;
+          if(d.error){alert('Error: '+d.error);return;}
+          closeTask();
+        })
+        .catch(function(){btn.disabled=false;alert('Failed to retry task now');});
     }
     function openContinueTask(){
       if(!currentTaskData)return;
@@ -1107,6 +1123,44 @@ export function registerDashboardRoutes(
         }
         try {
             const retried = await taskManager.retryTask(
+                task.projectId,
+                task.taskId
+            );
+            res.json({
+                taskId: retried.taskId,
+                branch: retried.branch,
+                status: retried.status
+            });
+        } catch (err) {
+            if (err instanceof TaskActiveError) {
+                res.status(409).json({ error: err.message });
+                return;
+            }
+            res.status(500).json({
+                error:
+                    err instanceof Error ? err.message : "Internal server error"
+            });
+        }
+    });
+
+    app.post("/dashboard/api/task/:taskId/retry-now", async (req, res) => {
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        const task = taskManager
+            .listAllTasks()
+            .find((t) => t.taskId === req.params.taskId);
+        if (!task) {
+            res.status(404).json({ error: "Task not found" });
+            return;
+        }
+        try {
+            const retried = await taskManager.retryTaskNow(
                 task.projectId,
                 task.taskId
             );
