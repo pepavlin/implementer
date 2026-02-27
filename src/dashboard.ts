@@ -337,9 +337,20 @@ export function dashboardHtml(hasPassword: boolean): string {
     .pr-draft{background:var(--b-pr-draft-bg);color:var(--b-pr-draft-fg)}
     .pr-merged{background:var(--b-pr-merged-bg);color:var(--b-pr-merged-fg)}
     .pr-closed{background:var(--b-pr-closed-bg);color:var(--b-pr-closed-fg)}
-    .stat-has-open-prs{box-shadow:0 0 0 1px rgba(74,222,128,.35),0 0 12px rgba(74,222,128,.12)}
     .open-pr-row td:first-child{border-left:3px solid #4ade8070!important}
-    .pr-indicators{display:inline-flex;gap:4px;margin-left:6px;vertical-align:middle;flex-wrap:wrap}
+    .tasks-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+    .tasks-header .section-title{margin-bottom:0}
+    .open-prs-panel{display:flex;flex-direction:column;align-items:flex-end;cursor:pointer;padding:8px 16px;border-radius:10px;background:var(--bg-card);border:1px solid var(--border2);transition:border-color .2s,box-shadow .2s}
+    .open-prs-panel:hover{border-color:var(--b-pr-open-fg);box-shadow:0 0 0 1px rgba(74,222,128,.3),0 0 10px rgba(74,222,128,.1)}
+    .open-prs-label{font-size:.65rem;color:var(--b-pr-open-fg);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+    .open-prs-count{font-size:2.4rem;font-weight:800;line-height:1;color:var(--b-pr-open-fg)}
+    .th-pr{width:90px;text-align:center}
+    .td-pr{text-align:center;white-space:nowrap}
+    .pr-btn{display:inline-flex;align-items:center;justify-content:center;padding:5px 10px;border-radius:4px;font-size:.72rem;font-weight:700;text-decoration:none;white-space:nowrap;transition:filter .15s,box-shadow .15s;border:1px solid transparent}
+    .pr-btn+.pr-btn{margin-left:4px}
+    .pr-btn:hover{filter:brightness(1.15);box-shadow:0 0 6px rgba(74,222,128,.3)}
+    .pr-btn-open{background:var(--b-pr-open-bg);color:var(--b-pr-open-fg);border-color:rgba(74,222,128,.25)}
+    .pr-btn-draft{background:var(--b-pr-draft-bg);color:var(--b-pr-draft-fg);border-color:rgba(148,163,184,.2)}
     .proj-tag{background:var(--tag-bg);padding:2px 8px;border-radius:4px;font-size:.73rem;color:var(--text2)}
     .mono{font-family:ui-monospace,'SF Mono',monospace;font-size:.76rem;color:var(--text2)}
     .ttitle{font-weight:500;color:var(--text5)}
@@ -448,12 +459,17 @@ export function dashboardHtml(hasPassword: boolean): string {
     <div class="stat"><div class="stat-label">Retrying</div><div class="stat-val ct" id="st">\u2014</div></div>
     <div class="stat"><div class="stat-label">Completed</div><div class="stat-val cc" id="sc">\u2014</div></div>
     <div class="stat"><div class="stat-label">Failed</div><div class="stat-val cf" id="sf">\u2014</div></div>
-    <div class="stat" id="stat-open-prs" style="cursor:pointer" onclick="setFilter('open-prs')" title="Click to filter tasks with open PRs"><div class="stat-label" id="spr-lbl" style="color:var(--b-pr-open-fg)">Open PRs</div><div class="stat-val" id="spr" style="color:var(--b-pr-open-fg)">\u2014</div></div>
   </div>
   <div class="section-title">Projects</div>
   <div class="projects" id="projects"><div class="muted" style="font-size:.82rem">Loading\u2026</div></div>
   <div class="proj-hint" id="proj-hint">Click a project card to filter tasks by project.</div>
-  <div class="section-title">Tasks</div>
+  <div class="tasks-header">
+    <div class="section-title">Tasks</div>
+    <div class="open-prs-panel" id="open-prs-panel" style="display:none" onclick="setFilter('open-prs')" title="Click to filter tasks with open PRs">
+      <div class="open-prs-label">Open PRs</div>
+      <div class="open-prs-count" id="spr">\u2014</div>
+    </div>
+  </div>
   <div class="filters" id="filters">
     <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">All</button>
     <button class="filter-btn" data-filter="running" onclick="setFilter('running')">Running</button>
@@ -469,9 +485,9 @@ export function dashboardHtml(hasPassword: boolean): string {
   <div class="table-wrap">
   <table>
     <thead><tr>
-      <th>Status</th><th>Project</th><th class="th-taskid">Task ID</th><th>Title / Prompt</th><th class="th-dur">Duration</th><th class="th-started">Started</th>
+      <th>Status</th><th>Project</th><th class="th-taskid">Task ID</th><th>Title / Prompt</th><th class="th-dur">Duration</th><th class="th-started">Started</th><th class="th-pr">PR</th>
     </tr></thead>
-    <tbody id="tb"><tr><td colspan="6" class="empty">Connecting\u2026</td></tr></tbody>
+    <tbody id="tb"><tr><td colspan="7" class="empty">Connecting\u2026</td></tr></tbody>
   </table>
   </div>
 
@@ -654,19 +670,21 @@ export function dashboardHtml(hasPassword: boolean): string {
         if(currentFilter==='open-prs')msg='No tasks with open pull requests';
         else if(currentFilter!=='all')msg+=' with status \u201c'+currentFilter+'\u201d';
         if(selectedProjects.size>0)msg+=' in selected project'+(selectedProjects.size>1?'s':'');
-        tb.innerHTML='<tr><td colspan="6" class="empty">'+msg+'</td></tr>';return;
+        tb.innerHTML='<tr><td colspan="7" class="empty">'+msg+'</td></tr>';return;
       }
       tb.innerHTML=filtered.map(function(t){
         var rowClass='clickable tr-'+esc(t.status);
         if(t.status==='completed'&&!isRecentCompleted(t.completedAt))rowClass+=' tr-completed-old';
         if(t.status==='completed'&&!viewedTasks.has(t.taskId))rowClass+=' tr-completed-new';
-        var openPrs=t.pullRequests?t.pullRequests.filter(function(pr){return pr.state==='open'||pr.state==='draft'||!pr.state;}).length:0;
-        if(openPrs>0)rowClass+=' open-pr-row';
-        var prIndicators='';
-        if(t.pullRequests&&t.pullRequests.length){
-          prIndicators='<span class="pr-indicators">'
-            +t.pullRequests.map(function(pr){return prStateBadge(pr.state);}).join('')
-            +'</span>';
+        var activePrs=t.pullRequests?t.pullRequests.filter(function(pr){return pr.state==='open'||pr.state==='draft'||!pr.state;}):[];
+        if(activePrs.length>0)rowClass+=' open-pr-row';
+        var prBtns='';
+        if(activePrs.length){
+          prBtns=activePrs.map(function(pr){
+            var num=pr.url?pr.url.split('/').pop():'PR';
+            var stateClass=pr.state==='draft'?'pr-btn-draft':'pr-btn-open';
+            return '<a class="pr-btn '+stateClass+'" href="'+esc(pr.url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="'+(pr.state==='draft'?'Draft':'Open')+' PR #'+esc(num)+' \u2014 '+esc(pr.repo||'')+'">'+(pr.state==='draft'?'\u25CB':'\u25CF')+'&nbsp;#'+esc(num)+'</a>';
+          }).join('');
         }
         var progressHtml='';
         if((t.status==='running'||t.status==='starting')&&t.estimatedDurationSeconds&&t.durationSeconds!==null){
@@ -680,9 +698,10 @@ export function dashboardHtml(hasPassword: boolean): string {
           +'<td>'+badge(t.status,t.completedAt,t.taskId)+'</td>'
           +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
           +'<td class="td-taskid"><span class="mono">'+esc(t.taskId)+'</span></td>'
-          +'<td>'+(t.title?'<div class="ttitle">'+esc(t.title)+prIndicators+'</div>':'<div class="ttitle">'+prIndicators+'</div>')+'<div class="tprompt">'+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+'</div>'+progressHtml+'</td>'
+          +'<td>'+(t.title?'<div class="ttitle">'+esc(t.title)+'</div>':'')+'<div class="tprompt">'+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+'</div>'+progressHtml+'</td>'
           +'<td class="td-dur mono">'+dur(t.durationSeconds)+'</td>'
           +'<td class="td-started mono">'+fmtDate(t.startedAt)+'</td>'
+          +'<td class="td-pr">'+(prBtns||'')+'</td>'
           +'</tr>';
       }).join('');
       tb.querySelectorAll('tr.clickable').forEach(function(row){
@@ -919,12 +938,12 @@ export function dashboardHtml(hasPassword: boolean): string {
       document.getElementById('sf').textContent=stats.failed;
       var openPrs=stats.openPrs||0;
       document.getElementById('spr').textContent=openPrs;
+      var panel=document.getElementById('open-prs-panel');
+      if(panel)panel.style.display=openPrs>0?'flex':'none';
       var srCard=document.getElementById('stat-running');
       var sqCard=document.getElementById('stat-queued');
-      var sprCard=document.getElementById('stat-open-prs');
       var srLbl=document.getElementById('sr-lbl');
       var sqLbl=document.getElementById('sq-lbl');
-      var sprLbl=document.getElementById('spr-lbl');
       if(stats.running>0){
         srCard.className='stat stat-has-running';
         srLbl.innerHTML='<span class="stat-active-dot cr"></span>Running';
@@ -938,13 +957,6 @@ export function dashboardHtml(hasPassword: boolean): string {
       }else{
         sqCard.className='stat';
         sqLbl.innerHTML='Queued';
-      }
-      if(openPrs>0){
-        sprCard.className='stat stat-has-open-prs';
-        sprLbl.innerHTML='<span class="stat-active-dot" style="background:var(--b-pr-open-fg)"></span>Open PRs';
-      }else{
-        sprCard.className='stat';
-        sprLbl.innerHTML='Open PRs';
       }
     }
     function refreshData(){
