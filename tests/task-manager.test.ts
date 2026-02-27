@@ -1134,6 +1134,64 @@ describe("TaskManager", () => {
 
       expect(() => tm.cancelTask(PROJECT_ID, "nonexistent" as any)).toThrow("Task not found");
     });
+
+    it("calls dequeueAvailableTasks after cancelling a queued task", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const store = new TaskStore(TMP);
+      store.save(makePersistedTask({ taskId: "dq-queued", status: "completed" }));
+
+      const tm = new TaskManager(makeConfig());
+      await tm.init();
+
+      const spy = vi.spyOn(tm, "dequeueAvailableTasks");
+
+      // Manually set to queued to simulate a waiting task
+      tm.tasks.get("dq-queued")!.task.status = "queued";
+
+      tm.cancelTask(PROJECT_ID, "dq-queued");
+
+      // dequeueAvailableTasks should be triggered (fire-and-forget)
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it("calls dequeueAvailableTasks after cancelling a retrying task", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const store = new TaskStore(TMP);
+      store.save(makePersistedTask({ taskId: "dq-retrying", status: "completed" }));
+
+      const tm = new TaskManager(makeConfig());
+      await tm.init();
+
+      const spy = vi.spyOn(tm, "dequeueAvailableTasks");
+
+      const entry = tm.tasks.get("dq-retrying")!;
+      entry.task.status = "retrying";
+      entry.retryTimeoutId = setTimeout(() => {}, 99999);
+
+      tm.cancelTask(PROJECT_ID, "dq-retrying");
+
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it("calls dequeueAvailableTasks after cancelling a running task", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const store = new TaskStore(TMP);
+      store.save(makePersistedTask({ taskId: "dq-running", status: "completed" }));
+
+      const tm = new TaskManager(makeConfig());
+      await tm.init();
+
+      const spy = vi.spyOn(tm, "dequeueAvailableTasks");
+
+      const entry = tm.tasks.get("dq-running")!;
+      entry.task.status = "running";
+      // Provide a mock executor so kill() doesn't throw
+      entry.executor = { kill: vi.fn() } as any;
+
+      tm.cancelTask(PROJECT_ID, "dq-running");
+
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
   });
 
 
@@ -1608,6 +1666,40 @@ describe("TaskManager", () => {
       expect(prepareSpy).toHaveBeenCalled();
       // checkoutBranchAll should NOT be called for a new standalone task
       expect(checkoutSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("dequeueAvailableTasks triggered on workspace acquisition failure", () => {
+    it("calls dequeueAvailableTasks when pool.acquire fails in runOrContinueTaskFromEntry", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({
+        taskId: "acquire-fail-task",
+        status: "queued",
+        branch: "impl/test-acquire-fail-task",
+        completedAt: null,
+      }));
+
+      const tm = new TaskManager(makeConfig());
+
+      // @ts-expect-error - accessing private projects map for testing
+      const state = tm.projects.get(PROJECT_ID)!;
+
+      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(true);
+      vi.spyOn(state.pool, "acquire").mockRejectedValue(new Error("no workspace available"));
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test", estimatedDurationSeconds: 60 });
+
+      await tm.init();
+
+      // Wait for the async catch block to run
+      await new Promise((r) => setTimeout(r, 200));
+
+      const task = tm.getTask(PROJECT_ID, "acquire-fail-task");
+      // Task should be marked as failed after acquire error
+      expect(task?.status).toBe("failed");
+      expect(task?.error).toContain("no workspace available");
     });
   });
 
