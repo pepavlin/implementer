@@ -30,8 +30,10 @@ export interface ClaudeCodeConfig {
     mcpServers?: Record<string, McpServerConfig>;
     maxOutputTokens?: number;
     /** Maximum wall-clock seconds a single executor.run() call may take before the container is killed.
-     *  When exceeded the task is marked failed and the normal retry logic applies.
-     *  Minimum 60 seconds. Recommended: 3600 (1 hour) to catch runaway tasks. */
+     *  Defaults to 3600 (1 hour). Minimum 60 seconds.
+     *  When exceeded the task is set to **retrying** (not failed) and its branch is preserved
+     *  so the next run (after server restart or manual /retry) continues from where it left off.
+     *  Unlike regular failures, timeouts always retry regardless of whether errorRetry is configured. */
     timeoutSeconds?: number;
 }
 
