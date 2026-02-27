@@ -1,6 +1,13 @@
 import { join } from "node:path";
 import { nanoid } from "nanoid";
-import type { ChainId, PersistedTask, ProjectId, Task, TaskCreateRequest, TaskId } from "../types.js";
+import type {
+    ChainId,
+    PersistedTask,
+    ProjectId,
+    Task,
+    TaskCreateRequest,
+    TaskId
+} from "../types.js";
 import { GitManager } from "../git-manager.js";
 import { Executor } from "../executor.js";
 import { WorkspacePool } from "../workspace-pool.js";
@@ -11,18 +18,15 @@ import { ProjectState, TaskEntry } from "./types.js";
 import { TaskActiveError, TaskCancelError, TaskEditError } from "./errors.js";
 import { BadRequestError } from "../errors.js";
 import { fireWebhook } from "./utils.js";
-import {
-    executeTask,
-    scheduleRetry,
-    prepareAndRunTask
-} from "./task-runner.js";
+import { executeTask, scheduleRetry, prepareMetadata } from "./task-runner.js";
+import { nan } from "zod/v4";
 
 export { TaskActiveError, TaskCancelError, TaskEditError };
 
 export class TaskManager {
     // Global stuff
     serverWorkspaceDir: string;
-    private globalMaxConcurrentTasks: number | undefined;
+    private globalMaxConcurrentTasks: number;
 
     // Projects
     private projects: Map<ProjectId, ProjectState> = new Map();
@@ -31,14 +35,14 @@ export class TaskManager {
     private store: TaskStore;
 
     tasks: Map<TaskId, TaskEntry> = new Map();
-    /** Per-project FIFO queues of taskIds waiting to run. */
-    queues: Map<ProjectId, TaskId[]> = new Map();
-    /** Per-project set of chain IDs that have a task currently running. */
+    /** FIFO queue of taskIds waiting to run. */
+    queue: TaskId[] = [];
+    /** Set of chain IDs that have a task currently running. */
     private activeChains: Map<ProjectId, Set<ChainId>> = new Map();
 
     constructor(config: Config) {
         this.serverWorkspaceDir = config.server.workspaceDir;
-        this.globalMaxConcurrentTasks = config.server.maxConcurrentTasks;
+        this.globalMaxConcurrentTasks = config.server.maxConcurrentTasks ?? 3;
 
         this.gitManager = new GitManager();
         this.store = new TaskStore(config.server.workspaceDir);
@@ -70,7 +74,7 @@ export class TaskManager {
         }
     }
 
-    persistEntry(entry: TaskEntry): void {
+    saveTask(entry: TaskEntry): void {
         this.store.save({ ...entry.task, workspaceId: entry.workspaceId });
     }
 
@@ -80,15 +84,7 @@ export class TaskManager {
         return state;
     }
 
-    private requireEntry(projectId: ProjectId, taskId: TaskId): TaskEntry {
-        const entry = this.tasks.get(taskId);
-        if (!entry || entry.task.projectId !== projectId) {
-            throw new Error(`Task not found: ${taskId}`);
-        }
-        return entry;
-    }
-
-    private finishTask(
+    finishTask(
         entry: TaskEntry,
         status: "completed" | "failed" | "cancelled",
         error?: string
@@ -98,7 +94,7 @@ export class TaskManager {
         if (!entry.task.completedAt) {
             entry.task.completedAt = new Date().toISOString();
         }
-        this.persistEntry(entry);
+        this.saveTask(entry);
     }
 
     /**
@@ -118,16 +114,89 @@ export class TaskManager {
         );
 
         for (const pt of persisted) {
-            this.recoverTask(pt);
+            await this.recoverTask(pt);
         }
-
-        // Resume interrupted tasks
-        await this.resumeInterruptedTasks();
 
         // Try to start any queued tasks (capacity may be available after resumption)
-        for (const [projectId, state] of this.projects) {
-            this.tryDequeue(projectId, state);
+        await this.dequeueAvailableTasks();
+    }
+
+    private async dequeueAvailableTasks(): Promise<void> {
+        for (const taskInQueue of this.queue) {
+            if (this.activeChains.size >= this.globalMaxConcurrentTasks) break; // If any chain is active, skip dequeueing to respect serial constraint
+            const entry = this.tasks.get(taskInQueue);
+            if (!entry) continue;
+            if (!this.canTaskBeDequeued(entry)) continue;
+
+            await this.runOrContinueTaskFromEntry(entry);
         }
+    }
+
+    private canTaskBeDequeued(taskEntry: TaskEntry): boolean {
+        // Check if another task in chain is active
+        if (
+            this.isChainActive(taskEntry.task.projectId, taskEntry.task.chainId)
+        )
+            return false;
+
+        // Check project capacity
+        const state = this.requireProject(taskEntry.task.projectId);
+        if (!state.pool.hasFreeSlot()) return false;
+
+        return true;
+    }
+
+    private async runOrContinueTaskFromEntry(entry: TaskEntry): Promise<void> {
+        const task = entry.task;
+        const projectId = task.projectId;
+        const state = this.requireProject(projectId);
+
+        // Update status to starting
+        task.status = "starting";
+        this.saveTask(entry);
+
+        // Mark chain as active immediately (synchronously) before any async work
+        this.markChainActive(projectId, task.chainId);
+
+        // If metadata not exist, generate
+        if (!task.branch) {
+            await prepareMetadata(task, state, this, entry);
+        }
+
+        entry.executor = new Executor(
+            state.config.claudeCode,
+            state.tokenManager
+        );
+
+        state.pool
+            .acquire(state.config.repositories, state.config.auth?.githubToken)
+            .then((workspace) => {
+                entry.workspaceId = workspace.id;
+                task.status = "running";
+                this.saveTask(entry);
+                return executeTask(
+                    task,
+                    workspace,
+                    state,
+                    this,
+                    entry.checkoutBranch
+                );
+            })
+            .catch((err) => {
+                console.error(`[${task.taskId}] Dequeue/acquire failed:`, err);
+                this.finishTask(
+                    entry,
+                    "failed",
+                    err instanceof Error ? err.message : String(err)
+                );
+                // Release chain lock on failure
+                if (task.chainId !== undefined) {
+                    this.unmarkChainActive(projectId, task.chainId);
+                }
+                if (task.callbackUrl) {
+                    fireWebhook(task.taskId, task.status, task.callbackUrl);
+                }
+            });
     }
 
     private recoverTask(pt: PersistedTask): void {
@@ -137,132 +206,43 @@ export class TaskManager {
             pt.status = "interrupted";
             pt.output = "";
             this.store.save(pt);
-            console.log(
-                `[task-manager] Task ${pt.taskId} marked as interrupted (was running)`
-            );
-            // Tasks waiting for a retry delay — the setTimeout is gone after restart.
-            // Re-queue them so the next attempt runs as soon as capacity is available.
         } else if (pt.status === "retrying") {
             pt.status = "queued";
             this.store.save(pt);
-            console.log(
-                `[task-manager] Task ${pt.taskId} re-enqueued (was retrying)`
-            );
         } else if (pt.status === "starting") {
             pt.status = "queued";
             this.store.save(pt);
-            console.log(
-                `[task-manager] Task ${pt.taskId} re-enqueued (was starting)`
-            );
         }
 
-        // Populate in-memory map (no live executor for historical tasks)
-        // For re-queued retrying tasks, preserve the branch as checkoutBranch so
-        // tryDequeue checks out the existing branch instead of creating a new one.
-        const checkoutBranch =
-            pt.status === "queued" && pt.attempt > 1
-                ? (pt.branch ?? undefined)
-                : undefined;
-
+        // Continue in branch if exists
         this.tasks.set(pt.taskId, {
             task: pt,
             executor: null,
             workspaceId: pt.workspaceId,
-            checkoutBranch
+            checkoutBranch: pt.branch ?? undefined
         });
 
-        // Re-enqueue tasks that were waiting in the queue before restart
-        if (pt.status === "queued") {
-            this.enqueue(pt.projectId, pt.taskId);
-            console.log(`[task-manager] Task ${pt.taskId} re-enqueued`);
+        switch (pt.status) {
+            case "queued":
+                this.enqueue(pt.projectId, pt.taskId);
+                break;
+            case "interrupted":
+                this.push_front(pt.projectId, pt.taskId);
+                break;
         }
     }
-
-    private async resumeInterruptedTasks(): Promise<void> {
-        const interrupted = Array.from(this.tasks.values()).filter(
-            (e) => e.task.status === "interrupted"
-        );
-
-        if (interrupted.length === 0) return;
-        console.log(
-            `[task-manager] Resuming ${interrupted.length} interrupted task(s)...`
-        );
-
-        for (const entry of interrupted) {
-            const state = this.projects.get(entry.task.projectId);
-            if (!state) {
-                console.error(
-                    `[task-manager] Unknown project "${entry.task.projectId}" for task ${entry.task.taskId} — marking as failed`
-                );
-                this.finishTask(
-                    entry,
-                    "failed",
-                    `Unknown project: ${entry.task.projectId}`
-                );
-                continue;
-            }
-
-            try {
-                const workspace = await state.pool.acquireExisting(
-                    entry.workspaceId!,
-                    state.config.repositories
-                );
-                const executor = new Executor(
-                    state.config.claudeCode,
-                    state.tokenManager
-                );
-                entry.executor = executor;
-                entry.task.status = "running";
-                entry.task.output = "";
-
-                // Mark chain as active before resuming so tryDequeue respects the serial constraint
-                if (entry.task.chainId !== undefined) {
-                    this.markChainActive(
-                        entry.task.projectId,
-                        entry.task.chainId
-                    );
-                }
-
-                this.persistEntry(entry);
-
-                console.log(
-                    `[task-manager] Resuming task ${entry.task.taskId} on workspace ${entry.workspaceId}`
-                );
-
-                // Mark this resumption so that a failure skips the normal retry delay
-                entry.resumedFromRestart = true;
-
-                // Fire in background — resume by checking out the existing branch
-                executeTask(
-                    entry.task,
-                    workspace,
-                    state,
-                    this,
-                    entry.task.branch ?? undefined
-                ).catch((err) => {
-                    console.error(
-                        `Task ${entry.task.taskId} resumption failed:`,
-                        err
-                    );
-                });
-            } catch (err) {
-                console.error(
-                    `[task-manager] Failed to resume task ${entry.task.taskId}:`,
-                    err
-                );
-                this.finishTask(
-                    entry,
-                    "failed",
-                    `Resumption failed: ${err instanceof Error ? err.message : String(err)}`
-                );
-            }
-        }
-    }
-
     getTask(projectId: ProjectId, taskId: TaskId): Task | undefined {
         const entry = this.tasks.get(taskId);
         if (!entry || entry.task.projectId !== projectId) return undefined;
         return entry.task;
+    }
+
+    private getTaskEntry(projectId: ProjectId, taskId: TaskId): TaskEntry {
+        const entry = this.tasks.get(taskId);
+        if (!entry || entry.task.projectId !== projectId) {
+            throw new Error(`Task not found: ${taskId}`);
+        }
+        return entry;
     }
 
     listTasks(projectId: ProjectId, filters?: { chainId?: ChainId }): Task[] {
@@ -280,19 +260,6 @@ export class TaskManager {
                 }
                 return true;
             })
-            .map((entry) => entry.task);
-    }
-
-    /** Returns all active tasks (queued, running, retrying) across all projects. */
-    listAllActiveTasks(): Task[] {
-        return Array.from(this.tasks.values())
-            .filter(
-                (entry) =>
-                    entry.task.status === "queued" ||
-                    entry.task.status === "starting" ||
-                    entry.task.status === "running" ||
-                    entry.task.status === "retrying"
-            )
             .map((entry) => entry.task);
     }
 
@@ -316,22 +283,25 @@ export class TaskManager {
         return entry.task.output;
     }
 
-    shouldQueue(projectId: ProjectId, state: ProjectState): boolean {
-        const runningCount = Array.from(this.tasks.values()).filter(
-            (e) => e.task.status === "running"
-        ).length;
-        if (
-            this.globalMaxConcurrentTasks !== undefined &&
-            runningCount >= this.globalMaxConcurrentTasks
-        ) {
-            return true;
+    push_front(projectId: ProjectId, taskId: TaskId): void {
+        const entry = this.tasks.get(taskId);
+        if (!entry || entry.task.projectId !== projectId) {
+            throw new Error(`Task not found: ${taskId}`);
         }
-        return !state.pool.hasFreeSlot();
-    }
+        entry.task.status = "queued";
+        this.saveTask(entry);
 
+        this.queue.unshift(taskId);
+    }
     enqueue(projectId: ProjectId, taskId: TaskId): void {
-        if (!this.queues.has(projectId)) this.queues.set(projectId, []);
-        this.queues.get(projectId)!.push(taskId);
+        const entry = this.tasks.get(taskId);
+        if (!entry || entry.task.projectId !== projectId) {
+            throw new Error(`Task not found: ${taskId}`);
+        }
+        entry.task.status = "queued";
+        this.saveTask(entry);
+
+        this.queue.push(taskId);
     }
 
     markChainActive(projectId: ProjectId, chainId: ChainId): void {
@@ -363,107 +333,14 @@ export class TaskManager {
         return current;
     }
 
-    tryDequeue(projectId: ProjectId, state: ProjectState): void {
-        const queue = this.queues.get(projectId);
-        if (!queue || queue.length === 0) return;
-        if (this.shouldQueue(projectId, state)) return;
-
-        // Find the first task whose chain is not currently active.
-        const idx = queue.findIndex((tid) => {
-            const e = this.tasks.get(tid);
-            if (!e) return true; // stale entry — will be cleaned up below
-            const cid = e.task.chainId;
-            return cid === undefined || !this.isChainActive(projectId, cid);
-        });
-
-        if (idx === -1) return; // All queued tasks are waiting for their chain to free up
-
-        const taskId = queue.splice(idx, 1)[0];
-        const entry = this.tasks.get(taskId);
-        if (!entry) {
-            // Stale entry — try again
-            this.tryDequeue(projectId, state);
-            return;
-        }
-
-        const task = entry.task;
-
-        console.log(
-            `[${taskId}] Dequeuing task (${queue.length} still queued for ${projectId})`
-        );
-
-        // Task has no branch yet (e.g. server crashed before slug generation completed).
-        // Route through prepareAndRunTask so the slug is generated before execution.
-        if (!task.branch) {
-            console.log(
-                `[${taskId}] Branch not set — running slug generation before execution`
-            );
-            prepareAndRunTask(task, state, this).catch((err) => {
-                console.error(`[${taskId}] Failed to prepare branchless task:`, err);
-                this.finishTask(
-                    entry,
-                    "failed",
-                    err instanceof Error ? err.message : String(err)
-                );
-                if (task.callbackUrl) {
-                    fireWebhook(task.taskId, task.status, task.callbackUrl);
-                }
-            });
-            return;
-        }
-
-        // Mark chain as active immediately (synchronously) before any async work
-        if (task.chainId !== undefined) {
-            this.markChainActive(projectId, task.chainId);
-        }
-
-        const executor = new Executor(
-            state.config.claudeCode,
-            state.tokenManager
-        );
-        entry.executor = executor;
-        task.status = "running";
-
-        state.pool
-            .acquire(state.config.repositories, state.config.auth?.githubToken)
-            .then((workspace) => {
-                entry.workspaceId = workspace.id;
-                this.persistEntry(entry);
-                return executeTask(
-                    task,
-                    workspace,
-                    state,
-                    this,
-                    entry.checkoutBranch
-                );
-            })
-            .catch((err) => {
-                console.error(`[${taskId}] Dequeue/acquire failed:`, err);
-                this.finishTask(
-                    entry,
-                    "failed",
-                    err instanceof Error ? err.message : String(err)
-                );
-                // Release chain lock on failure
-                if (task.chainId !== undefined) {
-                    this.unmarkChainActive(projectId, task.chainId);
-                }
-                if (task.callbackUrl) {
-                    fireWebhook(task.taskId, task.status, task.callbackUrl);
-                }
-            });
-    }
-
     /**
      * Start a new task for the given project. Returns immediately with a queued
      * task — branch slug generation and workspace acquisition happen in the background.
      */
-    async startTask(
+    async createNewTask(
         projectId: ProjectId,
         request: TaskCreateRequest
     ): Promise<Task> {
-        const state = this.requireProject(projectId);
-
         const taskId = nanoid(8) as TaskId;
 
         // Resolve chain continuation fields
@@ -492,8 +369,7 @@ export class TaskManager {
                 );
             }
             parentTaskId = request.continueTaskId;
-            chainId =
-                parentEntry.task.chainId ?? (parentEntry.task.taskId as unknown as ChainId);
+            chainId = parentEntry.task.chainId;
             inheritedBranch = parentEntry.task.branch;
         }
 
@@ -502,9 +378,9 @@ export class TaskManager {
             projectId,
             branch: inheritedBranch,
             parentTaskId,
-            chainId,
+            chainId: chainId ?? (nanoid(8) as ChainId),
             prompt: request.prompt,
-            status: "starting",
+            status: "creating",
             startedAt: new Date().toISOString(),
             completedAt: null,
             output: "",
@@ -514,20 +390,10 @@ export class TaskManager {
 
         const entry: TaskEntry = { task, executor: null, workspaceId: null };
         this.tasks.set(taskId, entry);
-        this.persistEntry(entry);
+        this.saveTask(entry);
 
-        // Slug generation and workspace acquisition run in the background
-        prepareAndRunTask(task, state, this).catch((err) => {
-            console.error(`[${taskId}] Failed to initialize task:`, err);
-            this.finishTask(
-                entry,
-                "failed",
-                err instanceof Error ? err.message : String(err)
-            );
-            if (task.callbackUrl) {
-                fireWebhook(taskId, task.status, task.callbackUrl);
-            }
-        });
+        this.enqueue(projectId, taskId);
+        this.dequeueAvailableTasks();
 
         return task;
     }
@@ -538,128 +404,27 @@ export class TaskManager {
      */
     async retryTask(projectId: ProjectId, taskId: TaskId): Promise<Task> {
         const state = this.requireProject(projectId);
-        const entry = this.requireEntry(projectId, taskId);
+        const entry = this.getTaskEntry(projectId, taskId);
         const task = entry.task;
 
         if (
             task.status === "queued" ||
             task.status === "starting" ||
-            task.status === "running"
+            task.status === "interrupted" ||
+            task.status === "creating" ||
+            task.status === "running" ||
+            task.status === "retrying"
         ) {
             throw new TaskActiveError(task.status);
         }
 
-        // For "retrying" status: a scheduled timer may or may not be active.
-        // Clear it if present (e.g. errorRetry-scheduled retry) so we can restart immediately.
-        // A timeout-induced "retrying" has no timer — this is a no-op in that case.
-        if (task.status === "retrying") {
-            if (entry.retryTimeoutId !== undefined) {
-                clearTimeout(entry.retryTimeoutId);
-                entry.retryTimeoutId = undefined;
-            }
-        }
+        task.attempt++;
+        this.saveTask(entry);
+        this.push_front(projectId, taskId);
 
-        // For normal tasks: if branch was cleaned up (no commits), regenerate a slug so
-        // executeTask creates a fresh branch. For chain tasks the branch is never nulled out,
-        // so this only triggers for non-chain tasks.
-        if (!task.branch && task.chainId === undefined) {
-            const slugExecutor = new Executor(
-                state.config.claudeCode,
-                state.tokenManager
-            );
-            const slug = await slugExecutor.generateBranchSlug(
-                task.prompt,
-                taskId
-            );
-            task.branch = `impl/${slug}-${taskId}`;
-        }
+        console.log(`[${taskId}] Manual retry requested`);
 
-        // Continue from the existing branch; if branch was just regenerated, checkoutBranch stays undefined
-        // so executeTask creates it fresh rather than trying to checkout a non-existent branch.
-        const checkoutBranch: string | undefined =
-            task.branch !== null ? task.branch : undefined;
-
-        // Reset task state
-        task.status = "running";
-        task.error = undefined;
-        task.output = "";
-        task.pullRequests = undefined;
-        task.completedAt = null;
-        task.startedAt = new Date().toISOString();
-        task.attempt = 1;
-
-        console.log(
-            `[${taskId}] Manual retry requested — branch: ${task.branch}`
-        );
-
-        // If the chain is already active, queue the retry instead of running immediately
-        if (
-            task.chainId !== undefined &&
-            this.isChainActive(projectId, task.chainId)
-        ) {
-            task.status = "queued";
-            entry.executor = null;
-            entry.workspaceId = null;
-            entry.checkoutBranch = checkoutBranch;
-            this.persistEntry(entry);
-            this.enqueue(projectId, taskId);
-            console.log(
-                `[${taskId}] Retry queued — chain ${task.chainId} is already active`
-            );
-            return task;
-        }
-
-        if (this.shouldQueue(projectId, state)) {
-            task.status = "queued";
-            entry.executor = null;
-            entry.workspaceId = null;
-            entry.checkoutBranch = checkoutBranch;
-            this.persistEntry(entry);
-            this.enqueue(projectId, taskId);
-            console.log(`[${taskId}] Retry queued`);
-            return task;
-        }
-
-        // Mark chain as active immediately before any async work
-        if (task.chainId !== undefined) {
-            this.markChainActive(projectId, task.chainId);
-        }
-
-        const executor = new Executor(
-            state.config.claudeCode,
-            state.tokenManager
-        );
-        entry.executor = executor;
-        entry.checkoutBranch = checkoutBranch;
-
-        let workspace: { id: number; dir: string };
-        try {
-            workspace = await state.pool.acquire(
-                state.config.repositories,
-                state.config.auth?.githubToken
-            );
-        } catch (_err) {
-            // Unmark chain before re-queuing so tryDequeue can pick it up correctly
-            if (task.chainId !== undefined) {
-                this.unmarkChainActive(projectId, task.chainId);
-            }
-            task.status = "queued";
-            entry.executor = null;
-            entry.workspaceId = null;
-            this.persistEntry(entry);
-            this.enqueue(projectId, taskId);
-            console.log(`[${taskId}] Retry queued after acquire race`);
-            return task;
-        }
-
-        entry.workspaceId = workspace.id;
-        this.persistEntry(entry);
-
-        executeTask(task, workspace, state, this, checkoutBranch).catch(
-            (err) => {
-                console.error(`Task ${taskId} retry failed unexpectedly:`, err);
-            }
-        );
+        this.dequeueAvailableTasks();
 
         return task;
     }
@@ -673,14 +438,11 @@ export class TaskManager {
      */
     cancelTask(projectId: ProjectId, taskId: TaskId): Task {
         this.requireProject(projectId);
-        const entry = this.requireEntry(projectId, taskId);
+        const entry = this.getTaskEntry(projectId, taskId);
         const task = entry.task;
 
         if (
-            task.status !== "queued" &&
-            task.status !== "starting" &&
-            task.status !== "running" &&
-            task.status !== "retrying"
+            !["queued", "starting", "running", "retrying"].includes(task.status)
         ) {
             throw new TaskCancelError(task.status);
         }
@@ -689,7 +451,7 @@ export class TaskManager {
 
         if (previousStatus === "queued" || previousStatus === "starting") {
             // Remove from the project's queue
-            const queue = this.queues.get(projectId);
+            const queue = this.queue;
             if (queue) {
                 const idx = queue.indexOf(taskId);
                 if (idx !== -1) queue.splice(idx, 1);
@@ -719,45 +481,5 @@ export class TaskManager {
         }
 
         return task;
-    }
-
-    /**
-     * Edit the prompt of a queued task.
-     * Only queued tasks can be edited — running/retrying tasks are already executing.
-     * The title is cleared so it can be regenerated when the task eventually runs.
-     * Throws TaskEditError if the task cannot be edited.
-     */
-    editTask(projectId: ProjectId, taskId: TaskId, newPrompt: string): Task {
-        this.requireProject(projectId);
-        const entry = this.requireEntry(projectId, taskId);
-        const task = entry.task;
-
-        if (task.status !== "queued" && task.status !== "starting") {
-            throw new TaskEditError(
-                `Cannot edit task with status: ${task.status}. Only queued or starting tasks can be edited.`
-            );
-        }
-
-        if (!newPrompt || !newPrompt.trim()) {
-            throw new TaskEditError("Prompt cannot be empty.");
-        }
-
-        task.prompt = newPrompt.trim();
-        // Clear the title so the user sees the updated prompt and title regenerates on next run
-        task.title = undefined;
-
-        this.persistEntry(entry);
-        console.log(`[${taskId}] Prompt updated`);
-
-        return task;
-    }
-
-    /** Schedule a retry for a failed task. Thin wrapper used by tests and internal callers. */
-    scheduleRetry(
-        task: Task,
-        state: ProjectState,
-        delayOverrideSeconds?: number
-    ): void {
-        scheduleRetry(task, state, this, delayOverrideSeconds);
     }
 }

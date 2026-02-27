@@ -983,8 +983,7 @@ export function registerDashboardRoutes(
             res.status(401).json({ error: "Unauthorized" });
             return;
         }
-        const { projectId, prompt, continueTaskId } =
-            req.body ?? {};
+        const { projectId, prompt, continueTaskId } = req.body ?? {};
         if (typeof projectId !== "string" || !config.projects[projectId]) {
             res.status(400).json({ error: "Invalid or missing project ID" });
             return;
@@ -998,10 +997,13 @@ export function registerDashboardRoutes(
                 ? continueTaskId.trim()
                 : undefined;
         try {
-            const task = await taskManager.startTask(projectId as ProjectId, {
-                prompt: prompt.trim(),
-                continueTaskId: contId as TaskId | undefined
-            });
+            const task = await taskManager.createNewTask(
+                projectId as ProjectId,
+                {
+                    prompt: prompt.trim(),
+                    continueTaskId: contId as TaskId | undefined
+                }
+            );
             res.json({
                 taskId: task.taskId,
                 branch: task.branch,

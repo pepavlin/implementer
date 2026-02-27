@@ -104,13 +104,10 @@ export function createServer(
                     parsed.error.issues
                 );
             }
-            const task = await taskManager.startTask(
-                getProjectId(res),
-                {
-                    ...parsed.data,
-                    continueTaskId: parsed.data.continueTaskId as TaskId | undefined
-                }
-            );
+            const task = await taskManager.createNewTask(getProjectId(res), {
+                ...parsed.data,
+                continueTaskId: parsed.data.continueTaskId as TaskId | undefined
+            });
             res.status(200).json({
                 taskId: task.taskId,
                 branch: task.branch,
@@ -156,7 +153,10 @@ export function createServer(
 
     // GET /task/:taskId - Get specific task status
     app.get("/task/:taskId", (req, res) => {
-        const task = taskManager.getTask(getProjectId(res), req.params.taskId as TaskId);
+        const task = taskManager.getTask(
+            getProjectId(res),
+            req.params.taskId as TaskId
+        );
         if (!task) throw new NotFoundError("Task not found");
         res.json({
             taskId: task.taskId,
@@ -188,10 +188,7 @@ export function createServer(
         const taskId = req.params.taskId as TaskId;
         const task = taskManager.getTask(getProjectId(res), taskId);
         if (!task) throw new NotFoundError("Task not found");
-        const cancelled = taskManager.cancelTask(
-            getProjectId(res),
-            taskId
-        );
+        const cancelled = taskManager.cancelTask(getProjectId(res), taskId);
         res.json({
             taskId: cancelled.taskId,
             branch: cancelled.branch,
@@ -207,10 +204,7 @@ export function createServer(
             const taskId = req.params.taskId as TaskId;
             const task = taskManager.getTask(projectId, taskId);
             if (!task) throw new NotFoundError("Task not found");
-            const retried = await taskManager.retryTask(
-                projectId,
-                taskId
-            );
+            const retried = await taskManager.retryTask(projectId, taskId);
             res.json({
                 taskId: retried.taskId,
                 branch: retried.branch,

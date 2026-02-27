@@ -1,7 +1,7 @@
 import { Executor, extractLastAssistantMessage } from "../executor.js";
 import { chownRecursive } from "../workspace-pool.js";
 import type { Task } from "../types.js";
-import type { ProjectState } from "./types.js";
+import type { ProjectState, TaskEntry } from "./types.js";
 import {
     buildSystemInstructions,
     buildPrBody,
@@ -47,9 +47,7 @@ export async function executeTask(
                 githubToken
             );
         } else {
-            console.log(
-                `[${task.taskId}] Creating new branch: ${branchName}`
-            );
+            console.log(`[${task.taskId}] Creating new branch: ${branchName}`);
             await tm.gitManager.prepareNewBranchAll(
                 workspace.dir,
                 repos,
@@ -117,9 +115,7 @@ export async function executeTask(
         // regardless of what Claude did. Runs even if no changes were made (no-op then).
         const protectedPaths = state.config.protectedPaths ?? [];
         if (protectedPaths.length > 0) {
-            console.log(
-                `[${task.taskId}] Reverting protected path changes...`
-            );
+            console.log(`[${task.taskId}] Reverting protected path changes...`);
             await tm.gitManager.revertProtectedPathsAll(
                 workspace.dir,
                 repos,
@@ -445,7 +441,7 @@ export async function executeTask(
         if (!task.completedAt && task.status !== "retrying") {
             task.completedAt = new Date().toISOString();
         }
-        tm.persistEntry(entry);
+        tm.saveTask(entry);
         // Release chain lock so the next task in the chain can be dequeued
         if (task.chainId !== undefined) {
             tm.unmarkChainActive(task.projectId, task.chainId);
@@ -466,7 +462,11 @@ export async function executeTask(
             const entry = tm.tasks.get(task.taskId);
             const wasResumedFromRestart = entry?.resumedFromRestart ?? false;
             if (entry) entry.resumedFromRestart = false;
-            tm.scheduleRetry(task, state, wasResumedFromRestart ? 0 : undefined);
+            tm.scheduleRetry(
+                task,
+                state,
+                wasResumedFromRestart ? 0 : undefined
+            );
             return; // webhook will fire only on terminal failure
         }
     }
@@ -491,7 +491,7 @@ export function scheduleRetry(
 
     const entry = tm.tasks.get(task.taskId);
     if (entry) {
-        tm.persistEntry(entry);
+        tm.saveTask(entry);
     }
 
     console.log(
@@ -509,7 +509,7 @@ export function scheduleRetry(
             task.status = "queued";
             tm.enqueue(task.projectId, task.taskId);
             const entry = tm.tasks.get(task.taskId);
-            if (entry) tm.persistEntry(entry);
+            if (entry) tm.saveTask(entry);
             console.log(
                 `[${task.taskId}] Retry queued — chain ${task.chainId} is already active`
             );
@@ -521,7 +521,7 @@ export function scheduleRetry(
             task.status = "queued";
             tm.enqueue(task.projectId, task.taskId);
             const entry = tm.tasks.get(task.taskId);
-            if (entry) tm.persistEntry(entry);
+            if (entry) tm.saveTask(entry);
             console.log(`[${task.taskId}] Retry queued (no capacity)`);
             return;
         }
@@ -548,7 +548,7 @@ export function scheduleRetry(
             task.status = "queued";
             tm.enqueue(task.projectId, task.taskId);
             const entry = tm.tasks.get(task.taskId);
-            if (entry) tm.persistEntry(entry);
+            if (entry) tm.saveTask(entry);
             console.log(`[${task.taskId}] Retry queued after acquire race`);
             return;
         }
@@ -560,7 +560,7 @@ export function scheduleRetry(
                 state.config.claudeCode,
                 state.tokenManager
             );
-            tm.persistEntry(entry);
+            tm.saveTask(entry);
         }
 
         // Retry on the same branch — Claude can see previous partial work
@@ -576,112 +576,129 @@ export function scheduleRetry(
     if (entryForTimeout) entryForTimeout.retryTimeoutId = timeoutId;
 }
 
-export async function prepareAndRunTask(
+export async function prepareMetadata(
     task: Task,
     state: ProjectState,
-    tm: TaskManager
+    tm: TaskManager,
+    entry: TaskEntry
 ): Promise<void> {
-    const { taskId, projectId } = task;
-    const entry = tm.tasks.get(taskId)!;
-
-    // Resolve branch and title based on task type
-    if (!task.branch) {
-        // Normal task: generate branch slug and title
-        console.log(`[${taskId}] Generating branch name and title...`);
-        const metaExecutor = new Executor(
-            state.config.claudeCode,
-            state.tokenManager
-        );
-        const { slug, title } = await metaExecutor.generateTaskMetadata(
-            task.prompt,
-            taskId
-        );
-        task.branch = `impl/${slug}-${taskId}`;
-        if (title) task.title = title;
-        console.log(
-            `[${taskId}] Branch: ${task.branch}, Title: ${task.title}`
-        );
-        tm.persistEntry(entry);
-    } else if (!task.title) {
-        // Branch already set (e.g., after restart), but title not yet generated
-        console.log(`[${taskId}] Generating title...`);
-        const metaExecutor = new Executor(
-            state.config.claudeCode,
-            state.tokenManager
-        );
-        const { title } = await metaExecutor.generateTaskMetadata(
-            task.prompt,
-            taskId
-        );
-        if (title) task.title = title;
-        console.log(`[${taskId}] Title: ${task.title}`);
-        tm.persistEntry(entry);
-    }
-
-    // If the chain is already active (another task in the same chain is running), queue and wait
-    if (
-        task.chainId !== undefined &&
-        tm.isChainActive(projectId, task.chainId)
-    ) {
-        task.status = "queued";
-        tm.persistEntry(entry);
-        tm.enqueue(projectId, taskId);
-        const queueLen = tm.queues.get(projectId)?.length ?? 0;
-        console.log(
-            `[${taskId}] Queued — chain ${task.chainId} is already active (position ${queueLen} for ${projectId})`
-        );
-        return;
-    }
-
-    // Queue if at capacity — task will be picked up by tryDequeue when a slot frees
-    if (tm.shouldQueue(projectId, state)) {
-        task.status = "queued";
-        tm.persistEntry(entry);
-        tm.enqueue(projectId, taskId);
-        const queueLen = tm.queues.get(projectId)?.length ?? 0;
-        console.log(
-            `[${taskId}] Queued (position ${queueLen} for ${projectId})`
-        );
-        return;
-    }
-
-    // Mark chain as active immediately before any async work
-    if (task.chainId !== undefined) {
-        tm.markChainActive(projectId, task.chainId);
-    }
-
-    // Acquire workspace and run immediately
-    const executor = new Executor(
-        state.config.claudeCode,
-        state.tokenManager
-    );
-    entry.executor = executor;
-    task.status = "running";
-
-    let workspace: { id: number; dir: string };
     try {
-        workspace = await state.pool.acquire(
-            state.config.repositories,
-            state.config.auth?.githubToken
-        );
-    } catch (_err) {
-        // Race condition: another task grabbed the last slot — queue and wait.
-        // Unmark chain so tryDequeue can re-pick it up correctly.
-        if (task.chainId !== undefined) {
-            tm.unmarkChainActive(projectId, task.chainId);
+        const { taskId, projectId } = task;
+        const entry = tm.tasks.get(taskId)!;
+
+        // Resolve branch and title based on task type
+        if (!task.branch) {
+            // Normal task: generate branch slug and title
+            console.log(`[${taskId}] Generating branch name and title...`);
+            const metaExecutor = new Executor(
+                state.config.claudeCode,
+                state.tokenManager
+            );
+            const { slug, title } = await metaExecutor.generateTaskMetadata(
+                task.prompt,
+                taskId
+            );
+            task.branch = `impl/${slug}-${taskId}`;
+            if (title) task.title = title;
+            console.log(
+                `[${taskId}] Branch: ${task.branch}, Title: ${task.title}`
+            );
+            tm.saveTask(entry);
         }
-        task.status = "queued";
-        entry.executor = null;
-        tm.persistEntry(entry);
-        tm.enqueue(projectId, taskId);
-        console.log(`[${taskId}] Queued after acquire race`);
-        return;
+        if (!task.title) {
+            // Branch already set (e.g., after restart), but title not yet generated
+            console.log(`[${taskId}] Generating title...`);
+            const metaExecutor = new Executor(
+                state.config.claudeCode,
+                state.tokenManager
+            );
+            const { title } = await metaExecutor.generateTaskMetadata(
+                task.prompt,
+                taskId
+            );
+            if (title) task.title = title;
+            console.log(`[${taskId}] Title: ${task.title}`);
+            tm.saveTask(entry);
+        }
+
+        // If the chain is already active (another task in the same chain is running), queue and wait
+        // if (
+        //     task.chainId !== undefined &&
+        //     tm.isChainActive(projectId, task.chainId)
+        // ) {
+        //     task.status = "queued";
+        //     tm.saveTask(entry);
+        //     tm.enqueue(projectId, taskId);
+        //     const queueLen = tm.queues.get(projectId)?.length ?? 0;
+        //     console.log(
+        //         `[${taskId}] Queued — chain ${task.chainId} is already active (position ${queueLen} for ${projectId})`
+        //     );
+        //     return;
+        // }
+
+        // // Queue if at capacity — task will be picked up by tryDequeue when a slot frees
+        // if (tm.shouldQueue(projectId, state)) {
+        //     task.status = "queued";
+        //     tm.saveTask(entry);
+        //     tm.enqueue(projectId, taskId);
+        //     const queueLen = tm.queues.get(projectId)?.length ?? 0;
+        //     console.log(
+        //         `[${taskId}] Queued (position ${queueLen} for ${projectId})`
+        //     );
+        //     return;
+        // }
+
+        // // Mark chain as active immediately before any async work
+        // if (task.chainId !== undefined) {
+        //     tm.markChainActive(projectId, task.chainId);
+        // }
+
+        // // Acquire workspace and run immediately
+        // const executor = new Executor(
+        //     state.config.claudeCode,
+        //     state.tokenManager
+        // );
+        // entry.executor = executor;
+        // task.status = "running";
+
+        // let workspace: { id: number; dir: string };
+        // try {
+        //     workspace = await state.pool.acquire(
+        //         state.config.repositories,
+        //         state.config.auth?.githubToken
+        //     );
+        // } catch (_err) {
+        //     // Race condition: another task grabbed the last slot — queue and wait.
+        //     // Unmark chain so tryDequeue can re-pick it up correctly.
+        //     if (task.chainId !== undefined) {
+        //         tm.unmarkChainActive(projectId, task.chainId);
+        //     }
+        //     task.status = "queued";
+        //     entry.executor = null;
+        //     tm.saveTask(entry);
+        //     tm.enqueue(projectId, taskId);
+        //     console.log(`[${taskId}] Queued after acquire race`);
+        //     return;
+        // }
+
+        // entry.workspaceId = workspace.id;
+        // tm.saveTask(entry);
+
+        // executeTask(task, workspace, state, tm).catch((err) => {
+        //     console.error(`Task ${taskId} failed unexpectedly:`, err);
+        // });
+    } catch (err) {
+        console.error(
+            `[${task.taskId}] Failed to prepare branchless task:`,
+            err
+        );
+        tm.finishTask(
+            entry,
+            "failed",
+            err instanceof Error ? err.message : String(err)
+        );
+        if (task.callbackUrl) {
+            fireWebhook(task.taskId, task.status, task.callbackUrl);
+        }
     }
-
-    entry.workspaceId = workspace.id;
-    tm.persistEntry(entry);
-
-    executeTask(task, workspace, state, tm).catch((err) => {
-        console.error(`Task ${taskId} failed unexpectedly:`, err);
-    });
 }

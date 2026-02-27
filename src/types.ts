@@ -5,6 +5,7 @@ export type ChainId = string & { readonly _brand: unique symbol };
 export type TaskStatus =
     | "queued"
     | "starting"
+    | "creating"
     | "running"
     | "retrying"
     | "completed"
@@ -33,7 +34,7 @@ export interface Task {
     /** Direct parent in chain (the task this one continues from). */
     parentTaskId?: TaskId;
     /** Root task ID of the chain (first task in the lineage). */
-    chainId?: ChainId;
+    chainId: ChainId;
     /** Current attempt number (1-indexed). Incremented on each retry. */
     attempt: number;
 }
