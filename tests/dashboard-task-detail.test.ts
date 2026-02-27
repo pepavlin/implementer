@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
 import request from "supertest";
 import { registerDashboardRoutes, buildDashboardData, dashboardToken } from "../src/dashboard.js";
-import type { Task, TaskId, ProjectId, ChainId } from "../src/types.js";
+import type { TaskId, ProjectId, ChainId } from "../src/types.js";
 import type { Config } from "../src/config/config.js";
 import type { TaskManager } from "../src/task-manager/task-manager.js";
 import { TaskActiveError } from "../src/task-manager/task-manager.js";
@@ -13,20 +13,41 @@ const ADMIN_PASSWORD = "test-password";
 const AUTH_TOKEN = dashboardToken(ADMIN_PASSWORD);
 const AUTH_COOKIE = `impl_dash=${AUTH_TOKEN}`;
 
-function makeTask(overrides: Partial<Task> = {}): Task {
+function makeTask(overrides: Partial<any> = {}): any {
+    const errorRetry = overrides.errorRetry;
+    delete overrides.errorRetry;
+
+    const data = {
+        taskId: overrides.taskId ?? "abc12345",
+        projectId: overrides.projectId ?? "my-project",
+        prompt: overrides.prompt ?? "Do something",
+        status: overrides.status ?? "completed",
+        startedAt: overrides.startedAt ?? new Date("2024-01-01T10:00:00Z").toISOString(),
+        completedAt: overrides.completedAt !== undefined ? overrides.completedAt : new Date("2024-01-01T10:05:00Z").toISOString(),
+        output: overrides.output ?? "",
+        chainId: overrides.chainId ?? "abc12345",
+        attempt: overrides.attempt ?? 1,
+        pullRequests: overrides.pullRequests,
+        nextRetryAt: overrides.nextRetryAt,
+        estimatedDurationSeconds: overrides.estimatedDurationSeconds,
+        parentTaskId: overrides.parentTaskId,
+    };
+
+    const branch = overrides.branch === null
+        ? undefined
+        : overrides.branch === undefined
+            ? { name: "impl/abc12345", createdAt: "2024-01-01T00:00:00.000Z" }
+            : typeof overrides.branch === "string"
+                ? { name: overrides.branch, createdAt: "2024-01-01T00:00:00.000Z" }
+                : overrides.branch;
+
     return {
-        taskId: "abc12345" as TaskId,
-        projectId: "my-project" as ProjectId,
-        branch: "impl/abc12345",
-        prompt: "Do something",
-        title: "Test task",
-        status: "completed",
-        startedAt: new Date("2024-01-01T10:00:00Z").toISOString(),
-        completedAt: new Date("2024-01-01T10:05:00Z").toISOString(),
-        output: "",
-        chainId: "abc12345" as ChainId,
-        attempt: 1,
-        ...overrides
+        id: data.taskId as TaskId,
+        data,
+        branch,
+        title: overrides.title ?? "Test task",
+        project: { data: { errorRetry } },
+        isActive: () => ["queued", "starting", "interrupted", "running", "retrying"].includes(data.status),
     };
 }
 
@@ -35,24 +56,26 @@ function makeConfig(maxAttempts?: number): Partial<Config> {
         server: { workspaceDir: "/tmp/test", adminPassword: ADMIN_PASSWORD, metaCpus: 0.4, sandboxCpus: 0.4 },
         projects: {
             "my-project": {
-                repositories: [],
-                claudeCode: { command: "claude", timeoutSeconds: 3600 },
-                ...(maxAttempts !== undefined
-                    ? { errorRetry: { maxAttempts, delaySeconds: 60 } }
-                    : {})
+                data: {
+                    repositories: [],
+                    claudeCode: { command: "claude", timeoutSeconds: 3600 },
+                    ...(maxAttempts !== undefined
+                        ? { errorRetry: { maxAttempts, delaySeconds: 60 } }
+                        : {})
+                }
             }
         } as unknown as Config["projects"]
     };
 }
 
-function makeTaskManager(tasks: Task[], overrides: Partial<TaskManager> = {}): Partial<TaskManager> {
+function makeTaskManager(tasks: any[], overrides: Partial<TaskManager> = {}): Partial<TaskManager> {
     return {
         listAllTasks: vi.fn(() => tasks),
         ...overrides,
     };
 }
 
-function createApp(tasks: Task[], configOverride?: Partial<Config>, tmOverrides?: Partial<TaskManager>): express.Express {
+function createApp(tasks: any[], configOverride?: Partial<Config>, tmOverrides?: Partial<TaskManager>): express.Express {
     const app = express();
     app.use(express.json());
     const tm = makeTaskManager(tasks, tmOverrides) as unknown as TaskManager;
@@ -79,7 +102,7 @@ describe("GET /dashboard/api/task/:taskId", () => {
     });
 
     it("returns attempt and maxAttempts when errorRetry is configured", async () => {
-        const task = makeTask({ attempt: 3 });
+        const task = makeTask({ attempt: 3, errorRetry: { maxAttempts: 5, delaySeconds: 60 } });
         const app = createApp([task], makeConfig(5) as unknown as Config);
 
         const res = await request(app)
@@ -97,7 +120,8 @@ describe("GET /dashboard/api/task/:taskId", () => {
             status: "retrying",
             completedAt: null,
             attempt: 2,
-            nextRetryAt
+            nextRetryAt,
+            errorRetry: { maxAttempts: 5, delaySeconds: 60 }
         });
         const app = createApp([task], makeConfig(5) as unknown as Config);
 
@@ -508,8 +532,8 @@ describe("POST /dashboard/api/task/:taskId/retry-now", () => {
 
     it("returns 409 when task is not in retrying status", async () => {
         const task = makeTask({ status: "failed" });
-        const retryTaskNow = vi.fn().mockRejectedValue(new TaskActiveError("failed"));
-        const app = createApp([task], makeConfig(), { retryTaskNow } as any);
+        const retryTask = vi.fn().mockImplementation(() => { throw new TaskActiveError("failed"); });
+        const app = createApp([task], makeConfig(), { retryTask } as any);
 
         const res = await request(app)
             .post("/dashboard/api/task/abc12345/retry-now")
@@ -522,8 +546,9 @@ describe("POST /dashboard/api/task/:taskId/retry-now", () => {
     it("returns queued status after immediate retry of retrying task", async () => {
         const nextRetryAt = new Date(Date.now() + 60_000).toISOString();
         const task = makeTask({ status: "retrying", completedAt: null, nextRetryAt });
-        const retryTaskNow = vi.fn().mockResolvedValue({ ...task, status: "queued", nextRetryAt: undefined });
-        const app = createApp([task], makeConfig(), { retryTaskNow } as any);
+        const retriedTask = makeTask({ status: "queued", completedAt: null });
+        const retryTask = vi.fn().mockReturnValue(retriedTask);
+        const app = createApp([task], makeConfig(), { retryTask } as any);
 
         const res = await request(app)
             .post("/dashboard/api/task/abc12345/retry-now")
@@ -532,7 +557,7 @@ describe("POST /dashboard/api/task/:taskId/retry-now", () => {
 
         expect(res.status).toBe(200);
         expect(res.body.status).toBe("queued");
-        expect(retryTaskNow).toHaveBeenCalledWith("my-project", "abc12345");
+        expect(retryTask).toHaveBeenCalledWith("my-project", "abc12345");
     });
 
     it("renders Retry Now button only for retrying tasks", async () => {

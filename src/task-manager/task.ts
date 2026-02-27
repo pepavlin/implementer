@@ -175,7 +175,7 @@ export class Task {
         if (totalActive >= this.manager.config.server.maxConcurrentTasks)
             return false;
 
-        if (this.manager.isChainActive(this.data.projectId, this.data.chainId))
+        if (this.manager.isChainActive(this.data.projectId, this.data.chainId, this.id))
             return false;
 
         // Check project capacity

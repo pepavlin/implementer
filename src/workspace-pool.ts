@@ -168,6 +168,14 @@ RULES:
         repos: RepositoryConfig[],
         githubToken?: string
     ): Promise<{ id: WorkspaceId; dir: string }> {
+        // Check concurrency limit first
+        const inUseCount = Array.from(this.instances.values()).filter(
+            (i) => i.inUse
+        ).length;
+        if (inUseCount >= this.maxConcurrentTasks) {
+            throw new PoolExhaustedError(this.maxConcurrentTasks);
+        }
+
         // Look for a free instance
         for (const [id, instance] of this.instances) {
             if (!instance.inUse) {
@@ -195,14 +203,6 @@ RULES:
             }
         }
 
-        // Check concurrency limit before creating a new instance
-        const inUseCount = Array.from(this.instances.values()).filter(
-            (i) => i.inUse
-        ).length;
-        if (inUseCount >= this.maxConcurrentTasks) {
-            throw new PoolExhaustedError(this.maxConcurrentTasks);
-        }
-
         // No free instance — create a new one
         const id = this.nextId++ as WorkspaceId;
         const dir = join(this.baseDir, String(id));
@@ -222,13 +222,12 @@ RULES:
      * (either a free instance exists or the concurrency cap hasn't been hit yet).
      */
     hasFreeSlot(): boolean {
-        for (const instance of this.instances.values()) {
-            if (!instance.inUse) return true;
-        }
         const inUseCount = Array.from(this.instances.values()).filter(
             (i) => i.inUse
         ).length;
-        return inUseCount < this.maxConcurrentTasks;
+        if (inUseCount >= this.maxConcurrentTasks) return false;
+        // Either a free instance exists or we can create a new one (below cap)
+        return true;
     }
 
     /**

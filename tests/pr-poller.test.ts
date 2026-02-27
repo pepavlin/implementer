@@ -26,11 +26,13 @@ function makeConfig(githubToken?: string): Config {
         server: { workspaceDir: "/tmp", maxConcurrentTasks: 3, adminPassword: "pw", metaCpus: 0.4, sandboxCpus: 0.4 },
         projects: {
             proj: {
-                apiKey: "key",
-                repositories: [],
-                claudeCode: { command: "claude", timeoutSeconds: 3600, mcpServers: {} },
-                auth: githubToken ? { githubToken } : {},
-                maxConcurrentTasks: 1,
+                data: {
+                    apiKey: "key",
+                    repositories: [],
+                    claudeCode: { command: "claude", timeoutSeconds: 3600, mcpServers: {} },
+                    auth: githubToken ? { githubToken } : {},
+                    maxConcurrentTasks: 1,
+                },
             },
         },
     } as unknown as Config;

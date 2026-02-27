@@ -37,10 +37,10 @@ projects:
         expect(config.server.workspaceDir).toContain("tmp");
         expect(Object.keys(config.projects)).toHaveLength(1);
         const project = config.projects["my-project"];
-        expect(project.repositories).toHaveLength(1);
-        expect(project.repositories[0].name).toBe("my-repo");
-        expect(project.repositories[0].defaultBranch).toBe("main");
-        expect(project.claudeCode.command).toBe("claude");
+        expect(project.data.repositories).toHaveLength(1);
+        expect(project.data.repositories[0].name).toBe("my-repo");
+        expect(project.data.repositories[0].defaultBranch).toBe("main");
+        expect(project.data.claudeCode.command).toBe("claude");
     });
 
 
@@ -57,7 +57,7 @@ projects:
         );
 
         const config = Config.load(path);
-        expect(config.projects["my-project"].claudeCode.timeoutSeconds).toBe(3600);
+        expect(config.projects["my-project"].data.claudeCode.timeoutSeconds).toBe(3600);
     });
 
     it("respects explicit timeoutSeconds when provided", () => {
@@ -75,7 +75,7 @@ projects:
         );
 
         const config = Config.load(path);
-        expect(config.projects["my-project"].claudeCode.timeoutSeconds).toBe(600);
+        expect(config.projects["my-project"].data.claudeCode.timeoutSeconds).toBe(600);
     });
 
     it("rejects timeoutSeconds below 60", () => {
@@ -109,7 +109,7 @@ projects:
         );
 
         const config = Config.load(path);
-        expect(config.projects["my-project"].maxConcurrentTasks).toBe(8);
+        expect(config.projects["my-project"].data.maxConcurrentTasks).toBe(8);
     });
 
     it("rejects maxConcurrentTasks less than 1", () => {
@@ -197,21 +197,21 @@ projects:
         const config = Config.load(path);
 
         const project = config.projects["webapp"];
-        expect(project.repositories).toHaveLength(2);
-        expect(project.repositories[0].defaultBranch).toBe("develop");
-        expect(project.repositories[1].defaultBranch).toBe("main");
-        expect(project.claudeCode.command).toBe("claude-dev");
-        expect(project.claudeCode.model).toBe("opus");
-        expect(project.claudeCode.systemPrompt).toBe("Always write tests.");
-        expect(project.claudeCode.mcpServers?.playwright.command).toBe("npx");
-        expect(project.claudeCode.mcpServers?.playwright.args).toEqual([
+        expect(project.data.repositories).toHaveLength(2);
+        expect(project.data.repositories[0].defaultBranch).toBe("develop");
+        expect(project.data.repositories[1].defaultBranch).toBe("main");
+        expect(project.data.claudeCode.command).toBe("claude-dev");
+        expect(project.data.claudeCode.model).toBe("opus");
+        expect(project.data.claudeCode.systemPrompt).toBe("Always write tests.");
+        expect(project.data.claudeCode.mcpServers?.playwright.command).toBe("npx");
+        expect(project.data.claudeCode.mcpServers?.playwright.args).toEqual([
             "@playwright/mcp@latest",
             "--headless"
         ]);
-        expect(project.apiKey).toBe("secret-key");
-        expect(project.maxConcurrentTasks).toBe(2);
-        expect(project.auth?.anthropicApiKey).toBe("sk-test-key");
-        expect(project.auth?.githubToken).toBe("ghp-test-token");
+        expect(project.data.apiKey).toBe("secret-key");
+        expect(project.data.maxConcurrentTasks).toBe(2);
+        expect(project.data.auth?.anthropicApiKey).toBe("sk-test-key");
+        expect(project.data.auth?.githubToken).toBe("ghp-test-token");
     });
 
     it("supports multiple projects", () => {
@@ -232,10 +232,10 @@ projects:
 
         const config = Config.load(path);
         expect(Object.keys(config.projects)).toHaveLength(2);
-        expect(config.projects["project-a"].repositories[0].name).toBe(
+        expect(config.projects["project-a"].data.repositories[0].name).toBe(
             "repo-a"
         );
-        expect(config.projects["project-b"].repositories[0].name).toBe(
+        expect(config.projects["project-b"].data.repositories[0].name).toBe(
             "repo-b"
         );
     });
@@ -359,7 +359,7 @@ projects:
         );
 
         const config = Config.load(path);
-        expect(config.projects["my-project"].protectedPaths).toEqual([
+        expect(config.projects["my-project"].data.protectedPaths).toEqual([
             ".github",
             "Dockerfile",
             "docker-compose.yml"
@@ -379,7 +379,7 @@ projects:
         );
 
         const config = Config.load(path);
-        expect(config.projects["my-project"].protectedPaths).toBeUndefined();
+        expect(config.projects["my-project"].data.protectedPaths).toBeUndefined();
     });
 
 });
@@ -402,7 +402,7 @@ projects:
         );
 
         const config = Config.load(path);
-        expect(config.projects["my-project"].claudeCode.systemPrompt).toBe(
+        expect(config.projects["my-project"].data.claudeCode.systemPrompt).toBe(
             "Global instructions.\nProject instructions."
         );
     });
@@ -433,7 +433,7 @@ projects:
         );
 
         const config = Config.load(path);
-        const servers = config.projects["my-project"].claudeCode.mcpServers!;
+        const servers = config.projects["my-project"].data.claudeCode.mcpServers!;
 
         // Project overrides global key
         expect(servers["playwright"].command).toBe("custom-pw");
@@ -462,7 +462,7 @@ projects:
         );
 
         const config = Config.load(path);
-        const cc = config.projects["my-project"].claudeCode;
+        const cc = config.projects["my-project"].data.claudeCode;
         expect(cc.systemPrompt).toBe("Global only.");
         expect(cc.mcpServers?.playwright.command).toBe("npx");
     });
@@ -485,7 +485,7 @@ projects:
         );
 
         const config = Config.load(path);
-        const cc = config.projects["my-project"].claudeCode;
+        const cc = config.projects["my-project"].data.claudeCode;
         expect(cc.systemPrompt).toBe("Project only.");
         expect(cc.mcpServers?.tool.command).toBe("my-tool");
     });
@@ -509,7 +509,7 @@ projects:
         );
 
         const config = Config.load(path);
-        const cc = config.projects["my-project"].claudeCode;
+        const cc = config.projects["my-project"].data.claudeCode;
         expect(cc.systemPrompt).toBe("Global prompt.");
         expect(cc.mcpServers?.tool.command).toBe("my-tool");
     });
@@ -533,7 +533,7 @@ projects:
         );
 
         const config = Config.load(path);
-        const cc = config.projects["my-project"].claudeCode;
+        const cc = config.projects["my-project"].data.claudeCode;
         expect(cc.systemPrompt).toBe("Project only.");
         expect(cc.mcpServers?.["global-tool"].command).toBe("global");
     });
@@ -563,11 +563,11 @@ projects:
 
         const config = Config.load(path);
 
-        const a = config.projects["project-a"].claudeCode;
+        const a = config.projects["project-a"].data.claudeCode;
         expect(a.systemPrompt).toBe("Shared.");
         expect(a.mcpServers?.shared.command).toBe("shared-cmd");
 
-        const b = config.projects["project-b"].claudeCode;
+        const b = config.projects["project-b"].data.claudeCode;
         expect(b.systemPrompt).toBe("Shared.\nB-specific.");
         expect(b.mcpServers?.shared.command).toBe("shared-cmd");
     });

@@ -274,12 +274,21 @@ export class TaskManager {
         return task;
     }
 
-    /** Check if any task in the given chain is currently active (starting or running). */
-    isChainActive(projectId: ProjectId, chainId: ChainId): boolean {
+    /**
+     * Check if any OTHER task in the given chain is currently active.
+     * Excludes the calling task (by excludeTaskId) so a queued task
+     * doesn't block itself from starting.
+     */
+    isChainActive(
+        projectId: ProjectId,
+        chainId: ChainId,
+        excludeTaskId?: TaskId
+    ): boolean {
         for (const task of this.tasks.values()) {
             if (
                 task.data.projectId === projectId &&
                 task.data.chainId === chainId &&
+                task.id !== excludeTaskId &&
                 task.isActive()
             ) {
                 return true;

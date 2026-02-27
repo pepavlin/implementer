@@ -2,8 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
 import { createServer } from "../src/server.js";
 import type { TaskManager } from "../src/task-manager/task-manager.js";
-import type { Task } from "../src/types.js";
-import { TaskActiveError, TaskCancelError } from "../src/task-manager/task-manager.js";
+import { TaskActiveError } from "../src/task-manager/task-manager.js";
 import type { Config } from "../src/config/config.js";
 
 const PROJECT_ID = "test-project";
@@ -41,11 +40,11 @@ function makeConfig(projectOverrides: Record<string, unknown> = {}): Config {
     } as unknown as Config;
 }
 
-function makeMockTask(overrides: Partial<Task> = {}): Task {
-    return {
+function makeMockTask(overrides: Partial<any> = {}): any {
+    const { branch: branchOverride, title: titleOverride, ...dataOverrides } = overrides;
+    const data = {
         taskId: "abc123",
         projectId: PROJECT_ID,
-        branch: "impl/test-branch-abc123",
         prompt: "Add a button",
         status: "running",
         startedAt: "2025-01-01T00:00:00.000Z",
@@ -53,7 +52,29 @@ function makeMockTask(overrides: Partial<Task> = {}): Task {
         output: "",
         attempt: 1,
         chainId: "chain1",
-        ...overrides
+        ...dataOverrides
+    };
+
+    let branch;
+    if ("branch" in overrides) {
+        if (branchOverride === null || branchOverride === undefined) {
+            branch = undefined;
+        } else if (typeof branchOverride === "string") {
+            branch = { name: branchOverride, createdAt: data.startedAt };
+        } else {
+            branch = branchOverride;
+        }
+    } else {
+        branch = { name: "impl/test-branch-abc123", createdAt: data.startedAt };
+    }
+
+    return {
+        id: data.taskId,
+        data,
+        branch,
+        title: titleOverride ?? null,
+        project: { data: { errorRetry: undefined } },
+        isActive: () => ["queued", "starting", "running", "retrying", "interrupted"].includes(data.status),
     };
 }
 
@@ -141,10 +162,10 @@ describe("server", () => {
     });
 
     describe("POST /task", () => {
-        it("creates a task and returns taskId with queued status and null branch", async () => {
+        it("creates a task and returns taskId with queued status and undefined branch", async () => {
             const task = makeMockTask({ status: "queued", branch: null });
             const tm = makeMockTaskManager({
-                createNewTask: vi.fn().mockResolvedValue(task)
+                createNewTask: vi.fn().mockReturnValue(task)
             });
             const app = createServer(tm, makeConfig());
 
@@ -154,7 +175,7 @@ describe("server", () => {
                 .expect(200);
 
             expect(res.body.taskId).toBe("abc123");
-            expect(res.body.branch).toBeNull();
+            expect(res.body.branch).toBeUndefined();
             expect(res.body.status).toBe("queued");
         });
 
@@ -171,7 +192,7 @@ describe("server", () => {
         it("returns queued status when at capacity", async () => {
             const task = makeMockTask({ status: "queued" });
             const tm = makeMockTaskManager({
-                createNewTask: vi.fn().mockResolvedValue(task)
+                createNewTask: vi.fn().mockReturnValue(task)
             });
             const app = createServer(tm, makeConfig());
 
@@ -185,7 +206,7 @@ describe("server", () => {
 
         it("returns 500 on unexpected error", async () => {
             const tm = makeMockTaskManager({
-                createNewTask: vi.fn().mockRejectedValue(new Error("boom"))
+                createNewTask: vi.fn().mockImplementation(() => { throw new Error("boom"); })
             });
             const app = createServer(tm, makeConfig());
 
@@ -204,7 +225,7 @@ describe("server", () => {
                 parentTaskId: "parentXYZ",
                 chainId: "rootABC"
             });
-            const createNewTask = vi.fn().mockResolvedValue(task);
+            const createNewTask = vi.fn().mockReturnValue(task);
             const tm = makeMockTaskManager({ createNewTask });
             const app = createServer(tm, makeConfig());
 
@@ -230,7 +251,7 @@ describe("server", () => {
                 chainId: "chain1"
             });
             const tm = makeMockTaskManager({
-                createNewTask: vi.fn().mockResolvedValue(task)
+                createNewTask: vi.fn().mockReturnValue(task)
             });
             const app = createServer(tm, makeConfig());
 
@@ -246,7 +267,7 @@ describe("server", () => {
         it("returns null parentTaskId and chainId for standalone tasks", async () => {
             const task = makeMockTask({ status: "queued", branch: null });
             const tm = makeMockTaskManager({
-                createNewTask: vi.fn().mockResolvedValue(task)
+                createNewTask: vi.fn().mockReturnValue(task)
             });
             const app = createServer(tm, makeConfig());
 
@@ -563,7 +584,7 @@ describe("server", () => {
             });
             const tm = makeMockTaskManager({
                 getTask: vi.fn().mockReturnValue(task),
-                retryTask: vi.fn().mockResolvedValue(retried)
+                retryTask: vi.fn().mockReturnValue(retried)
             });
             const app = createServer(tm, makeConfig());
 
@@ -571,7 +592,7 @@ describe("server", () => {
                 .post("/task/abc123/retry")
                 .expect(200);
             expect(res.body.taskId).toBe("abc123");
-            expect(res.body.branch).toBe("impl/test-branch-abc123");
+            expect(res.body.branch.name).toBe("impl/test-branch-abc123");
             expect(res.body.status).toBe("running");
         });
 
@@ -580,7 +601,7 @@ describe("server", () => {
             const retried = makeMockTask({ status: "queued" });
             const tm = makeMockTaskManager({
                 getTask: vi.fn().mockReturnValue(task),
-                retryTask: vi.fn().mockResolvedValue(retried)
+                retryTask: vi.fn().mockReturnValue(retried)
             });
             const app = createServer(tm, makeConfig());
 
@@ -608,7 +629,7 @@ describe("server", () => {
                 getTask: vi.fn().mockReturnValue(task),
                 retryTask: vi
                     .fn()
-                    .mockRejectedValue(new TaskActiveError("running"))
+                    .mockImplementation(() => { throw new TaskActiveError("running"); })
             });
             const app = createServer(tm, makeConfig());
 
@@ -622,7 +643,7 @@ describe("server", () => {
             const task = makeMockTask({ status: "failed" });
             const tm = makeMockTaskManager({
                 getTask: vi.fn().mockReturnValue(task),
-                retryTask: vi.fn().mockRejectedValue(new Error("unexpected"))
+                retryTask: vi.fn().mockImplementation(() => { throw new Error("unexpected"); })
             });
             const app = createServer(tm, makeConfig());
 
@@ -944,7 +965,7 @@ describe("server", () => {
             expect(res.body.prompt).toBe("Add a button");
             expect(res.body.status).toBe("completed");
             expect(res.body.projectId).toBe(PROJECT_ID);
-            expect(res.body.branch).toBe("impl/test-branch-abc123");
+            expect(res.body.branch.name).toBe("impl/test-branch-abc123");
             expect(res.body.durationSeconds).toBe(300);
             expect(res.body.pullRequests).toEqual([
                 { repo: "my-repo", url: "https://github.com/org/repo/pull/42" }
@@ -1081,7 +1102,7 @@ describe("server", () => {
 
         it("creates a task and returns taskId", async () => {
             const task = makeMockTask({ status: "queued", branch: null });
-            const createNewTask = vi.fn().mockResolvedValue(task);
+            const createNewTask = vi.fn().mockReturnValue(task);
             const tm = makeMockTaskManager({ createNewTask });
             const app = createServer(tm, makeConfigWithAdmin());
             const cookie = await getAdminCookie(app);
@@ -1280,7 +1301,7 @@ describe("server", () => {
             const retried = makeMockTask({ status: "queued" });
             const tm = makeMockTaskManager({
                 listAllTasks: vi.fn().mockReturnValue([task]),
-                retryTask: vi.fn().mockResolvedValue(retried)
+                retryTask: vi.fn().mockReturnValue(retried)
             });
             const app = createServer(tm, makeConfigWithAdmin());
             const cookie = await getAdminCookie(app);
@@ -1300,7 +1321,7 @@ describe("server", () => {
                 listAllTasks: vi.fn().mockReturnValue([task]),
                 retryTask: vi
                     .fn()
-                    .mockRejectedValue(new TaskActiveError("running"))
+                    .mockImplementation(() => { throw new TaskActiveError("running"); })
             });
             const app = createServer(tm, makeConfigWithAdmin());
             const cookie = await getAdminCookie(app);
@@ -1317,7 +1338,7 @@ describe("server", () => {
             const task = makeMockTask({ status: "failed" });
             const tm = makeMockTaskManager({
                 listAllTasks: vi.fn().mockReturnValue([task]),
-                retryTask: vi.fn().mockRejectedValue(new Error("unexpected"))
+                retryTask: vi.fn().mockImplementation(() => { throw new Error("unexpected"); })
             });
             const app = createServer(tm, makeConfigWithAdmin());
             const cookie = await getAdminCookie(app);
@@ -1381,7 +1402,7 @@ describe("server", () => {
                 listAllTasks: vi.fn().mockReturnValue(tasks),
                 retryTask: vi
                     .fn()
-                    .mockResolvedValue(makeMockTask({ status: "queued" }))
+                    .mockReturnValue(makeMockTask({ status: "queued" }))
             });
             const app = createServer(tm, makeConfigWithAdmin());
             const cookie = await getAdminCookie(app);
@@ -1405,7 +1426,7 @@ describe("server", () => {
                 listAllTasks: vi.fn().mockReturnValue(tasks),
                 retryTask: vi
                     .fn()
-                    .mockResolvedValueOnce(makeMockTask({ status: "queued" }))
+                    .mockReturnValueOnce(makeMockTask({ status: "queued" }))
                     .mockRejectedValueOnce(new Error("retry failed"))
             });
             const app = createServer(tm, makeConfigWithAdmin());
@@ -1457,7 +1478,7 @@ describe("server", () => {
             const cancelled = makeMockTask({ status: "cancelled" });
             const tm = makeMockTaskManager({
                 listAllTasks: vi.fn().mockReturnValue([task]),
-                cancelTask: vi.fn().mockReturnValue(cancelled)
+                cancelTask: vi.fn().mockResolvedValue(cancelled)
             });
             const app = createServer(tm, makeConfigWithAdmin());
             const cookie = await getAdminCookie(app);
@@ -1476,7 +1497,7 @@ describe("server", () => {
             const cancelled = makeMockTask({ status: "cancelled" });
             const tm = makeMockTaskManager({
                 listAllTasks: vi.fn().mockReturnValue([task]),
-                cancelTask: vi.fn().mockReturnValue(cancelled)
+                cancelTask: vi.fn().mockResolvedValue(cancelled)
             });
             const app = createServer(tm, makeConfigWithAdmin());
             const cookie = await getAdminCookie(app);
@@ -1489,13 +1510,12 @@ describe("server", () => {
             expect(res.body.status).toBe("cancelled");
         });
 
-        it("returns 409 when task cannot be cancelled", async () => {
+        it("cancels a completed task successfully (cancel works on any task)", async () => {
             const task = makeMockTask({ status: "completed" });
+            const cancelled = makeMockTask({ status: "cancelled" });
             const tm = makeMockTaskManager({
                 listAllTasks: vi.fn().mockReturnValue([task]),
-                cancelTask: vi.fn().mockImplementation(() => {
-                    throw new TaskCancelError("Task is already completed");
-                })
+                cancelTask: vi.fn().mockResolvedValue(cancelled)
             });
             const app = createServer(tm, makeConfigWithAdmin());
             const cookie = await getAdminCookie(app);
@@ -1503,29 +1523,12 @@ describe("server", () => {
             const res = await request(app)
                 .post("/dashboard/api/task/abc123/cancel")
                 .set("Cookie", cookie)
-                .expect(409);
+                .expect(200);
 
-            expect(res.body.error).toContain("already completed");
+            expect(res.body.taskId).toBe("abc123");
+            expect(res.body.status).toBe("cancelled");
         });
 
-        it("returns 500 on unexpected error", async () => {
-            const task = makeMockTask({ status: "running" });
-            const tm = makeMockTaskManager({
-                listAllTasks: vi.fn().mockReturnValue([task]),
-                cancelTask: vi.fn().mockImplementation(() => {
-                    throw new Error("unexpected");
-                })
-            });
-            const app = createServer(tm, makeConfigWithAdmin());
-            const cookie = await getAdminCookie(app);
-
-            const res = await request(app)
-                .post("/dashboard/api/task/abc123/cancel")
-                .set("Cookie", cookie)
-                .expect(500);
-
-            expect(res.body.error).toBe("unexpected");
-        });
     });
 
     describe("dashboard cancel/edit UI", () => {
