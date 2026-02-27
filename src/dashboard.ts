@@ -86,12 +86,22 @@ export function buildDashboardData(
             })) ?? null
     }));
 
-    // Count PRs that are open or draft (i.e. need attention)
+    // Count PRs separately by state
     const openPrCount = allTasks.reduce((count, task) => {
-        const open = (task.data.pullRequests ?? []).filter(
-            (pr) => pr.state === "open" || pr.state === "draft" || !pr.state
-        ).length;
-        return count + open;
+        return (
+            count +
+            (task.data.pullRequests ?? []).filter(
+                (pr) => pr.state === "open"
+            ).length
+        );
+    }, 0);
+    const draftPrCount = allTasks.reduce((count, task) => {
+        return (
+            count +
+            (task.data.pullRequests ?? []).filter(
+                (pr) => pr.state === "draft"
+            ).length
+        );
     }, 0);
 
     const stats = {
@@ -105,7 +115,8 @@ export function buildDashboardData(
             (t) => t.data.status === "interrupted"
         ).length,
         total: allTasks.length,
-        openPrs: openPrCount
+        openPrs: openPrCount,
+        draftPrs: draftPrCount
     };
 
     const projects: Record<string, Record<string, number>> = {};
@@ -416,6 +427,17 @@ export function dashboardHtml(hasPassword: boolean): string {
     .progress-fill.overrun{background:linear-gradient(90deg,#f59e0b,#d97706)}
     .progress-pct{font-size:.65rem;color:var(--text3);white-space:nowrap;min-width:28px;text-align:right}
     .progress-est{font-size:.65rem;color:var(--text4);white-space:nowrap}
+    /* ── Bulk selection ─────────────────────────────────────────────────────── */
+    .th-cb,.td-cb{width:36px;padding-left:12px;padding-right:4px}
+    .task-cb{width:15px;height:15px;cursor:pointer;accent-color:#3b82f6}
+    .bulk-bar{position:fixed;bottom:0;left:0;right:0;background:var(--bg-card);border-top:2px solid #3b82f6;padding:12px 24px;display:flex;align-items:center;gap:12px;z-index:200;box-shadow:0 -4px 24px rgba(0,0,0,.35)}
+    .bulk-count{font-size:.82rem;font-weight:600;color:var(--text2);margin-right:4px}
+    .btn-bulk-retry{background:var(--b-q-bg);color:var(--b-q-fg);padding:7px 16px;border-radius:6px;border:none;font-size:.78rem;font-weight:600;cursor:pointer}
+    .btn-bulk-retry:hover{background:var(--btn-ret-h)}
+    .btn-bulk-cancel{background:var(--btn-cancel-bg);color:var(--btn-cancel-fg);padding:7px 16px;border-radius:6px;border:none;font-size:.78rem;font-weight:600;cursor:pointer}
+    .btn-bulk-cancel:hover{background:var(--btn-cancel-h)}
+    .btn-bulk-clear{background:var(--btn-sec-bg);color:var(--btn-sec-fg);padding:7px 16px;border-radius:6px;border:none;font-size:.78rem;font-weight:600;cursor:pointer}
+    .btn-bulk-clear:hover{background:var(--btn-sec-h)}
     /* ── Responsive ────────────────────────────────────────────────────────── */
     .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
     @media(max-width:767px){
@@ -466,16 +488,14 @@ export function dashboardHtml(hasPassword: boolean): string {
     <div class="stat"><div class="stat-label">Retrying</div><div class="stat-val ct" id="st">\u2014</div></div>
     <div class="stat"><div class="stat-label">Completed</div><div class="stat-val cc" id="sc">\u2014</div></div>
     <div class="stat"><div class="stat-label">Failed</div><div class="stat-val cf" id="sf">\u2014</div></div>
+    <div class="stat" id="stat-open-prs" style="cursor:pointer" onclick="setFilter('open-prs')" title="Click to filter tasks with open PRs"><div class="stat-label" style="color:var(--b-pr-open-fg)" id="spr-lbl">Open PRs</div><div class="stat-val" style="color:var(--b-pr-open-fg)" id="spr">\u2014</div></div>
+    <div class="stat" id="stat-draft-prs" style="cursor:pointer" onclick="setFilter('draft-prs')" title="Click to filter tasks with draft PRs"><div class="stat-label" style="color:var(--b-pr-draft-fg)" id="sdpr-lbl">Draft PRs</div><div class="stat-val" style="color:var(--b-pr-draft-fg)" id="sdpr">\u2014</div></div>
   </div>
   <div class="section-title">Projects</div>
   <div class="projects" id="projects"><div class="muted" style="font-size:.82rem">Loading\u2026</div></div>
   <div class="proj-hint" id="proj-hint">Click a project card to filter tasks by project.</div>
   <div class="tasks-header">
     <div class="section-title">Tasks</div>
-    <div class="open-prs-panel" id="open-prs-panel" style="display:none" onclick="setFilter('open-prs')" title="Click to filter tasks with open PRs">
-      <div class="open-prs-label">Open PRs</div>
-      <div class="open-prs-count" id="spr">\u2014</div>
-    </div>
   </div>
   <div class="filters" id="filters">
     <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">All</button>
@@ -488,14 +508,23 @@ export function dashboardHtml(hasPassword: boolean): string {
     <button class="filter-btn" data-filter="interrupted" onclick="setFilter('interrupted')">Interrupted</button>
     <button class="filter-btn" data-filter="cancelled" onclick="setFilter('cancelled')">Cancelled</button>
     <button class="filter-btn" data-filter="open-prs" onclick="setFilter('open-prs')">Open PRs</button>
+    <button class="filter-btn" data-filter="draft-prs" onclick="setFilter('draft-prs')">Draft PRs</button>
   </div>
   <div class="table-wrap">
   <table>
     <thead><tr>
-      <th>Status</th><th>Project</th><th class="th-taskid">Task ID</th><th>Title / Prompt</th><th class="th-dur">Duration</th><th class="th-started">Started</th><th class="th-pr">PR</th>
+      <th class="th-cb"><input type="checkbox" id="cb-all" title="Select all visible tasks" onchange="toggleSelectAll(this.checked)"></th><th>Status</th><th>Project</th><th class="th-taskid">Task ID</th><th>Title / Prompt</th><th class="th-dur">Duration</th><th class="th-started">Started</th><th class="th-pr">PR</th>
     </tr></thead>
-    <tbody id="tb"><tr><td colspan="7" class="empty">Connecting\u2026</td></tr></tbody>
+    <tbody id="tb"><tr><td colspan="8" class="empty">Connecting\u2026</td></tr></tbody>
   </table>
+  </div>
+
+  <!-- Bulk action bar -->
+  <div id="bulk-bar" class="bulk-bar" style="display:none">
+    <span class="bulk-count" id="bulk-count">0 selected</span>
+    <button class="btn-bulk-retry" onclick="bulkRetry()">Retry Selected</button>
+    <button class="btn-bulk-cancel" onclick="bulkCancel()">Cancel Selected</button>
+    <button class="btn-bulk-clear" onclick="clearSelection()">Clear</button>
   </div>
 
   <!-- Task Detail Modal -->
@@ -596,8 +625,9 @@ export function dashboardHtml(hasPassword: boolean): string {
   </div>
 
   <script>
-    var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null,retryCountdownInterval=null;
+    var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null,retryCountdownInterval=null,selectedTaskIds=new Set();
     function hasOpenPrs(t){return!!(t.pullRequests&&t.pullRequests.some(function(pr){return pr.state==='open'||pr.state==='draft'||!pr.state;}));}
+    function hasDraftPrs(t){return!!(t.pullRequests&&t.pullRequests.some(function(pr){return pr.state==='draft';}));}
     function prStateBadge(state){
       var map={open:['pr-open','\u25CF Open'],draft:['pr-draft','\u25CB Draft'],merged:['pr-merged','\u2A2F Merged'],closed:['pr-closed','\u2715 Closed']};
       var s=state||'open';var r=map[s]||map['open'];
@@ -629,6 +659,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       if(lastData)renderTasks(lastData.tasks);
     }
     function taskHasOpenPr(t){return hasOpenPrs(t);}
+    function taskHasDraftPr(t){return hasDraftPrs(t);}
     function toggleProject(id){
       if(selectedProjects.has(id)){selectedProjects.delete(id);}else{selectedProjects.add(id);}
       updateProjHint();
@@ -667,7 +698,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     }
     function renderTasks(tasks){
       var filtered=tasks.filter(function(t){
-        var statusOk=currentFilter==='all'||t.status===currentFilter||(currentFilter==='open-prs'&&taskHasOpenPr(t));
+        var statusOk=currentFilter==='all'||t.status===currentFilter||(currentFilter==='open-prs'&&taskHasOpenPr(t))||(currentFilter==='draft-prs'&&taskHasDraftPr(t));
         var projOk=selectedProjects.size===0||selectedProjects.has(t.projectId);
         return statusOk&&projOk;
       });
@@ -675,22 +706,25 @@ export function dashboardHtml(hasPassword: boolean): string {
       if(!filtered.length){
         var msg='No tasks';
         if(currentFilter==='open-prs')msg='No tasks with open pull requests';
+        else if(currentFilter==='draft-prs')msg='No tasks with draft pull requests';
         else if(currentFilter!=='all')msg+=' with status \u201c'+currentFilter+'\u201d';
         if(selectedProjects.size>0)msg+=' in selected project'+(selectedProjects.size>1?'s':'');
-        tb.innerHTML='<tr><td colspan="7" class="empty">'+msg+'</td></tr>';return;
+        tb.innerHTML='<tr><td colspan="8" class="empty">'+msg+'</td></tr>';return;
       }
       tb.innerHTML=filtered.map(function(t){
         var rowClass='clickable tr-'+esc(t.status);
         if(t.status==='completed'&&!isRecentCompleted(t.completedAt))rowClass+=' tr-completed-old';
         if(t.status==='completed'&&!viewedTasks.has(t.taskId))rowClass+=' tr-completed-new';
-        var activePrs=t.pullRequests?t.pullRequests.filter(function(pr){return pr.state==='open'||pr.state==='draft'||!pr.state;}):[];
+        var activePrs=t.pullRequests?t.pullRequests.filter(function(pr){return pr.state==='open'||pr.state==='draft';}):[];
         if(activePrs.length>0)rowClass+=' open-pr-row';
         var prBtns='';
         if(activePrs.length){
           prBtns=activePrs.map(function(pr){
             var num=pr.url?pr.url.split('/').pop():'PR';
-            var stateClass=pr.state==='draft'?'pr-btn-draft':'pr-btn-open';
-            return '<a class="pr-btn '+stateClass+'" href="'+esc(pr.url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="'+(pr.state==='draft'?'Draft':'Open')+' PR #'+esc(num)+' \u2014 '+esc(pr.repo||'')+'">'+(pr.state==='draft'?'\u25CB':'\u25CF')+'&nbsp;#'+esc(num)+'</a>';
+            var isDraft=pr.state==='draft';
+            var stateClass=isDraft?'pr-btn-draft':'pr-btn-open';
+            var label=isDraft?'\u25CB Draft':'\u25CF';
+            return '<a class="pr-btn '+stateClass+'" href="'+esc(pr.url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="'+(isDraft?'Draft':'Open')+' PR #'+esc(num)+' \u2014 '+esc(pr.repo||'')+'">'+label+'&nbsp;#'+esc(num)+'</a>';
           }).join('');
         }
         var progressHtml='';
@@ -701,7 +735,9 @@ export function dashboardHtml(hasPassword: boolean): string {
           var estLabel=dur(t.estimatedDurationSeconds);
           progressHtml='<div class="task-progress"><div class="progress-track"><div class="'+fillClass+'" style="width:'+pct+'%"></div></div><span class="progress-pct">'+pct+'%</span><span class="progress-est">/ '+estLabel+'</span></div>';
         }
+        var isChecked=selectedTaskIds.has(t.taskId);
         return '<tr class="'+rowClass+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'">'
+          +'<td class="td-cb" onclick="event.stopPropagation()"><input type="checkbox" class="task-cb" data-id="'+esc(t.taskId)+'" '+(isChecked?'checked':'')+' onchange="toggleTaskSelection(this.dataset.id,this.checked)" onclick="event.stopPropagation()"></td>'
           +'<td>'+badge(t.status,t.completedAt,t.taskId)+'</td>'
           +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
           +'<td class="td-taskid"><span class="mono">'+esc(t.taskId)+'</span></td>'
@@ -714,6 +750,61 @@ export function dashboardHtml(hasPassword: boolean): string {
       tb.querySelectorAll('tr.clickable').forEach(function(row){
         row.addEventListener('click',function(){openTask(this.dataset.id,this.dataset.proj);});
       });
+      // Sync select-all checkbox
+      var cbAll=document.getElementById('cb-all');
+      if(cbAll){var total=filtered.length,checked=filtered.filter(function(t){return selectedTaskIds.has(t.taskId);}).length;cbAll.checked=total>0&&checked===total;cbAll.indeterminate=checked>0&&checked<total;}
+    }
+    function toggleTaskSelection(taskId,checked){
+      if(checked)selectedTaskIds.add(taskId);
+      else selectedTaskIds.delete(taskId);
+      updateBulkBar();
+      // Sync select-all checkbox
+      var cbAll=document.getElementById('cb-all');
+      if(cbAll&&lastData){var visible=document.querySelectorAll('.task-cb');var total=visible.length,ch=Array.from(visible).filter(function(c){return c.checked;}).length;cbAll.checked=total>0&&ch===total;cbAll.indeterminate=ch>0&&ch<total;}
+    }
+    function toggleSelectAll(checked){
+      document.querySelectorAll('.task-cb').forEach(function(cb){
+        cb.checked=checked;
+        if(checked)selectedTaskIds.add(cb.dataset.id);
+        else selectedTaskIds.delete(cb.dataset.id);
+      });
+      updateBulkBar();
+    }
+    function updateBulkBar(){
+      var bar=document.getElementById('bulk-bar');
+      var count=selectedTaskIds.size;
+      if(!count){bar.style.display='none';return;}
+      bar.style.display='flex';
+      document.getElementById('bulk-count').textContent=count+' task'+(count>1?'s':'')+' selected';
+    }
+    function clearSelection(){
+      selectedTaskIds.clear();
+      updateBulkBar();
+      if(lastData)renderTasks(lastData.tasks);
+    }
+    function bulkRetry(){
+      var ids=Array.from(selectedTaskIds);
+      if(!ids.length)return;
+      if(!confirm('Retry '+ids.length+' task'+(ids.length>1?'s':'')+'?'))return;
+      fetch('/dashboard/api/tasks/bulk-retry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({taskIds:ids})})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          if(d.error){alert('Error: '+d.error);return;}
+          clearSelection();
+        })
+        .catch(function(){alert('Failed to retry tasks');});
+    }
+    function bulkCancel(){
+      var ids=Array.from(selectedTaskIds);
+      if(!ids.length)return;
+      if(!confirm('Cancel '+ids.length+' task'+(ids.length>1?'s':'')+'?'))return;
+      fetch('/dashboard/api/tasks/bulk-cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({taskIds:ids})})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          if(d.error){alert('Error: '+d.error);return;}
+          clearSelection();
+        })
+        .catch(function(){alert('Failed to cancel tasks');});
     }
     function openTask(taskId,projectId){
       currentTaskId=taskId;
@@ -944,9 +1035,15 @@ export function dashboardHtml(hasPassword: boolean): string {
       document.getElementById('sc').textContent=stats.completed;
       document.getElementById('sf').textContent=stats.failed;
       var openPrs=stats.openPrs||0;
+      var draftPrs=stats.draftPrs||0;
       document.getElementById('spr').textContent=openPrs;
-      var panel=document.getElementById('open-prs-panel');
-      if(panel)panel.style.display=openPrs>0?'flex':'none';
+      document.getElementById('sdpr').textContent=draftPrs;
+      // Highlight Open PRs card when there are open PRs
+      var sprCard=document.getElementById('stat-open-prs');
+      if(sprCard)sprCard.style.boxShadow=openPrs>0?'0 0 0 1px rgba(74,222,128,.3),0 0 12px rgba(74,222,128,.1)':'';
+      // Highlight Draft PRs card when there are draft PRs
+      var sdprCard=document.getElementById('stat-draft-prs');
+      if(sdprCard)sdprCard.style.boxShadow=draftPrs>0?'0 0 0 1px rgba(148,163,184,.3),0 0 10px rgba(148,163,184,.07)':'';
       var srCard=document.getElementById('stat-running');
       var sqCard=document.getElementById('stat-queued');
       var srLbl=document.getElementById('sr-lbl');
@@ -1324,5 +1421,73 @@ export function registerDashboardRoutes(
                 r.reason instanceof Error ? r.reason.message : "Unknown error"
             );
         res.json({ retried, errors });
+    });
+
+    app.post("/dashboard/api/tasks/bulk-cancel", async (req, res) => {
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        const { taskIds } = req.body ?? {};
+        if (!Array.isArray(taskIds) || taskIds.length === 0) {
+            res.status(400).json({ error: "taskIds array is required" });
+            return;
+        }
+        const allTasks = taskManager.listAllTasks();
+        const tasksById = new Map(allTasks.map((t) => [t.id, t]));
+        const results = await Promise.allSettled(
+            taskIds.map(async (id: string) => {
+                const task = tasksById.get(id as TaskId);
+                if (!task) throw new Error(`Task ${id} not found`);
+                return taskManager.cancelTask(task.data.projectId, task.id);
+            })
+        );
+        const succeeded = results.filter(
+            (r) => r.status === "fulfilled"
+        ).length;
+        const errors = results
+            .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+            .map((r) =>
+                r.reason instanceof Error ? r.reason.message : "Unknown error"
+            );
+        res.json({ succeeded, failed: errors.length, errors });
+    });
+
+    app.post("/dashboard/api/tasks/bulk-retry", async (req, res) => {
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        const { taskIds } = req.body ?? {};
+        if (!Array.isArray(taskIds) || taskIds.length === 0) {
+            res.status(400).json({ error: "taskIds array is required" });
+            return;
+        }
+        const allTasks = taskManager.listAllTasks();
+        const tasksById = new Map(allTasks.map((t) => [t.id, t]));
+        const results = await Promise.allSettled(
+            taskIds.map(async (id: string) => {
+                const task = tasksById.get(id as TaskId);
+                if (!task) throw new Error(`Task ${id} not found`);
+                return taskManager.retryTask(task.data.projectId, task.id);
+            })
+        );
+        const succeeded = results.filter(
+            (r) => r.status === "fulfilled"
+        ).length;
+        const errors = results
+            .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+            .map((r) =>
+                r.reason instanceof Error ? r.reason.message : "Unknown error"
+            );
+        res.json({ succeeded, failed: errors.length, errors });
     });
 }
