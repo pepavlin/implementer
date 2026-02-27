@@ -335,12 +335,44 @@ export function dashboardHtml(hasPassword: boolean): string {
     textarea.form-inp{resize:vertical}
     select.form-inp option{background:var(--bg-card)}
     .form-err{background:var(--b-fail-bg);color:var(--b-fail-fg);padding:10px 14px;border-radius:6px;font-size:.8rem;margin-top:8px}
+    /* ── Responsive ────────────────────────────────────────────────────────── */
+    .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+    @media(max-width:767px){
+      body{padding:16px}
+      .stat{flex:1 1 calc(33% - 8px)}
+    }
+    @media(max-width:540px){
+      body{padding:10px}
+      header{flex-direction:column;align-items:stretch;gap:8px;margin-bottom:14px}
+      h1{font-size:1.15rem}
+      .header-actions{justify-content:space-between;flex-wrap:wrap;gap:6px}
+      .stats{gap:6px;margin-bottom:16px}
+      .stat{flex:1 1 calc(50% - 3px);padding:10px 12px}
+      .stat-val{font-size:1.4rem}
+      .proj-card{flex:1 1 calc(50% - 5px);min-width:130px}
+      .proj-name{font-size:.78rem}
+      th,td{padding:8px 10px}
+      table{font-size:.8rem}
+      .th-taskid,.td-taskid,.th-dur,.td-dur,.th-started,.td-started{display:none}
+      .tprompt{white-space:normal}
+      .overlay{padding:6px}
+      .modal{max-height:96vh}
+      .modal-hd{padding:12px 14px}
+      .modal-bd{padding:14px}
+      .modal-ft{padding:10px 14px;flex-wrap:wrap;gap:6px}
+      .modal-ft .btn{flex:1 1 auto;text-align:center;justify-content:center}
+      .btn{padding:7px 12px}
+      .btn-new{padding:7px 12px;font-size:.76rem}
+      .filters{gap:5px}
+      .filter-btn{padding:4px 10px;font-size:.72rem}
+      .section-title{font-size:.75rem}
+    }
   </style>
 </head>
 <body>
   <header>
     <h1>Implementer Dashboard</h1>
-    <div style="display:flex;align-items:center;gap:12px">
+    <div class="header-actions" style="display:flex;align-items:center;gap:12px">
       <button class="btn-new" onclick="openNewTask()">+ New Task</button>
       <button class="theme-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">&#x2600;</button>
       <div class="live"><span class="dot" id="dot"></span><span id="upd">Connecting\u2026</span><button class="btn-ref-ico" id="refresh-btn" onclick="refreshData()" title="Refresh">\u21bb</button></div>
@@ -369,12 +401,14 @@ export function dashboardHtml(hasPassword: boolean): string {
     <button class="filter-btn" data-filter="interrupted" onclick="setFilter('interrupted')">Interrupted</button>
     <button class="filter-btn" data-filter="cancelled" onclick="setFilter('cancelled')">Cancelled</button>
   </div>
+  <div class="table-wrap">
   <table>
     <thead><tr>
-      <th>Status</th><th>Project</th><th>Task ID</th><th>Title / Prompt</th><th>Duration</th><th>Started</th>
+      <th>Status</th><th>Project</th><th class="th-taskid">Task ID</th><th>Title / Prompt</th><th class="th-dur">Duration</th><th class="th-started">Started</th>
     </tr></thead>
     <tbody id="tb"><tr><td colspan="6" class="empty">Connecting\u2026</td></tr></tbody>
   </table>
+  </div>
 
   <!-- Task Detail Modal -->
   <div id="task-overlay" class="overlay" style="display:none" onclick="if(event.target===this)closeTask()">
@@ -512,10 +546,10 @@ export function dashboardHtml(hasPassword: boolean): string {
         return '<tr class="clickable tr-'+esc(t.status)+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'">'
           +'<td>'+badge(t.status)+'</td>'
           +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
-          +'<td><span class="mono">'+esc(t.taskId)+'</span></td>'
+          +'<td class="td-taskid"><span class="mono">'+esc(t.taskId)+'</span></td>'
           +'<td>'+(t.title?'<div class="ttitle">'+esc(t.title)+'</div>':'')+'<div class="tprompt">'+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+'</div></td>'
-          +'<td class="mono">'+dur(t.durationSeconds)+'</td>'
-          +'<td class="mono">'+fmtDate(t.startedAt)+'</td>'
+          +'<td class="td-dur mono">'+dur(t.durationSeconds)+'</td>'
+          +'<td class="td-started mono">'+fmtDate(t.startedAt)+'</td>'
           +'</tr>';
       }).join('');
       tb.querySelectorAll('tr.clickable').forEach(function(row){
