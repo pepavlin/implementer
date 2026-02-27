@@ -5,6 +5,7 @@ import { registerDashboardRoutes, buildDashboardData, dashboardToken } from "../
 import type { Task, TaskId, ProjectId, ChainId } from "../src/types.js";
 import type { Config } from "../src/config/config.js";
 import type { TaskManager } from "../src/task-manager/task-manager.js";
+import { TaskActiveError } from "../src/task-manager/task-manager.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -44,16 +45,17 @@ function makeConfig(maxAttempts?: number): Partial<Config> {
     };
 }
 
-function makeTaskManager(tasks: Task[]): Partial<TaskManager> {
+function makeTaskManager(tasks: Task[], overrides: Partial<TaskManager> = {}): Partial<TaskManager> {
     return {
-        listAllTasks: vi.fn(() => tasks)
+        listAllTasks: vi.fn(() => tasks),
+        ...overrides,
     };
 }
 
-function createApp(tasks: Task[], configOverride?: Partial<Config>): express.Express {
+function createApp(tasks: Task[], configOverride?: Partial<Config>, tmOverrides?: Partial<TaskManager>): express.Express {
     const app = express();
     app.use(express.json());
-    const tm = makeTaskManager(tasks) as unknown as TaskManager;
+    const tm = makeTaskManager(tasks, tmOverrides) as unknown as TaskManager;
     const cfg = (configOverride ?? makeConfig()) as unknown as Config;
     registerDashboardRoutes(app, tm, cfg);
     return app;
@@ -426,5 +428,72 @@ describe("dashboard HTML - completed badge recency styling", () => {
         // 20 minutes = 1200000 ms
         expect(res.text).toContain("isRecentCompleted");
         expect(res.text).toContain("1200000");
+    });
+});
+
+describe("POST /dashboard/api/task/:taskId/retry-now", () => {
+    it("returns 401 without authentication", async () => {
+        const task = makeTask({ status: "retrying", completedAt: null });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .post("/dashboard/api/task/abc12345/retry-now")
+            .send({});
+
+        expect(res.status).toBe(401);
+    });
+
+    it("returns 404 when task not found", async () => {
+        const app = createApp([]);
+
+        const res = await request(app)
+            .post("/dashboard/api/task/nonexistent/retry-now")
+            .set("Cookie", AUTH_COOKIE)
+            .send({});
+
+        expect(res.status).toBe(404);
+    });
+
+    it("returns 409 when task is not in retrying status", async () => {
+        const task = makeTask({ status: "failed" });
+        const retryTaskNow = vi.fn().mockRejectedValue(new TaskActiveError("failed"));
+        const app = createApp([task], makeConfig(), { retryTaskNow } as any);
+
+        const res = await request(app)
+            .post("/dashboard/api/task/abc12345/retry-now")
+            .set("Cookie", AUTH_COOKIE)
+            .send({});
+
+        expect(res.status).toBe(409);
+    });
+
+    it("returns queued status after immediate retry of retrying task", async () => {
+        const nextRetryAt = new Date(Date.now() + 60_000).toISOString();
+        const task = makeTask({ status: "retrying", completedAt: null, nextRetryAt });
+        const retryTaskNow = vi.fn().mockResolvedValue({ ...task, status: "queued", nextRetryAt: undefined });
+        const app = createApp([task], makeConfig(), { retryTaskNow } as any);
+
+        const res = await request(app)
+            .post("/dashboard/api/task/abc12345/retry-now")
+            .set("Cookie", AUTH_COOKIE)
+            .send({});
+
+        expect(res.status).toBe(200);
+        expect(res.body.status).toBe("queued");
+        expect(retryTaskNow).toHaveBeenCalledWith("my-project", "abc12345");
+    });
+
+    it("renders Retry Now button only for retrying tasks", async () => {
+        const task = makeTask({ status: "retrying", completedAt: null });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("task-retry-now");
+        expect(res.text).toContain("retryNow()");
+        expect(res.text).toContain("retry-now");
     });
 });
