@@ -208,6 +208,13 @@ export class TaskManager {
         // If metadata not exist, generate
         if (!task.branch) {
             await prepareMetadata(task, state, this, entry);
+            // prepareMetadata catches its own errors and marks the task as "failed".
+            // If that happened, release the chain lock and bail out — don't acquire a workspace.
+            if (task.status === "failed") {
+                this.unmarkChainActive(projectId, task.chainId);
+                void this.dequeueAvailableTasks();
+                return;
+            }
         }
         entry.executor = new Executor(
             state.config.claudeCode,
@@ -240,6 +247,8 @@ export class TaskManager {
                 if (task.callbackUrl) {
                     fireWebhook(task.taskId, task.status, task.callbackUrl);
                 }
+                // Status changed — attempt to dequeue waiting tasks now that the chain lock is free.
+                void this.dequeueAvailableTasks();
             });
     }
 
@@ -528,7 +537,7 @@ export class TaskManager {
         const entry = this.getTaskEntry(projectId, taskId);
         const task = entry.task;
 
-        if (!["queued", "running", "retrying"].includes(task.status)) {
+        if (!["queued", "starting", "running", "retrying"].includes(task.status)) {
             throw new TaskCancelError(task.status);
         }
 
@@ -568,6 +577,11 @@ export class TaskManager {
         if (task.callbackUrl) {
             fireWebhook(taskId, task.status, task.callbackUrl);
         }
+
+        // After any status change, attempt to dequeue waiting tasks.
+        // For "running" cancellations the executeTask finally block will call this again
+        // once the workspace is actually released; this early call is a safe no-op then.
+        void this.dequeueAvailableTasks();
 
         return task;
     }
