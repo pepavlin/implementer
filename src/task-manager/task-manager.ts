@@ -4,6 +4,7 @@ import type {
     ChainId,
     PersistedTask,
     ProjectId,
+    PullRequestState,
     Task,
     TaskCreateRequest,
     TaskId
@@ -19,6 +20,7 @@ import { TaskActiveError, TaskCancelError, TaskEditError } from "./errors.js";
 import { BadRequestError } from "../errors.js";
 import { fireWebhook } from "./utils.js";
 import { executeTask, prepareMetadata } from "./task-runner.js";
+import { PrPoller } from "../pr-poller.js";
 export { TaskActiveError, TaskCancelError, TaskEditError };
 
 export class TaskManager {
@@ -31,6 +33,7 @@ export class TaskManager {
 
     gitManager: GitManager;
     private store: TaskStore;
+    private prPoller: PrPoller;
 
     tasks: Map<TaskId, TaskEntry> = new Map();
     /** FIFO queue of taskIds waiting to run. */
@@ -44,6 +47,7 @@ export class TaskManager {
 
         this.gitManager = new GitManager();
         this.store = new TaskStore(config.server.workspaceDir);
+        this.prPoller = new PrPoller(this, config);
 
         // Get ready projects
         for (const [projectId, projectConfig] of Object.entries(
@@ -117,6 +121,9 @@ export class TaskManager {
 
         // Try to start any queued tasks (capacity may be available after resumption)
         await this.dequeueAvailableTasks();
+
+        // Start background PR state polling
+        this.prPoller.start();
     }
 
     async dequeueAvailableTasks(): Promise<void> {
@@ -289,6 +296,20 @@ export class TaskManager {
                 return true;
             })
             .map((entry) => entry.task);
+    }
+
+    /**
+     * Update the state of a single pull request on a task. Called by the PR
+     * poller when it detects a state change. Persists the updated task to disk.
+     */
+    updatePrState(taskId: string, prUrl: string, state: PullRequestState): void {
+        const entry = this.tasks.get(taskId as TaskId);
+        if (!entry) return;
+        const pr = entry.task.pullRequests?.find((p) => p.url === prUrl);
+        if (!pr) return;
+        pr.state = state;
+        pr.lastCheckedAt = new Date().toISOString();
+        this.saveTask(entry);
     }
 
     /** Returns all tasks across all projects, sorted by startedAt descending. */

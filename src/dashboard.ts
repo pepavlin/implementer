@@ -72,8 +72,22 @@ export function buildDashboardData(
                     : Date.now()) -
                     new Date(task.startedAt).getTime()) /
                     1000
-            )
+            ),
+        // Include minimal PR info for table-level indicators
+        pullRequests: task.pullRequests?.map((pr) => ({
+            repo: pr.repo,
+            url: pr.url,
+            state: pr.state ?? null
+        })) ?? null
     }));
+
+    // Count PRs that are open or draft (i.e. need attention)
+    const openPrCount = allTasks.reduce((count, task) => {
+        const open = (task.pullRequests ?? []).filter(
+            (pr) => pr.state === "open" || pr.state === "draft" || !pr.state
+        ).length;
+        return count + open;
+    }, 0);
 
     const stats = {
         running: allTasks.filter((t) => t.status === "running").length,
@@ -83,7 +97,8 @@ export function buildDashboardData(
         completed: allTasks.filter((t) => t.status === "completed").length,
         failed: allTasks.filter((t) => t.status === "failed").length,
         interrupted: allTasks.filter((t) => t.status === "interrupted").length,
-        total: allTasks.length
+        total: allTasks.length,
+        openPrs: openPrCount
     };
 
     const projects: Record<string, Record<string, number>> = {};
@@ -199,6 +214,10 @@ export function dashboardHtml(hasPassword: boolean): string {
       --b-ret-bg:#1e3a5f;--b-ret-fg:#60a5fa;--b-done-bg:#0a2e1e;--b-done-fg:#34d399;
       --b-fail-bg:#3b0f0f;--b-fail-fg:#ef4444;--b-int-bg:#2a1f3a;--b-int-fg:#a78bfa;
       --b-can-bg:#1e2130;--b-can-fg:#475569;
+      --b-pr-open-bg:#14532d;--b-pr-open-fg:#4ade80;
+      --b-pr-draft-bg:#1e2130;--b-pr-draft-fg:#94a3b8;
+      --b-pr-merged-bg:#2e1065;--b-pr-merged-fg:#c084fc;
+      --b-pr-closed-bg:#3b0f0f;--b-pr-closed-fg:#ef4444;
       --btn-sec-bg:#252a3a;--btn-sec-fg:#94a3b8;--btn-sec-h:#2a2f42;--btn-ret-h:#78350f;
       --btn-cancel-bg:#3b0f0f;--btn-cancel-fg:#ef4444;--btn-cancel-h:#7f1d1d;
       --btn-edit-bg:#1e3a5f;--btn-edit-fg:#60a5fa;--btn-edit-h:#1e40af;
@@ -213,6 +232,10 @@ export function dashboardHtml(hasPassword: boolean): string {
       --b-ret-bg:#dbeafe;--b-ret-fg:#2563eb;--b-done-bg:#d1fae5;--b-done-fg:#059669;
       --b-fail-bg:#fee2e2;--b-fail-fg:#dc2626;--b-int-bg:#ede9fe;--b-int-fg:#7c3aed;
       --b-can-bg:#f1f5f9;--b-can-fg:#64748b;
+      --b-pr-open-bg:#dcfce7;--b-pr-open-fg:#16a34a;
+      --b-pr-draft-bg:#f1f5f9;--b-pr-draft-fg:#64748b;
+      --b-pr-merged-bg:#f3e8ff;--b-pr-merged-fg:#7c3aed;
+      --b-pr-closed-bg:#fee2e2;--b-pr-closed-fg:#dc2626;
       --btn-sec-bg:#f1f5f9;--btn-sec-fg:#475569;--btn-sec-h:#e2e8f0;--btn-ret-h:#fbbf24;
       --btn-cancel-bg:#fee2e2;--btn-cancel-fg:#dc2626;--btn-cancel-h:#fca5a5;
       --btn-edit-bg:#dbeafe;--btn-edit-fg:#2563eb;--btn-edit-h:#93c5fd;
@@ -308,6 +331,14 @@ export function dashboardHtml(hasPassword: boolean): string {
     .b-failed{background:var(--b-fail-bg);color:var(--b-fail-fg)}
     .b-interrupted{background:var(--b-int-bg);color:var(--b-int-fg)}
     .b-cancelled{background:var(--b-can-bg);color:var(--b-can-fg)}
+    .pr-state{display:inline-flex;align-items:center;padding:1px 7px;border-radius:999px;font-size:.65rem;font-weight:600;white-space:nowrap;gap:3px}
+    .pr-open{background:var(--b-pr-open-bg);color:var(--b-pr-open-fg)}
+    .pr-draft{background:var(--b-pr-draft-bg);color:var(--b-pr-draft-fg)}
+    .pr-merged{background:var(--b-pr-merged-bg);color:var(--b-pr-merged-fg)}
+    .pr-closed{background:var(--b-pr-closed-bg);color:var(--b-pr-closed-fg)}
+    .stat-has-open-prs{box-shadow:0 0 0 1px rgba(74,222,128,.35),0 0 12px rgba(74,222,128,.12)}
+    .open-pr-row td:first-child{border-left:3px solid #4ade8070!important}
+    .pr-indicators{display:inline-flex;gap:4px;margin-left:6px;vertical-align:middle;flex-wrap:wrap}
     .proj-tag{background:var(--tag-bg);padding:2px 8px;border-radius:4px;font-size:.73rem;color:var(--text2)}
     .mono{font-family:ui-monospace,'SF Mono',monospace;font-size:.76rem;color:var(--text2)}
     .ttitle{font-weight:500;color:var(--text5)}
@@ -409,6 +440,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     <div class="stat"><div class="stat-label">Retrying</div><div class="stat-val ct" id="st">\u2014</div></div>
     <div class="stat"><div class="stat-label">Completed</div><div class="stat-val cc" id="sc">\u2014</div></div>
     <div class="stat"><div class="stat-label">Failed</div><div class="stat-val cf" id="sf">\u2014</div></div>
+    <div class="stat" id="stat-open-prs" style="cursor:pointer" onclick="setFilter('open-prs')" title="Click to filter tasks with open PRs"><div class="stat-label" id="spr-lbl" style="color:var(--b-pr-open-fg)">Open PRs</div><div class="stat-val" id="spr" style="color:var(--b-pr-open-fg)">\u2014</div></div>
   </div>
   <div class="section-title">Projects</div>
   <div class="projects" id="projects"><div class="muted" style="font-size:.82rem">Loading\u2026</div></div>
@@ -424,6 +456,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     <button class="filter-btn" data-filter="failed" onclick="setFilter('failed')">Failed</button>
     <button class="filter-btn" data-filter="interrupted" onclick="setFilter('interrupted')">Interrupted</button>
     <button class="filter-btn" data-filter="cancelled" onclick="setFilter('cancelled')">Cancelled</button>
+    <button class="filter-btn" data-filter="open-prs" onclick="setFilter('open-prs')">Open PRs</button>
   </div>
   <div class="table-wrap">
   <table>
@@ -533,6 +566,12 @@ export function dashboardHtml(hasPassword: boolean): string {
 
   <script>
     var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null,retryCountdownInterval=null;
+    function hasOpenPrs(t){return!!(t.pullRequests&&t.pullRequests.some(function(pr){return pr.state==='open'||pr.state==='draft'||!pr.state;}));}
+    function prStateBadge(state){
+      var map={open:['pr-open','\u25CF Open'],draft:['pr-draft','\u25CB Draft'],merged:['pr-merged','\u2A2F Merged'],closed:['pr-closed','\u2715 Closed']};
+      var s=state||'open';var r=map[s]||map['open'];
+      return '<span class="pr-state '+r[0]+'">'+r[1]+'</span>';
+    }
     var viewedTasks=new Set(JSON.parse(localStorage.getItem('seenCompletedTasks')||'[]'));
     function fmtCountdown(ms){if(ms<=0)return 'now';var s=Math.ceil(ms/1000);if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;return m+'m '+r+'s';}
     function startRetryCountdown(nextRetryAt){
@@ -558,6 +597,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       document.querySelectorAll('.filter-btn').forEach(function(b){b.classList.toggle('active',b.dataset.filter===f);});
       if(lastData)renderTasks(lastData.tasks);
     }
+    function taskHasOpenPr(t){return hasOpenPrs(t);}
     function toggleProject(id){
       if(selectedProjects.has(id)){selectedProjects.delete(id);}else{selectedProjects.add(id);}
       updateProjHint();
@@ -596,14 +636,15 @@ export function dashboardHtml(hasPassword: boolean): string {
     }
     function renderTasks(tasks){
       var filtered=tasks.filter(function(t){
-        var statusOk=currentFilter==='all'||t.status===currentFilter;
+        var statusOk=currentFilter==='all'||t.status===currentFilter||(currentFilter==='open-prs'&&taskHasOpenPr(t));
         var projOk=selectedProjects.size===0||selectedProjects.has(t.projectId);
         return statusOk&&projOk;
       });
       var tb=document.getElementById('tb');
       if(!filtered.length){
         var msg='No tasks';
-        if(currentFilter!=='all')msg+=' with status \u201c'+currentFilter+'\u201d';
+        if(currentFilter==='open-prs')msg='No tasks with open pull requests';
+        else if(currentFilter!=='all')msg+=' with status \u201c'+currentFilter+'\u201d';
         if(selectedProjects.size>0)msg+=' in selected project'+(selectedProjects.size>1?'s':'');
         tb.innerHTML='<tr><td colspan="6" class="empty">'+msg+'</td></tr>';return;
       }
@@ -611,11 +652,19 @@ export function dashboardHtml(hasPassword: boolean): string {
         var rowClass='clickable tr-'+esc(t.status);
         if(t.status==='completed'&&!isRecentCompleted(t.completedAt))rowClass+=' tr-completed-old';
         if(t.status==='completed'&&!viewedTasks.has(t.taskId))rowClass+=' tr-completed-new';
+        var openPrs=t.pullRequests?t.pullRequests.filter(function(pr){return pr.state==='open'||pr.state==='draft'||!pr.state;}).length:0;
+        if(openPrs>0)rowClass+=' open-pr-row';
+        var prIndicators='';
+        if(t.pullRequests&&t.pullRequests.length){
+          prIndicators='<span class="pr-indicators">'
+            +t.pullRequests.map(function(pr){return prStateBadge(pr.state);}).join('')
+            +'</span>';
+        }
         return '<tr class="'+rowClass+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'">'
           +'<td>'+badge(t.status,t.completedAt,t.taskId)+'</td>'
           +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
           +'<td class="td-taskid"><span class="mono">'+esc(t.taskId)+'</span></td>'
-          +'<td>'+(t.title?'<div class="ttitle">'+esc(t.title)+'</div>':'')+'<div class="tprompt">'+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+'</div></td>'
+          +'<td>'+(t.title?'<div class="ttitle">'+esc(t.title)+prIndicators+'</div>':'<div class="ttitle">'+prIndicators+'</div>')+'<div class="tprompt">'+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+'</div></td>'
           +'<td class="td-dur mono">'+dur(t.durationSeconds)+'</td>'
           +'<td class="td-started mono">'+fmtDate(t.startedAt)+'</td>'
           +'</tr>';
@@ -652,8 +701,14 @@ export function dashboardHtml(hasPassword: boolean): string {
           if(t.pullRequests&&t.pullRequests.length){
             prsHtml=t.pullRequests.map(function(pr){
               var num=pr.url.split('/').pop();
-              return '<a href="'+esc(pr.url)+'" target="_blank" rel="noopener" class="pr-link">'+esc(pr.repo)+' #'+esc(num)+'</a>';
-            }).join(' &nbsp;&bull;&nbsp; ');
+              var stateHtml=prStateBadge(pr.state);
+              var checkedHtml=pr.lastCheckedAt?' <span class="muted" style="font-size:.72em">(checked '+fmtDate(pr.lastCheckedAt)+')</span>':'';
+              return '<span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px">'
+                +stateHtml
+                +'<a href="'+esc(pr.url)+'" target="_blank" rel="noopener" class="pr-link">'+esc(pr.repo)+' #'+esc(num)+'</a>'
+                +checkedHtml
+                +'</span>';
+            }).join('<br>');
           }
           stopRetryCountdown();
           var html='';
@@ -838,10 +893,14 @@ export function dashboardHtml(hasPassword: boolean): string {
       document.getElementById('st').textContent=stats.retrying;
       document.getElementById('sc').textContent=stats.completed;
       document.getElementById('sf').textContent=stats.failed;
+      var openPrs=stats.openPrs||0;
+      document.getElementById('spr').textContent=openPrs;
       var srCard=document.getElementById('stat-running');
       var sqCard=document.getElementById('stat-queued');
+      var sprCard=document.getElementById('stat-open-prs');
       var srLbl=document.getElementById('sr-lbl');
       var sqLbl=document.getElementById('sq-lbl');
+      var sprLbl=document.getElementById('spr-lbl');
       if(stats.running>0){
         srCard.className='stat stat-has-running';
         srLbl.innerHTML='<span class="stat-active-dot cr"></span>Running';
@@ -855,6 +914,13 @@ export function dashboardHtml(hasPassword: boolean): string {
       }else{
         sqCard.className='stat';
         sqLbl.innerHTML='Queued';
+      }
+      if(openPrs>0){
+        sprCard.className='stat stat-has-open-prs';
+        sprLbl.innerHTML='<span class="stat-active-dot" style="background:var(--b-pr-open-fg)"></span>Open PRs';
+      }else{
+        sprCard.className='stat';
+        sprLbl.innerHTML='Open PRs';
       }
     }
     function refreshData(){

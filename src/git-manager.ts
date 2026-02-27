@@ -464,17 +464,23 @@ export class GitManager {
         const args = ["pr", "create", "--title", title, "--body", body, "--base", repo.defaultBranch, "--head", branchName];
         if (draft) args.push("--draft");
         const url = await gh(args, repoDir, githubToken);
-        results.push({ repo: repo.name, url });
+        results.push({ repo: repo.name, url, state: draft ? "draft" : "open" });
       } catch (createErr) {
-        // PR might already exist — try to get its URL
+        // PR might already exist — try to get its URL and state
         try {
-          const url = await gh(
-            ["pr", "view", branchName, "--json", "url", "--jq", ".url"],
+          const json = await gh(
+            ["pr", "view", branchName, "--json", "url,state,isDraft"],
             repoDir,
             githubToken,
           );
-          if (url) {
-            results.push({ repo: repo.name, url });
+          if (json) {
+            const parsed = JSON.parse(json) as { url: string; state: string; isDraft: boolean };
+            const rawState = parsed.state?.toUpperCase();
+            let state: import("./types.js").PullRequestState;
+            if (rawState === "MERGED") state = "merged";
+            else if (rawState === "CLOSED") state = "closed";
+            else state = parsed.isDraft ? "draft" : "open";
+            results.push({ repo: repo.name, url: parsed.url, state });
           }
         } catch {
           console.error(`[git-manager] Failed to create PR for ${repo.name}: ${createErr instanceof Error ? createErr.message : String(createErr)}`);

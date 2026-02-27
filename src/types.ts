@@ -13,9 +13,15 @@ export type TaskStatus =
     | "interrupted"
     | "cancelled";
 
+export type PullRequestState = "open" | "draft" | "merged" | "closed";
+
 export interface PullRequest {
     repo: string;
     url: string;
+    /** Current state of the pull request, refreshed by the PR poller. */
+    state?: PullRequestState;
+    /** ISO timestamp of the last time the state was checked from GitHub. */
+    lastCheckedAt?: string;
 }
 
 export interface Task {

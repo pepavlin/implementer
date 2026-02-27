@@ -11,11 +11,14 @@ The dashboard uses a cookie-based session (`impl_dash`). On successful login, a 
 - **Live task stream** — uses Server-Sent Events (`/dashboard/events`) to push updates every 2 seconds
 - **Manual refresh** — a Refresh button forces an immediate reload of all task states
 - **Project cards** — shows per-project task counts; click to filter the task list
-- **Status filters** — filter tasks by status (running, queued, retrying, completed, failed, interrupted)
-- **Task detail modal** — view full task info including prompt, output, error, branch, and pull requests
+- **Status filters** — filter tasks by status (running, queued, retrying, completed, failed, interrupted, open PRs)
+- **Task detail modal** — view full task info including prompt, output, error, branch, and pull requests with their current state
 - **New Task modal** — submit a new task from the UI, selecting project and writing a prompt
 - **Retry task** — retry a failed or interrupted task from the task detail modal
 - **Light/dark mode toggle** — theme preference persisted in `localStorage` under the key `impl-theme`
+- **Pull request state tracking** — PRs show their current state (open, draft, merged, closed) with color-coded badges
+- **Open PRs counter** — a dedicated stat card shows the count of open/draft PRs; clicking it filters to tasks with open PRs
+- **Open PR row highlighting** — tasks with open or draft pull requests have a distinct left-border highlight in the task table
 
 ## Light/Dark Mode
 
