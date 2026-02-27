@@ -174,3 +174,99 @@ describe("buildDashboardData", () => {
         expect(data.projects["my-project"].running).toBe(1);
     });
 });
+
+describe("dashboard HTML - completed vs cancelled visual distinction", () => {
+    it("renders dashboard HTML with distinct CSS variables for completed and cancelled", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        const html = res.text;
+
+        // completed should use emerald green (--b-done-bg/fg)
+        expect(html).toContain("--b-done-bg:#0a2e1e");
+        expect(html).toContain("--b-done-fg:#34d399");
+
+        // cancelled should use a different (muted) style
+        expect(html).toContain("--b-can-bg:#1e2130");
+        expect(html).toContain("--b-can-fg:#475569");
+
+        // completed and cancelled variables must be different
+        expect(html).not.toContain("--b-done-bg:#1a2535");
+        expect(html).not.toContain("--b-done-fg:#64748b");
+    });
+
+    it("renders dashboard HTML with separate CSS classes for completed and cancelled badges", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        const html = res.text;
+
+        // Both classes must exist and reference different variables
+        expect(html).toContain(".b-completed{background:var(--b-done-bg);color:var(--b-done-fg)}");
+        expect(html).toContain(".b-cancelled{background:var(--b-can-bg);color:var(--b-can-fg)}");
+    });
+
+    it("renders completed badge with checkmark icon", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        const html = res.text;
+
+        // completed badge should contain checkmark entity
+        expect(html).toContain("&#10003; Completed");
+        // cancelled badge should contain × entity
+        expect(html).toContain("&#215; Cancelled");
+    });
+
+    it("renders table rows with distinct left-border CSS for completed and cancelled", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        const html = res.text;
+
+        // completed row gets emerald left border
+        expect(html).toContain(".tr-completed td:first-child{border-left:3px solid #34d39960}");
+        // cancelled row gets muted left border
+        expect(html).toContain(".tr-cancelled td:first-child{border-left:3px solid #47556940}");
+    });
+
+    it("light mode has distinct colours for completed and cancelled", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        const html = res.text;
+
+        // light mode completed: light emerald
+        expect(html).toContain("--b-done-bg:#d1fae5");
+        expect(html).toContain("--b-done-fg:#059669");
+
+        // light mode cancelled: light gray (distinct from completed)
+        expect(html).toContain("--b-can-bg:#f1f5f9");
+        expect(html).toContain("--b-can-fg:#64748b");
+    });
+});

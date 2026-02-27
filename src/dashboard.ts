@@ -188,9 +188,9 @@ export function dashboardHtml(hasPassword: boolean): string {
       --text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--text4:#4a5568;--text5:#f1f5f9;--text-code:#cbd5e1;
       --overlay:rgba(0,0,0,.75);--shadow:0 20px 60px rgba(0,0,0,.5);--tag-bg:#252a3a;
       --b-run-bg:#14532d;--b-run-fg:#22c55e;--b-start-bg:#0d3b4f;--b-start-fg:#22d3ee;--b-q-bg:#451a03;--b-q-fg:#f59e0b;
-      --b-ret-bg:#1e3a5f;--b-ret-fg:#60a5fa;--b-done-bg:#1a2535;--b-done-fg:#64748b;
+      --b-ret-bg:#1e3a5f;--b-ret-fg:#60a5fa;--b-done-bg:#0a2e1e;--b-done-fg:#34d399;
       --b-fail-bg:#3b0f0f;--b-fail-fg:#ef4444;--b-int-bg:#2a1f3a;--b-int-fg:#a78bfa;
-      --b-can-bg:#1a2535;--b-can-fg:#64748b;
+      --b-can-bg:#1e2130;--b-can-fg:#475569;
       --btn-sec-bg:#252a3a;--btn-sec-fg:#94a3b8;--btn-sec-h:#2a2f42;--btn-ret-h:#78350f;
       --btn-cancel-bg:#3b0f0f;--btn-cancel-fg:#ef4444;--btn-cancel-h:#7f1d1d;
       --btn-edit-bg:#1e3a5f;--btn-edit-fg:#60a5fa;--btn-edit-h:#1e40af;
@@ -202,9 +202,9 @@ export function dashboardHtml(hasPassword: boolean): string {
       --text:#0f172a;--text2:#475569;--text3:#64748b;--text4:#94a3b8;--text5:#1e293b;--text-code:#374151;
       --overlay:rgba(0,0,0,.5);--shadow:0 20px 60px rgba(0,0,0,.15);--tag-bg:#f1f5f9;
       --b-run-bg:#dcfce7;--b-run-fg:#16a34a;--b-start-bg:#cffafe;--b-start-fg:#0891b2;--b-q-bg:#fef3c7;--b-q-fg:#d97706;
-      --b-ret-bg:#dbeafe;--b-ret-fg:#2563eb;--b-done-bg:#f8fafc;--b-done-fg:#64748b;
+      --b-ret-bg:#dbeafe;--b-ret-fg:#2563eb;--b-done-bg:#d1fae5;--b-done-fg:#059669;
       --b-fail-bg:#fee2e2;--b-fail-fg:#dc2626;--b-int-bg:#ede9fe;--b-int-fg:#7c3aed;
-      --b-can-bg:#f8fafc;--b-can-fg:#64748b;
+      --b-can-bg:#f1f5f9;--b-can-fg:#64748b;
       --btn-sec-bg:#f1f5f9;--btn-sec-fg:#475569;--btn-sec-h:#e2e8f0;--btn-ret-h:#fbbf24;
       --btn-cancel-bg:#fee2e2;--btn-cancel-fg:#dc2626;--btn-cancel-h:#fca5a5;
       --btn-edit-bg:#dbeafe;--btn-edit-fg:#2563eb;--btn-edit-h:#93c5fd;
@@ -242,6 +242,8 @@ export function dashboardHtml(hasPassword: boolean): string {
     .tr-starting td:first-child{border-left:3px solid #22d3ee80}
     .tr-retrying td{animation:retrying-row-pulse 2s ease-in-out infinite}
     .tr-retrying td:first-child{border-left:3px solid #60a5fa80}
+    .tr-completed td:first-child{border-left:3px solid #34d39960}
+    .tr-cancelled td:first-child{border-left:3px solid #47556940}
     .stats{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
     .stat{background:var(--bg-card);border-radius:8px;padding:14px 20px;min-width:110px;transition:box-shadow .3s}
     .stat.stat-has-running{box-shadow:0 0 0 1px rgba(34,197,94,.3),0 0 12px rgba(34,197,94,.1)}
@@ -249,7 +251,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     .stat-label{font-size:.68rem;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;display:flex;align-items:center;gap:5px}
     .stat-active-dot{width:6px;height:6px;border-radius:50%;background:currentColor;animation:pulse 1.5s ease-in-out infinite;flex-shrink:0}
     .stat-val{font-size:1.8rem;font-weight:700;margin-top:2px}
-    .cr{color:#22c55e}.cq{color:#f59e0b}.ct{color:#60a5fa}.cc{color:var(--text2)}.cf{color:#ef4444}
+    .cr{color:#22c55e}.cq{color:#f59e0b}.ct{color:#60a5fa}.cc{color:var(--b-done-fg)}.cf{color:#ef4444}
     .section-title{font-size:.8rem;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
     .projects{display:flex;gap:10px;margin-bottom:8px;flex-wrap:wrap}
     .proj-card{background:var(--bg-card);border-radius:8px;padding:14px 18px;min-width:160px;border:1px solid var(--border);cursor:pointer;user-select:none;transition:border-color .3s,background .3s,box-shadow .3s}
@@ -526,7 +528,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
     var _spin='<span class="badge-spin"></span>';
     var _dots='<span class="badge-dots"><span></span><span></span><span></span></span>';
-    function badge(s){var m={running:['b-running',_spin+'Running'],starting:['b-starting',_spin+'Starting'],queued:['b-queued','Queued'+_dots],retrying:['b-retrying',_spin+'Retrying'],completed:['b-completed','Completed'],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
+    function badge(s){var m={running:['b-running',_spin+'Running'],starting:['b-starting',_spin+'Starting'],queued:['b-queued','Queued'+_dots],retrying:['b-retrying',_spin+'Retrying'],completed:['b-completed','&#10003; Completed'],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','&#215; Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
     function dur(s){if(s==null)return '—';if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
     function fmtDate(d){try{return new Date(d).toLocaleString();}catch(e){return String(d);}}
     function setFilter(f){
