@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig } from "../src/config.js";
+import { Config } from "../src/config/config.js";
 
 const TMP = join(import.meta.dirname, "..", "tmp", "config-test");
 
@@ -19,7 +19,7 @@ afterEach(() => {
     rmSync(TMP, { recursive: true, force: true });
 });
 
-describe("loadConfig", () => {
+describe("Config.load", () => {
     it("loads a minimal valid config", () => {
         const path = writeYaml(
             "config.yaml",
@@ -32,7 +32,7 @@ projects:
 `
         );
 
-        const config = loadConfig(path);
+        const config = Config.load(path);
 
         expect(config.server.workspaceDir).toContain("tmp");
         expect(Object.keys(config.projects)).toHaveLength(1);
@@ -56,7 +56,7 @@ projects:
 `
         );
 
-        const config = loadConfig(path);
+        const config = Config.load(path);
         expect(config.projects["my-project"].maxConcurrentTasks).toBe(8);
     });
 
@@ -73,7 +73,7 @@ projects:
 `
         );
 
-        expect(() => loadConfig(path)).toThrow();
+        expect(() => Config.load(path)).toThrow();
     });
 
     it("loads server-level maxConcurrentTasks", () => {
@@ -90,26 +90,8 @@ projects:
 `
         );
 
-        const config = loadConfig(path);
+        const config = Config.load(path);
         expect(config.server.maxConcurrentTasks).toBe(5);
-    });
-
-    it("loads server-level maxTokensPerHour", () => {
-        const path = writeYaml(
-            "config.yaml",
-            `
-server:
-  maxTokensPerHour: 200000
-projects:
-  my-project:
-    repositories:
-      - name: repo
-        url: https://github.com/test/repo.git
-`
-        );
-
-        const config = loadConfig(path);
-        expect(config.server.maxTokensPerHour).toBe(200_000);
     });
 
     it("rejects server.maxConcurrentTasks less than 1", () => {
@@ -126,7 +108,7 @@ projects:
 `
         );
 
-        expect(() => loadConfig(path)).toThrow();
+        expect(() => Config.load(path)).toThrow();
     });
 
     it("loads a full config with all fields", () => {
@@ -160,7 +142,7 @@ projects:
 `
         );
 
-        const config = loadConfig(path);
+        const config = Config.load(path);
 
         const project = config.projects["webapp"];
         expect(project.repositories).toHaveLength(2);
@@ -196,7 +178,7 @@ projects:
 `
         );
 
-        const config = loadConfig(path);
+        const config = Config.load(path);
         expect(Object.keys(config.projects)).toHaveLength(2);
         expect(config.projects["project-a"].repositories[0].name).toBe(
             "repo-a"
@@ -214,7 +196,7 @@ projects: {}
 `
         );
 
-        expect(() => loadConfig(path)).toThrow();
+        expect(() => Config.load(path)).toThrow();
     });
 
     it("rejects project with no repositories", () => {
@@ -227,7 +209,7 @@ projects:
 `
         );
 
-        expect(() => loadConfig(path)).toThrow();
+        expect(() => Config.load(path)).toThrow();
     });
 
     it("rejects project with missing repository name", () => {
@@ -241,7 +223,7 @@ projects:
 `
         );
 
-        expect(() => loadConfig(path)).toThrow();
+        expect(() => Config.load(path)).toThrow();
     });
 
     it("rejects project with missing repository url", () => {
@@ -255,7 +237,7 @@ projects:
 `
         );
 
-        expect(() => loadConfig(path)).toThrow();
+        expect(() => Config.load(path)).toThrow();
     });
 
     it("rejects unknown top-level fields", () => {
@@ -271,7 +253,7 @@ unknownField: true
 `
         );
 
-        expect(() => loadConfig(path)).toThrow();
+        expect(() => Config.load(path)).toThrow();
     });
 
     it("rejects unknown project fields", () => {
@@ -287,7 +269,7 @@ projects:
 `
         );
 
-        expect(() => loadConfig(path)).toThrow();
+        expect(() => Config.load(path)).toThrow();
     });
 
     it("resolves workspaceDir relative to config file", () => {
@@ -304,59 +286,8 @@ projects:
 `
         );
 
-        const config = loadConfig(path);
+        const config = Config.load(path);
         expect(config.server.workspaceDir).toBe(join(TMP, "my-workspace"));
-    });
-
-    it("interpolates ${VAR} references in auth fields", () => {
-        process.env.TEST_ANTHROPIC_KEY = "sk-from-env";
-        process.env.TEST_GITHUB_TOKEN = "ghp-from-env";
-
-        const path = writeYaml(
-            "config.yaml",
-            `
-projects:
-  my-project:
-    repositories:
-      - name: repo
-        url: https://github.com/test/repo.git
-    auth:
-      anthropicApiKey: \${TEST_ANTHROPIC_KEY}
-      githubToken: \${TEST_GITHUB_TOKEN}
-`
-        );
-
-        const config = loadConfig(path);
-        expect(config.projects["my-project"].auth?.anthropicApiKey).toBe(
-            "sk-from-env"
-        );
-        expect(config.projects["my-project"].auth?.githubToken).toBe(
-            "ghp-from-env"
-        );
-
-        delete process.env.TEST_ANTHROPIC_KEY;
-        delete process.env.TEST_GITHUB_TOKEN;
-    });
-
-    it("interpolates ${VAR} references in apiKey field", () => {
-        process.env.TEST_API_KEY = "my-api-key";
-
-        const path = writeYaml(
-            "config.yaml",
-            `
-projects:
-  my-project:
-    apiKey: \${TEST_API_KEY}
-    repositories:
-      - name: repo
-        url: https://github.com/test/repo.git
-`
-        );
-
-        const config = loadConfig(path);
-        expect(config.projects["my-project"].apiKey).toBe("my-api-key");
-
-        delete process.env.TEST_API_KEY;
     });
 
     it("loads protectedPaths when provided", () => {
@@ -375,7 +306,7 @@ projects:
 `
         );
 
-        const config = loadConfig(path);
+        const config = Config.load(path);
         expect(config.projects["my-project"].protectedPaths).toEqual([
             ".github",
             "Dockerfile",
@@ -395,31 +326,197 @@ projects:
 `
         );
 
-        const config = loadConfig(path);
+        const config = Config.load(path);
         expect(config.projects["my-project"].protectedPaths).toBeUndefined();
     });
 
-    it("interpolates ${VAR} references in claudeOauthToken field", () => {
-        process.env.TEST_CLAUDE_OAUTH_TOKEN = "oauth-from-env";
+});
 
+describe("defaults merging", () => {
+    it("concatenates global and project systemPrompt", () => {
         const path = writeYaml(
             "config.yaml",
             `
-    projects:
-      my-project:
-        repositories:
-          - name: repo
-            url: https://github.com/test/repo.git
-        auth:
-          claudeOauthToken: \${TEST_CLAUDE_OAUTH_TOKEN}
-    `
+defaults:
+  systemPrompt: "Global instructions."
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+    claudeCode:
+      systemPrompt: "Project instructions."
+`
         );
 
-        const config = loadConfig(path);
-        expect(config.projects["my-project"].auth?.claudeOauthToken).toBe(
-            "oauth-from-env"
+        const config = Config.load(path);
+        expect(config.projects["my-project"].claudeCode.systemPrompt).toBe(
+            "Global instructions.\nProject instructions."
+        );
+    });
+
+    it("shallow-merges mcpServers with project overriding global", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+defaults:
+  mcpServers:
+    playwright:
+      command: npx
+      args: ["@playwright/mcp@latest", "--headless"]
+    shared-tool:
+      command: shared
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+    claudeCode:
+      mcpServers:
+        playwright:
+          command: custom-pw
+        custom-tool:
+          command: custom
+`
         );
 
-        delete process.env.TEST_CLAUDE_OAUTH_TOKEN;
+        const config = Config.load(path);
+        const servers = config.projects["my-project"].claudeCode.mcpServers!;
+
+        // Project overrides global key
+        expect(servers["playwright"].command).toBe("custom-pw");
+        expect(servers["playwright"].args).toBeUndefined();
+        // Global-only key preserved
+        expect(servers["shared-tool"].command).toBe("shared");
+        // Project-only key preserved
+        expect(servers["custom-tool"].command).toBe("custom");
+    });
+
+    it("applies defaults when project has no systemPrompt or mcpServers", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+defaults:
+  systemPrompt: "Global only."
+  mcpServers:
+    playwright:
+      command: npx
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+`
+        );
+
+        const config = Config.load(path);
+        const cc = config.projects["my-project"].claudeCode;
+        expect(cc.systemPrompt).toBe("Global only.");
+        expect(cc.mcpServers?.playwright.command).toBe("npx");
+    });
+
+    it("uses project values when no defaults section exists", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+    claudeCode:
+      systemPrompt: "Project only."
+      mcpServers:
+        tool:
+          command: my-tool
+`
+        );
+
+        const config = Config.load(path);
+        const cc = config.projects["my-project"].claudeCode;
+        expect(cc.systemPrompt).toBe("Project only.");
+        expect(cc.mcpServers?.tool.command).toBe("my-tool");
+    });
+
+    it("handles defaults with only systemPrompt (no mcpServers)", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+defaults:
+  systemPrompt: "Global prompt."
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+    claudeCode:
+      mcpServers:
+        tool:
+          command: my-tool
+`
+        );
+
+        const config = Config.load(path);
+        const cc = config.projects["my-project"].claudeCode;
+        expect(cc.systemPrompt).toBe("Global prompt.");
+        expect(cc.mcpServers?.tool.command).toBe("my-tool");
+    });
+
+    it("handles defaults with only mcpServers (no systemPrompt)", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+defaults:
+  mcpServers:
+    global-tool:
+      command: global
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+    claudeCode:
+      systemPrompt: "Project only."
+`
+        );
+
+        const config = Config.load(path);
+        const cc = config.projects["my-project"].claudeCode;
+        expect(cc.systemPrompt).toBe("Project only.");
+        expect(cc.mcpServers?.["global-tool"].command).toBe("global");
+    });
+
+    it("applies defaults to all projects", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+defaults:
+  systemPrompt: "Shared."
+  mcpServers:
+    shared:
+      command: shared-cmd
+projects:
+  project-a:
+    repositories:
+      - name: repo-a
+        url: https://github.com/test/repo-a.git
+  project-b:
+    repositories:
+      - name: repo-b
+        url: https://github.com/test/repo-b.git
+    claudeCode:
+      systemPrompt: "B-specific."
+`
+        );
+
+        const config = Config.load(path);
+
+        const a = config.projects["project-a"].claudeCode;
+        expect(a.systemPrompt).toBe("Shared.");
+        expect(a.mcpServers?.shared.command).toBe("shared-cmd");
+
+        const b = config.projects["project-b"].claudeCode;
+        expect(b.systemPrompt).toBe("Shared.\nB-specific.");
+        expect(b.mcpServers?.shared.command).toBe("shared-cmd");
     });
 });

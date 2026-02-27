@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import yaml from "js-yaml";
-import { ServerConfig, ProjectConfig, ConfigSchema } from "./config-types";
+import {
+    ServerConfig,
+    ProjectConfig,
+    DefaultsConfig,
+    ConfigSchema
+} from "./config-types";
 import { NotFoundError, UnauthorizedError } from "../errors";
 import { ProjectId } from "../types";
 
@@ -40,7 +45,34 @@ export class Config {
             validated.server.workspaceDir
         );
 
+        // Merge global defaults into each project's claudeCode
+        if (validated.defaults) {
+            this.applyDefaults(validated.projects, validated.defaults);
+        }
+
         return validated;
+    }
+
+    private applyDefaults(
+        projects: Record<string, ProjectConfig>,
+        defaults: DefaultsConfig
+    ): void {
+        for (const project of Object.values(projects)) {
+            // systemPrompt: concatenate global + project (newline-separated)
+            if (defaults.systemPrompt) {
+                project.claudeCode.systemPrompt = project.claudeCode.systemPrompt
+                    ? `${defaults.systemPrompt}\n${project.claudeCode.systemPrompt}`
+                    : defaults.systemPrompt;
+            }
+
+            // mcpServers: shallow merge — project keys override global keys
+            if (defaults.mcpServers) {
+                project.claudeCode.mcpServers = {
+                    ...defaults.mcpServers,
+                    ...project.claudeCode.mcpServers
+                };
+            }
+        }
     }
 
     getProjectIdByToken(projectToken: string): ProjectId | null {

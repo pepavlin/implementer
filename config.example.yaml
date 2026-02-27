@@ -2,13 +2,20 @@ server:
     workspaceDir: ./workspace
     # Global cap on tasks running simultaneously across all projects (optional)
     maxConcurrentTasks: 10
-    # Max tokens/hour via the Anthropic OAuth usage API — rejects new tasks when exceeded (optional, OAuth mode only)
-    # ~100k ≈ 1/3 of Claude Max 5x observed hourly capacity (~300k/h); tune based on /api/oauth/usage response
-    maxTokensPerHour: 100000
     # Password for the /dashboard admin UI (optional).
     # If not set, the dashboard is accessible without authentication.
     # Supports ${ENV_VAR} substitution.
     # adminPassword: ${DASHBOARD_PASSWORD}
+
+# Global defaults merged into every project's claudeCode (optional).
+# systemPrompt is concatenated (global + project); mcpServers are shallow-merged (project overrides global).
+# defaults:
+#     systemPrompt: |
+#         Global instructions applied to all projects.
+#     mcpServers:
+#         playwright:
+#             command: npx
+#             args: ["@playwright/mcp@latest", "--headless"]
 
 projects:
     demo-webapp:

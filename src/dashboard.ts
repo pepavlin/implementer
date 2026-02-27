@@ -6,7 +6,6 @@ import {
     TaskCancelError,
     TaskEditError
 } from "./task-manager/task-manager.js";
-import { UsageLimitError } from "./usage-limiter.js";
 import { extractLastAssistantMessage } from "./executor.js";
 import type { Config } from "./config/config.js";
 import type { ProjectId, TaskId } from "./types.js";
@@ -856,10 +855,6 @@ export function registerDashboardRoutes(
                 status: task.status
             });
         } catch (err) {
-            if (err instanceof UsageLimitError) {
-                res.status(429).json({ error: err.message });
-                return;
-            }
             res.status(500).json({
                 error:
                     err instanceof Error ? err.message : "Internal server error"

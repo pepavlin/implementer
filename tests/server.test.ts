@@ -3,7 +3,6 @@ import request from "supertest";
 import { createServer } from "../src/server.js";
 import type { TaskManager } from "../src/task-manager.js";
 import type { Config, Task } from "../src/types.js";
-import { UsageLimitError } from "../src/usage-limiter.js";
 import { TaskActiveError, TaskCancelError, TaskEditError } from "../src/task-manager.js";
 
 const PROJECT_ID = "test-project";
@@ -146,22 +145,6 @@ describe("server", () => {
                 .expect(200);
 
             expect(res.body.status).toBe("queued");
-        });
-
-        it("returns 429 when token usage limit is exceeded", async () => {
-            const tm = makeMockTaskManager({
-                startTask: vi
-                    .fn()
-                    .mockRejectedValue(new UsageLimitError(600_000, 500_000))
-            });
-            const app = createServer(tm, makeConfig());
-
-            const res = await request(app)
-                .post("/task")
-                .send({ prompt: "Do something" })
-                .expect(429);
-
-            expect(res.body.error).toContain("Token usage limit exceeded");
         });
 
         it("returns 500 on unexpected error", async () => {
@@ -1057,23 +1040,6 @@ describe("server", () => {
             });
         });
 
-        it("returns 429 when token usage limit is exceeded", async () => {
-            const tm = makeMockTaskManager({
-                startTask: vi
-                    .fn()
-                    .mockRejectedValue(new UsageLimitError(600_000, 500_000))
-            });
-            const app = createServer(tm, makeConfigWithAdmin());
-            const cookie = await getAdminCookie(app);
-
-            const res = await request(app)
-                .post("/dashboard/api/task")
-                .set("Cookie", cookie)
-                .send({ projectId: PROJECT_ID, prompt: "Do something" })
-                .expect(429);
-
-            expect(res.body.error).toContain("Token usage limit exceeded");
-        });
     });
 
     describe("GET /dashboard/api/data", () => {

@@ -4,8 +4,6 @@ export interface ServerConfig {
     workspaceDir: string;
     /** Global cap on tasks running simultaneously across all projects. */
     maxConcurrentTasks?: number;
-    /** Max tokens/hour allowed via the OAuth usage API before rejecting new tasks. Only applies in OAuth mode. */
-    maxTokensPerHour?: number;
     /** Password required to access the /dashboard admin UI. */
     adminPassword?: string;
 }
@@ -48,6 +46,11 @@ export interface ErrorRetryConfig {
     /** Seconds to wait between attempts. */
     delaySeconds: number;
 }
+export interface DefaultsConfig {
+    systemPrompt?: string;
+    mcpServers?: Record<string, McpServerConfig>;
+}
+
 export interface ProjectConfig {
     apiKey?: string;
     maxConcurrentTasks?: number;
@@ -63,7 +66,6 @@ const ServerSchema = z
     .object({
         workspaceDir: z.string().default("./workspace"),
         maxConcurrentTasks: z.number().int().min(1).optional(),
-        maxTokensPerHour: z.number().int().min(1).optional(),
         adminPassword: z.string().optional()
     })
     .strict();
@@ -113,6 +115,13 @@ const ErrorRetrySchema = z
     })
     .strict();
 
+const DefaultsSchema = z
+    .object({
+        systemPrompt: z.string().optional(),
+        mcpServers: z.record(McpServerSchema).optional()
+    })
+    .strict();
+
 const ProjectSchema = z
     .object({
         apiKey: z.string().optional(),
@@ -128,6 +137,7 @@ const ProjectSchema = z
 export const ConfigSchema = z
     .object({
         server: ServerSchema.default({}),
+        defaults: DefaultsSchema.optional(),
         projects: z
             .record(ProjectSchema)
             .refine((projects) => Object.keys(projects).length >= 1, {

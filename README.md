@@ -23,7 +23,15 @@ Edit `config.yaml` to match your environment:
 server:
     workspaceDir: ./workspace # where workspace instances are stored
     maxConcurrentTasks: 10 # global cap across all projects (optional)
-    maxTokensPerHour: 100000 # hourly token limit, OAuth mode only (optional); ~1/3 of Claude Max 5x capacity
+
+# Global defaults merged into every project's claudeCode (optional)
+# defaults:
+#     systemPrompt: |
+#         Global instructions applied to all projects.
+#     mcpServers:
+#         playwright:
+#             command: npx
+#             args: ["@playwright/mcp@latest", "--headless"]
 
 projects:
     demo-webapp:
@@ -43,6 +51,8 @@ projects:
         #     - Dockerfile
         #     - docker-compose.yml
 ```
+
+`defaults` fields are merged into each project's `claudeCode`: `systemPrompt` is concatenated (global first, then project), `mcpServers` are shallow-merged (project keys override global).
 
 You can define multiple projects and multiple repositories per project.
 
