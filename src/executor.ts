@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import type { ClaudeCodeConfig } from "./config/config-types.js";
 import type { TokenManager } from "./auth.js";
 
@@ -70,10 +70,13 @@ export class Executor {
       "",
     ];
 
+    const slugContainer = `${process.env.INSTANCE_NAME || "implementer"}-slug-${taskId ?? Date.now()}`;
+    Executor.removeContainer(slugContainer);
+
     const dockerArgs = [
       "run",
       "--rm",
-      "--name", `${process.env.INSTANCE_NAME || "implementer"}-slug-${taskId ?? Date.now()}`,
+      "--name", slugContainer,
       "--cpus=0.4",
       "-e", `${creds.envName}=${creds.value}`,
       this.sandboxImage,
@@ -130,10 +133,13 @@ Task: ${prompt}`,
       "",
     ];
 
+    const metaContainer = `${process.env.INSTANCE_NAME || "implementer"}-meta-${taskId ?? Date.now()}`;
+    Executor.removeContainer(metaContainer);
+
     const dockerArgs = [
       "run",
       "--rm",
-      "--name", `${process.env.INSTANCE_NAME || "implementer"}-meta-${taskId ?? Date.now()}`,
+      "--name", metaContainer,
       "--cpus=0.4",
       "-e", `${creds.envName}=${creds.value}`,
       this.sandboxImage,
@@ -245,6 +251,9 @@ Task: ${prompt}`,
 
     const containerName = `${process.env.INSTANCE_NAME || "implementer"}-${taskId ?? Date.now()}-${this.runCounter++}`;
 
+    // Remove any stale container with the same name from a previous run/restart
+    Executor.removeContainer(containerName);
+
     const dockerArgs = [
       "run",
       "--rm",
@@ -318,6 +327,43 @@ Task: ${prompt}`,
         });
       });
     });
+  }
+
+  /**
+   * Force-remove a Docker container by name. Silently ignores errors
+   * (e.g. if the container doesn't exist or Docker is not available).
+   */
+  static removeContainer(name: string): void {
+    try {
+      execFileSync("docker", ["rm", "-f", name], { stdio: "ignore", timeout: 5_000 });
+    } catch {
+      // Container doesn't exist or Docker unavailable — nothing to do
+    }
+  }
+
+  /**
+   * Kill and remove all Docker containers whose name starts with the
+   * instance prefix. Call this on startup to clean up orphaned containers
+   * left behind by a previous server process that exited abnormally.
+   */
+  static cleanupStaleContainers(): void {
+    const prefix = process.env.INSTANCE_NAME || "implementer";
+    try {
+      const output = execFileSync(
+        "docker",
+        ["ps", "-a", "--filter", `name=^${prefix}-`, "--format", "{{.Names}}"],
+        { encoding: "utf-8", timeout: 10_000 }
+      ).trim();
+      if (!output) return;
+      const names = output.split("\n").filter(Boolean);
+      for (const name of names) {
+        console.log(`[cleanup] Removing stale container: ${name}`);
+        Executor.removeContainer(name);
+      }
+      console.log(`[cleanup] Removed ${names.length} stale container(s)`);
+    } catch {
+      // Docker not available or command failed — skip cleanup
+    }
   }
 
   /**

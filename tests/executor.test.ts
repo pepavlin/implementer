@@ -5,10 +5,10 @@ import type { ClaudeCodeConfig } from "../src/config/config-types.js";
 import { TokenManager } from "../src/auth.js";
 import { Executor, extractLastAssistantMessage } from "../src/executor.js";
 
-// Mock child_process.spawn to capture docker args without running containers
+// Mock child_process.spawn and execFileSync to capture docker args without running containers
 vi.mock("node:child_process", async () => {
   const actual = await vi.importActual<typeof child_process>("node:child_process");
-  return { ...actual, spawn: vi.fn() };
+  return { ...actual, spawn: vi.fn(), execFileSync: vi.fn() };
 });
 
 const spawnMock = vi.mocked(child_process.spawn);

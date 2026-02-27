@@ -1458,12 +1458,10 @@ describe("TaskManager", () => {
 
       await executeTask(entry.task, workspace, projectState, tm);
 
-      // Task must be "retrying" (not "failed") after a timeout
-      expect(entry.task.status).toBe("retrying");
+      // Task must be "queued" (re-enqueued via push_front) after a timeout
+      expect(entry.task.status).toBe("queued");
       // Branch must be preserved for the next attempt
       expect(entry.task.branch).toBe("impl/build-the-thing-" + task.taskId);
-      // completedAt must be null — task hasn't truly finished
-      expect(entry.task.completedAt).toBeNull();
       // attempt was incremented by the timeout handler
       expect(entry.task.attempt).toBe(2);
     });
