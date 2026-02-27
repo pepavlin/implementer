@@ -76,11 +76,34 @@ export class Config {
     }
 
     getProjectIdByToken(projectToken: string): ProjectId | null {
+        // Check explicit API key match first
         for (const [projectId, project] of Object.entries(this.projects)) {
             if (project.apiKey && project.apiKey === projectToken) {
                 return projectId as ProjectId;
             }
         }
+
+        // Dev mode: single project with no apiKey configured — allow any token
+        const projectEntries = Object.entries(this.projects);
+        if (
+            projectEntries.length === 1 &&
+            !projectEntries[0][1].apiKey
+        ) {
+            return projectEntries[0][0] as ProjectId;
+        }
+
         return null;
     }
+}
+
+/**
+ * Validate a config file and return the parsed data.
+ * Throws if the file cannot be read or the config is invalid.
+ */
+export function validateConfigFile(configPath: string): { server: ServerConfig; projects: Record<string, ProjectConfig> } {
+    const resolvedPath = resolve(configPath);
+    const raw = readFileSync(resolvedPath, "utf-8");
+    const parsed = yaml.load(raw);
+    const validated = ConfigSchema.parse(parsed);
+    return { server: validated.server, projects: validated.projects };
 }

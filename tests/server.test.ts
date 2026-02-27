@@ -1,29 +1,44 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
 import { createServer } from "../src/server.js";
-import type { TaskManager } from "../src/task-manager.js";
-import type { Config, Task } from "../src/types.js";
-import { TaskActiveError, TaskCancelError, TaskEditError } from "../src/task-manager.js";
+import type { TaskManager } from "../src/task-manager/task-manager.js";
+import type { Task } from "../src/types.js";
+import { TaskActiveError, TaskCancelError, TaskEditError } from "../src/task-manager/task-manager.js";
+import type { Config } from "../src/config/config.js";
 
 const PROJECT_ID = "test-project";
 
 function makeConfig(projectOverrides: Record<string, unknown> = {}): Config {
-    return {
-        server: { workspaceDir: "/tmp/test" },
-        projects: {
-            [PROJECT_ID]: {
-                repositories: [
-                    {
-                        name: "repo",
-                        url: "https://example.com/repo.git",
-                        defaultBranch: "main"
-                    }
-                ],
-                claudeCode: { command: "claude" },
-                ...projectOverrides
-            }
+    const projects: Record<string, unknown> = {
+        [PROJECT_ID]: {
+            repositories: [
+                {
+                    name: "repo",
+                    url: "https://example.com/repo.git",
+                    defaultBranch: "main"
+                }
+            ],
+            claudeCode: { command: "claude" },
+            ...projectOverrides
         }
     };
+    return {
+        server: { workspaceDir: "/tmp/test" },
+        projects,
+        configPath: "/tmp/test/config.yaml",
+        getProjectIdByToken: (token: string) => {
+            for (const [id, proj] of Object.entries(projects)) {
+                const p = proj as Record<string, unknown>;
+                if (p.apiKey && p.apiKey === token) return id;
+            }
+            // Dev mode: single project with no apiKey — allow any token
+            const entries = Object.entries(projects);
+            if (entries.length === 1 && !(entries[0][1] as Record<string, unknown>).apiKey) {
+                return entries[0][0];
+            }
+            return null;
+        }
+    } as unknown as Config;
 }
 
 function makeMockTask(overrides: Partial<Task> = {}): Task {
@@ -70,8 +85,30 @@ function makeConfigWithAdmin(): Config {
                 ],
                 claudeCode: { command: "claude" }
             }
+        },
+        configPath: "/tmp/test/config.yaml",
+        getProjectIdByToken: (_token: string) => null
+    } as unknown as Config;
+}
+
+function makeInlineConfig(projects: Record<string, unknown>, serverOverrides: Record<string, unknown> = {}): Config {
+    return {
+        server: { workspaceDir: "/tmp/test", ...serverOverrides },
+        projects,
+        configPath: "/tmp/test/config.yaml",
+        getProjectIdByToken: (token: string) => {
+            for (const [id, proj] of Object.entries(projects)) {
+                const p = proj as Record<string, unknown>;
+                if (p.apiKey && p.apiKey === token) return id;
+            }
+            // Dev mode: single project with no apiKey
+            const entries = Object.entries(projects);
+            if (entries.length === 1 && !(entries[0][1] as Record<string, unknown>).apiKey) {
+                return entries[0][0];
+            }
+            return null;
         }
-    };
+    } as unknown as Config;
 }
 
 async function getAdminCookie(
@@ -658,31 +695,16 @@ describe("server", () => {
         });
 
         it("rejects when multiple projects configured but no API keys", async () => {
-            const config: Config = {
-                server: { workspaceDir: "/tmp/test" },
-                projects: {
-                    "project-a": {
-                        repositories: [
-                            {
-                                name: "repo-a",
-                                url: "https://example.com/a.git",
-                                defaultBranch: "main"
-                            }
-                        ],
-                        claudeCode: { command: "claude" }
-                    },
-                    "project-b": {
-                        repositories: [
-                            {
-                                name: "repo-b",
-                                url: "https://example.com/b.git",
-                                defaultBranch: "main"
-                            }
-                        ],
-                        claudeCode: { command: "claude" }
-                    }
+            const config = makeInlineConfig({
+                "project-a": {
+                    repositories: [{ name: "repo-a", url: "https://example.com/a.git", defaultBranch: "main" }],
+                    claudeCode: { command: "claude" }
+                },
+                "project-b": {
+                    repositories: [{ name: "repo-b", url: "https://example.com/b.git", defaultBranch: "main" }],
+                    claudeCode: { command: "claude" }
                 }
-            };
+            });
             const app = createServer(makeMockTaskManager(), config);
             await request(app).get("/tasks").expect(401);
         });
@@ -943,6 +965,42 @@ describe("server", () => {
             expect(res.body.output).toBeNull();
         });
 
+        it("returns null durationSeconds for queued task", async () => {
+            const task = makeMockTask({ status: "queued" });
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue([task])
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .get("/dashboard/api/task/abc123")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(res.body.durationSeconds).toBeNull();
+        });
+
+        it("uses completedAt for durationSeconds in task detail for completed task", async () => {
+            const task = makeMockTask({
+                status: "completed",
+                startedAt: "2025-01-01T00:00:00.000Z",
+                completedAt: "2025-01-01T00:05:00.000Z"
+            });
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue([task])
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .get("/dashboard/api/task/abc123")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(res.body.durationSeconds).toBe(300);
+        });
+
         it("returns error field when task has error", async () => {
             const task = makeMockTask({
                 status: "failed",
@@ -1097,7 +1155,7 @@ describe("server", () => {
             expect(res.body.stats.total).toBe(0);
         });
 
-        it("includes durationSeconds in task list items", async () => {
+        it("includes durationSeconds in task list items for completed task", async () => {
             const task = makeMockTask({
                 status: "completed",
                 completedAt: "2025-01-01T01:00:00.000Z"
@@ -1113,7 +1171,44 @@ describe("server", () => {
                 .set("Cookie", cookie)
                 .expect(200);
 
-            expect(typeof res.body.tasks[0].durationSeconds).toBe("number");
+            expect(res.body.tasks[0].durationSeconds).toBe(3600);
+        });
+
+        it("returns null durationSeconds for queued tasks", async () => {
+            const task = makeMockTask({ taskId: "t1", status: "queued" });
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue([task])
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .get("/dashboard/api/data")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(res.body.tasks[0].durationSeconds).toBeNull();
+        });
+
+        it("uses completedAt for durationSeconds of finished tasks", async () => {
+            const task = makeMockTask({
+                taskId: "t1",
+                status: "failed",
+                startedAt: "2025-01-01T00:00:00.000Z",
+                completedAt: "2025-01-01T00:10:00.000Z"
+            });
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue([task])
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .get("/dashboard/api/data")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            expect(res.body.tasks[0].durationSeconds).toBe(600);
         });
 
         it("counts each status correctly in stats", async () => {

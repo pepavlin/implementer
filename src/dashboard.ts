@@ -56,9 +56,15 @@ export function buildDashboardData(
         prompt: task.prompt,
         status: task.status,
         startedAt: task.startedAt,
-        durationSeconds: Math.round(
-            (Date.now() - new Date(task.startedAt).getTime()) / 1000
-        )
+        durationSeconds: task.status === "queued"
+            ? null
+            : Math.round(
+                ((task.completedAt
+                    ? new Date(task.completedAt).getTime()
+                    : Date.now()) -
+                    new Date(task.startedAt).getTime()) /
+                    1000
+            )
     }));
 
     const stats = {
@@ -451,7 +457,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     var _spin='<span class="badge-spin"></span>';
     var _dots='<span class="badge-dots"><span></span><span></span><span></span></span>';
     function badge(s){var m={running:['b-running',_spin+'Running'],starting:['b-starting',_spin+'Starting'],queued:['b-queued','Queued'+_dots],retrying:['b-retrying',_spin+'Retrying'],completed:['b-completed','Completed'],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
-    function dur(s){if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
+    function dur(s){if(s==null)return '—';if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
     function fmtDate(d){try{return new Date(d).toLocaleString();}catch(e){return String(d);}}
     function setFilter(f){
       currentFilter=f;
@@ -856,13 +862,15 @@ export function registerDashboardRoutes(
             attempt: task.attempt,
             startedAt: task.startedAt,
             completedAt: task.completedAt,
-            durationSeconds: Math.round(
-                ((task.completedAt
-                    ? new Date(task.completedAt).getTime()
-                    : Date.now()) -
-                    new Date(task.startedAt).getTime()) /
-                    1000
-            ),
+            durationSeconds: task.status === "queued"
+                ? null
+                : Math.round(
+                    ((task.completedAt
+                        ? new Date(task.completedAt).getTime()
+                        : Date.now()) -
+                        new Date(task.startedAt).getTime()) /
+                        1000
+                ),
             output:
                 task.status === "queued" ||
                 task.status === "starting" ||
