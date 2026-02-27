@@ -268,4 +268,121 @@ describe("PrPoller", () => {
 
         expect(clearIntervalSpy).toHaveBeenCalledOnce();
     });
+
+    // ── Sequential / concurrency behaviour ────────────────────────────────────
+
+    it("processes PRs sequentially (default concurrency=1) — one at a time, never overlapping", async () => {
+        vi.useRealTimers();
+
+        const activeAtSameTime: number[] = [];
+        let active = 0;
+        let maxActive = 0;
+
+        const trackingQuery: GhQueryFn = async () => {
+            active++;
+            if (active > maxActive) maxActive = active;
+            await new Promise((r) => setTimeout(r, 10));
+            active--;
+            return { state: "OPEN", isDraft: false };
+        };
+
+        const task = makeTask({
+            pullRequests: [
+                { repo: "r", url: "pr-1", state: "open" },
+                { repo: "r", url: "pr-2", state: "open" },
+                { repo: "r", url: "pr-3", state: "open" },
+            ],
+        });
+
+        const accessor = makeAccessor([task]);
+        // Default concurrency = 1
+        const poller = new PrPoller(accessor, makeConfig(), 60_000, trackingQuery);
+        await poller.pollAll();
+
+        // With concurrency=1 at most 1 query runs at a time
+        expect(maxActive).toBe(1);
+        expect(accessor.updates).toHaveLength(3);
+
+        vi.useFakeTimers();
+    });
+
+    it("concurrency=2 checks all PRs and never exceeds the limit", async () => {
+        vi.useRealTimers();
+
+        let active = 0;
+        let maxActive = 0;
+
+        const trackingQuery: GhQueryFn = async () => {
+            active++;
+            if (active > maxActive) maxActive = active;
+            await new Promise((r) => setTimeout(r, 20));
+            active--;
+            return { state: "OPEN", isDraft: false };
+        };
+
+        const task = makeTask({
+            pullRequests: [
+                { repo: "r", url: "pr-1", state: "open" },
+                { repo: "r", url: "pr-2", state: "open" },
+                { repo: "r", url: "pr-3", state: "open" },
+                { repo: "r", url: "pr-4", state: "open" },
+            ],
+        });
+
+        const accessor = makeAccessor([task]);
+        const poller = new PrPoller(accessor, makeConfig(), 60_000, trackingQuery, 2);
+        await poller.pollAll();
+
+        expect(maxActive).toBeLessThanOrEqual(2);
+        expect(accessor.updates).toHaveLength(4);
+
+        vi.useFakeTimers();
+    });
+
+    it("error in one PR does not stop sequential processing of remaining PRs", async () => {
+        const urls: string[] = [];
+        let callIndex = 0;
+
+        const partiallyFailingQuery: GhQueryFn = async (url) => {
+            callIndex++;
+            urls.push(url);
+            if (callIndex === 2) throw new Error("transient network error");
+            return { state: "OPEN", isDraft: false };
+        };
+
+        const task = makeTask({
+            pullRequests: [
+                { repo: "r", url: "pr-1", state: "open" },
+                { repo: "r", url: "pr-2", state: "open" }, // will fail
+                { repo: "r", url: "pr-3", state: "open" },
+            ],
+        });
+
+        const accessor = makeAccessor([task]);
+        const poller = new PrPoller(accessor, makeConfig(), 60_000, partiallyFailingQuery);
+        await poller.pollAll(); // must not throw
+
+        // All 3 PRs must have been attempted
+        expect(urls).toEqual(["pr-1", "pr-2", "pr-3"]);
+        // Only 2 successful updates (pr-2 failed)
+        expect(accessor.updates).toHaveLength(2);
+        expect(accessor.updates.map((u) => u.prUrl)).toContain("pr-1");
+        expect(accessor.updates.map((u) => u.prUrl)).toContain("pr-3");
+    });
+
+    it("always calls updatePrState even when state is unchanged (refreshes lastCheckedAt)", async () => {
+        const task = makeTask({
+            pullRequests: [
+                { repo: "r", url: "pr-stable", state: "open" },
+            ],
+        });
+        const accessor = makeAccessor([task]);
+        // query returns same state as stored
+        const poller = new PrPoller(accessor, makeConfig(), 60_000, fakeQuery("OPEN", false));
+        await poller.pollAll();
+
+        // updatePrState must still be called to refresh lastCheckedAt
+        expect(accessor.updates).toHaveLength(1);
+        expect(accessor.updates[0].state).toBe("open");
+    });
 });

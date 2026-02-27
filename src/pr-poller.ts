@@ -66,23 +66,29 @@ export interface TaskAccessor {
  */
 export type GhQueryFn = (url: string, token?: string) => Promise<GhPrState>;
 
+/** Default max concurrent PR queries — kept low to avoid overwhelming the server. */
+const DEFAULT_CONCURRENCY = 1;
+
 export class PrPoller {
     private intervalId?: ReturnType<typeof setInterval>;
     private accessor: TaskAccessor;
     private config: Config;
     private intervalMs: number;
     private queryFn: GhQueryFn;
+    private concurrency: number;
 
     constructor(
         accessor: TaskAccessor,
         config: Config,
         intervalMs: number = DEFAULT_INTERVAL_MS,
-        queryFn: GhQueryFn = ghQuery
+        queryFn: GhQueryFn = ghQuery,
+        concurrency: number = DEFAULT_CONCURRENCY
     ) {
         this.accessor = accessor;
         this.config = config;
         this.intervalMs = intervalMs;
         this.queryFn = queryFn;
+        this.concurrency = Math.max(1, concurrency);
     }
 
     /** Start periodic polling. Safe to call multiple times (idempotent). */
@@ -143,38 +149,55 @@ export class PrPoller {
 
         if (toCheck.length === 0) return;
 
-        console.log(`[pr-poller] Checking ${toCheck.length} open pull request(s)...`);
+        console.log(
+            `[pr-poller] Checking ${toCheck.length} open pull request(s) ` +
+            `(concurrency: ${this.concurrency})...`
+        );
 
-        // Check all PRs concurrently (respects GitHub rate limits reasonably for
-        // typical usage; add throttling if needed at scale)
-        const results = await Promise.allSettled(
-            toCheck.map(async ({ taskId, pr, token }) => {
+        // Process PRs with limited concurrency to avoid spawning too many
+        // gh subprocesses at once, which can overload the server.
+        let errorCount = 0;
+
+        const processOne = async (item: typeof toCheck[number]): Promise<void> => {
+            const { taskId, pr, token } = item;
+            try {
                 const raw = await this.queryFn(pr.url, token);
                 const newState = normalizeGhState(raw);
                 if (newState !== pr.state) {
                     console.log(
                         `[pr-poller] PR ${pr.url} state changed: ${pr.state ?? "unknown"} → ${newState}`
                     );
-                    this.accessor.updatePrState(taskId, pr.url, newState);
-                } else {
-                    // Update lastCheckedAt even when state didn't change
-                    this.accessor.updatePrState(taskId, pr.url, newState);
                 }
-            })
-        );
-
-        const errors = results.filter((r) => r.status === "rejected");
-        if (errors.length > 0) {
-            for (const err of errors) {
-                if (err.status === "rejected") {
-                    console.warn(
-                        "[pr-poller] Failed to check PR:",
-                        err.reason instanceof Error
-                            ? err.reason.message
-                            : String(err.reason)
-                    );
-                }
+                // Always update to refresh lastCheckedAt even when state is unchanged
+                this.accessor.updatePrState(taskId, pr.url, newState);
+            } catch (err) {
+                errorCount++;
+                console.warn(
+                    "[pr-poller] Failed to check PR:",
+                    err instanceof Error ? err.message : String(err)
+                );
             }
+        };
+
+        if (this.concurrency === 1) {
+            // Fully sequential — safest for the server
+            for (const item of toCheck) {
+                await processOne(item);
+            }
+        } else {
+            // Concurrency-limited pool: keep at most `this.concurrency` queries running
+            const queue = [...toCheck];
+            const workers = Array.from({ length: this.concurrency }, async () => {
+                while (queue.length > 0) {
+                    const item = queue.shift();
+                    if (item) await processOne(item);
+                }
+            });
+            await Promise.all(workers);
+        }
+
+        if (errorCount > 0) {
+            console.warn(`[pr-poller] ${errorCount} PR check(s) failed during this cycle.`);
         }
     }
 }
