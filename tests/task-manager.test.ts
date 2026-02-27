@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Config, PersistedTask } from "../src/types.js";
+import type { PersistedTask } from "../src/types.js";
+import type { Config } from "../src/config/config.js";
 import { TaskStore } from "../src/task-store.js";
 
 const TMP = join(import.meta.dirname, "..", "tmp", "task-manager-test");
@@ -53,28 +54,28 @@ describe("TaskManager", () => {
   });
 
   it("can be instantiated with valid config", async () => {
-    const { TaskManager } = await import("../src/task-manager.js");
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
     const config = makeConfig();
     const tm = new TaskManager(config);
     expect(tm).toBeDefined();
   });
 
   it("listTasks returns empty array initially", async () => {
-    const { TaskManager } = await import("../src/task-manager.js");
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
     const config = makeConfig();
     const tm = new TaskManager(config);
     expect(tm.listTasks(PROJECT_ID)).toEqual([]);
   });
 
   it("listAllActiveTasks returns empty array initially", async () => {
-    const { TaskManager } = await import("../src/task-manager.js");
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
     const config = makeConfig();
     const tm = new TaskManager(config);
     expect(tm.listAllActiveTasks()).toEqual([]);
   });
 
   it("listAllActiveTasks returns empty when only completed/failed tasks are loaded", async () => {
-    const { TaskManager } = await import("../src/task-manager.js");
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
     const store = new TaskStore(makeConfig().server.workspaceDir);
     store.save(makePersistedTask({ taskId: "t-completed", status: "completed", completedAt: new Date().toISOString() }));
     store.save(makePersistedTask({ taskId: "t-failed", status: "failed", completedAt: new Date().toISOString() }));
@@ -86,21 +87,21 @@ describe("TaskManager", () => {
   });
 
   it("getTask returns undefined for unknown id", async () => {
-    const { TaskManager } = await import("../src/task-manager.js");
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
     const config = makeConfig();
     const tm = new TaskManager(config);
     expect(tm.getTask(PROJECT_ID, "nonexistent")).toBeUndefined();
   });
 
   it("getOutput returns empty string for unknown id", async () => {
-    const { TaskManager } = await import("../src/task-manager.js");
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
     const config = makeConfig();
     const tm = new TaskManager(config);
     expect(tm.getOutput(PROJECT_ID, "nonexistent")).toBe("");
   });
 
   it("accepts multiple repositories in config", async () => {
-    const { TaskManager } = await import("../src/task-manager.js");
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
     const config = makeConfig({
       projects: {
         [PROJECT_ID]: {
@@ -117,7 +118,7 @@ describe("TaskManager", () => {
   });
 
   it("accepts systemPrompt in config", async () => {
-    const { TaskManager } = await import("../src/task-manager.js");
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
     const config = makeConfig({
       projects: {
         [PROJECT_ID]: {
@@ -136,7 +137,7 @@ describe("TaskManager", () => {
   });
 
   it("supports multiple projects in config", async () => {
-    const { TaskManager } = await import("../src/task-manager.js");
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
     const config: Config = {
       server: { workspaceDir: TMP },
       projects: {
@@ -158,7 +159,7 @@ describe("TaskManager", () => {
 
   describe("init", () => {
     it("loads completed tasks from disk into memory", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -176,7 +177,7 @@ describe("TaskManager", () => {
     });
 
     it("marks running tasks as interrupted", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -206,7 +207,7 @@ describe("TaskManager", () => {
     });
 
     it("re-enqueues retrying tasks on restart", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -245,7 +246,7 @@ describe("TaskManager", () => {
     });
 
     it("does not modify completed tasks", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -264,7 +265,7 @@ describe("TaskManager", () => {
     });
 
     it("does not modify failed tasks", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -283,7 +284,7 @@ describe("TaskManager", () => {
     });
 
     it("works with empty task store", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
 
       const tm = new TaskManager(config);
@@ -293,7 +294,7 @@ describe("TaskManager", () => {
     });
 
     it("marks interrupted task as failed when workspace is missing", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -317,7 +318,7 @@ describe("TaskManager", () => {
     });
 
     it("marks task from unknown project as failed", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -341,7 +342,7 @@ describe("TaskManager", () => {
     });
 
     it("sets resumedFromRestart flag on task entries during resumption", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -369,7 +370,7 @@ describe("TaskManager", () => {
 
   describe("restart resume — retry delay", () => {
     it("tasks resumed after restart skip the retry delay on their first failure", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig({
         projects: {
           [PROJECT_ID]: {
@@ -421,7 +422,7 @@ describe("TaskManager", () => {
     });
 
     it("subsequent retries after a restart use the normal configured delay", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const { Executor } = await import("../src/executor.js");
       const config = makeConfig({
         projects: {
@@ -478,7 +479,7 @@ describe("TaskManager", () => {
 
   describe("startTask", () => {
     it("returns immediately with queued status and null branch", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const { Executor } = await import("../src/executor.js");
       const config = makeConfig();
       const tm = new TaskManager(config);
@@ -510,7 +511,7 @@ describe("TaskManager", () => {
     });
 
     it("registers the task in memory before slug generation completes", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const { Executor } = await import("../src/executor.js");
       const config = makeConfig();
       const tm = new TaskManager(config);
@@ -527,7 +528,7 @@ describe("TaskManager", () => {
 
   describe("retryTask", () => {
     it("throws TaskActiveError when task is running", async () => {
-      const { TaskManager, TaskActiveError } = await import("../src/task-manager.js");
+      const { TaskManager, TaskActiveError } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -544,7 +545,7 @@ describe("TaskManager", () => {
     });
 
     it("throws TaskActiveError when task is queued", async () => {
-      const { TaskManager, TaskActiveError } = await import("../src/task-manager.js");
+      const { TaskManager, TaskActiveError } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -561,7 +562,7 @@ describe("TaskManager", () => {
     });
 
     it("throws TaskActiveError when task is retrying", async () => {
-      const { TaskManager, TaskActiveError } = await import("../src/task-manager.js");
+      const { TaskManager, TaskActiveError } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -578,14 +579,14 @@ describe("TaskManager", () => {
     });
 
     it("throws error for unknown task", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const tm = new TaskManager(makeConfig());
 
       await expect(tm.retryTask(PROJECT_ID, "nonexistent")).rejects.toThrow("Task not found");
     });
 
     it("throws error for task belonging to another project", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config: Config = {
         server: { workspaceDir: TMP },
         projects: {
@@ -610,7 +611,7 @@ describe("TaskManager", () => {
     });
 
     it("resets task state and keeps branch when retrying a failed task", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -644,7 +645,7 @@ describe("TaskManager", () => {
     });
 
     it("resets task state when retrying a completed task", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -672,10 +673,11 @@ describe("TaskManager", () => {
       expect(result.completedAt).toBeNull();
       expect(result.attempt).toBe(1);
     });
+  });
 
   describe("project isolation", () => {
     it("getTask returns undefined for task belonging to another project", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config: Config = {
         server: { workspaceDir: TMP },
         projects: {
@@ -707,7 +709,7 @@ describe("TaskManager", () => {
 
   describe("task chains", () => {
     it("startTask with continueTaskId sets parentTaskId, chainId, and inherits branch", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const { Executor } = await import("../src/executor.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
@@ -738,7 +740,7 @@ describe("TaskManager", () => {
     });
 
     it("rejects continueTaskId for non-existent task", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const tm = new TaskManager(config);
 
@@ -748,7 +750,7 @@ describe("TaskManager", () => {
     });
 
     it("rejects continueTaskId for task in different project", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config: Config = {
         server: { workspaceDir: TMP },
         projects: {
@@ -775,7 +777,7 @@ describe("TaskManager", () => {
     });
 
     it("rejects continueTaskId that is not the chain tip (error mentions the actual tip)", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const { Executor } = await import("../src/executor.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
@@ -796,7 +798,7 @@ describe("TaskManager", () => {
     });
 
     it("rejects continueTaskId for task with null branch", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -811,7 +813,7 @@ describe("TaskManager", () => {
     });
 
     it("chain tasks run serially (second task queues when chain active)", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const { Executor } = await import("../src/executor.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
@@ -842,7 +844,7 @@ describe("TaskManager", () => {
     });
 
     it("chain task dequeues after active chain completes", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -888,7 +890,7 @@ describe("TaskManager", () => {
     });
 
     it("chain task preserves branch on no-commits completion", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const { Executor } = await import("../src/executor.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
@@ -916,7 +918,7 @@ describe("TaskManager", () => {
     });
 
     it("multi-task chain: A->B->C, continuing from C works, from A/B rejected", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const { Executor } = await import("../src/executor.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
@@ -954,7 +956,7 @@ describe("TaskManager", () => {
 
   describe("getOutput with null executor", () => {
     it("returns stored output for completed task loaded from disk", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -971,7 +973,7 @@ describe("TaskManager", () => {
     });
 
     it("returns empty string for running task with null executor", async () => {
-      const { TaskManager } = await import("../src/task-manager.js");
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
@@ -991,6 +993,199 @@ describe("TaskManager", () => {
       }
 
       expect(tm.getOutput(PROJECT_ID, "no-exec-task")).toBe("");
+    });
+  });
+
+  describe("persistEntry", () => {
+    it("persists task entry to disk", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "persist-test", status: "completed" }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      // Update the task in memory and persist
+      const task = tm.getTask(PROJECT_ID, "persist-test")!;
+      task.output = "updated output";
+      // @ts-expect-error - accessing private tasks map for testing
+      const entry = tm.tasks.get("persist-test")!;
+      tm.persistEntry(entry);
+
+      // Verify it was persisted
+      const onDisk = JSON.parse(
+        readFileSync(join(TMP, "tasks", "persist-test.json"), "utf-8"),
+      );
+      expect(onDisk.output).toBe("updated output");
+    });
+
+    it("includes workspaceId in persisted data", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "ws-test", status: "completed", workspaceId: 42 }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      // @ts-expect-error - accessing private tasks map for testing
+      const entry = tm.tasks.get("ws-test")!;
+      tm.persistEntry(entry);
+
+      const onDisk = JSON.parse(
+        readFileSync(join(TMP, "tasks", "ws-test.json"), "utf-8"),
+      );
+      expect(onDisk.workspaceId).toBe(42);
+    });
+  });
+
+  describe("cancelTask", () => {
+    it("cancels a queued task", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "cancel-queued", status: "completed" }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      // Set task to queued manually
+      // @ts-expect-error - accessing private tasks map for testing
+      tm.tasks.get("cancel-queued").task.status = "queued";
+
+      const result = tm.cancelTask(PROJECT_ID, "cancel-queued");
+      expect(result.status).toBe("cancelled");
+      expect(result.completedAt).toBeDefined();
+
+      const onDisk = JSON.parse(
+        readFileSync(join(TMP, "tasks", "cancel-queued.json"), "utf-8"),
+      );
+      expect(onDisk.status).toBe("cancelled");
+    });
+
+    it("cancels a retrying task and clears timeout", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "cancel-retrying", status: "completed" }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      // Set task to retrying with a timeout
+      // @ts-expect-error - accessing private tasks map for testing
+      const entry = tm.tasks.get("cancel-retrying")!;
+      entry.task.status = "retrying";
+      entry.retryTimeoutId = setTimeout(() => {}, 99999);
+
+      const result = tm.cancelTask(PROJECT_ID, "cancel-retrying");
+      expect(result.status).toBe("cancelled");
+      expect(entry.retryTimeoutId).toBeUndefined();
+    });
+
+    it("throws TaskCancelError for completed task", async () => {
+      const { TaskManager, TaskCancelError } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "cancel-done", status: "completed" }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      expect(() => tm.cancelTask(PROJECT_ID, "cancel-done")).toThrow(TaskCancelError);
+    });
+
+    it("throws for unknown project", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const tm = new TaskManager(makeConfig());
+
+      expect(() => tm.cancelTask("nonexistent" as any, "any-task" as any)).toThrow("Unknown project");
+    });
+
+    it("throws for unknown task", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const tm = new TaskManager(makeConfig());
+
+      expect(() => tm.cancelTask(PROJECT_ID, "nonexistent" as any)).toThrow("Task not found");
+    });
+  });
+
+  describe("editTask", () => {
+    it("edits the prompt of a queued task", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "edit-task", status: "completed" }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      // Set to queued
+      // @ts-expect-error - accessing private tasks map for testing
+      tm.tasks.get("edit-task").task.status = "queued";
+
+      const result = tm.editTask(PROJECT_ID, "edit-task", "New prompt text");
+      expect(result.prompt).toBe("New prompt text");
+      expect(result.title).toBeUndefined();
+
+      const onDisk = JSON.parse(
+        readFileSync(join(TMP, "tasks", "edit-task.json"), "utf-8"),
+      );
+      expect(onDisk.prompt).toBe("New prompt text");
+    });
+
+    it("throws TaskEditError for non-queued task", async () => {
+      const { TaskManager, TaskEditError } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "edit-running", status: "completed" }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      // Set to running
+      // @ts-expect-error - accessing private tasks map for testing
+      tm.tasks.get("edit-running").task.status = "running";
+
+      expect(() => tm.editTask(PROJECT_ID, "edit-running", "New prompt")).toThrow(TaskEditError);
+    });
+
+    it("throws TaskEditError for empty prompt", async () => {
+      const { TaskManager, TaskEditError } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "edit-empty", status: "completed" }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      // @ts-expect-error - accessing private tasks map for testing
+      tm.tasks.get("edit-empty").task.status = "queued";
+
+      expect(() => tm.editTask(PROJECT_ID, "edit-empty", "  ")).toThrow(TaskEditError);
+    });
+
+    it("throws for unknown project", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const tm = new TaskManager(makeConfig());
+
+      expect(() => tm.editTask("nonexistent" as any, "any-task" as any, "prompt")).toThrow("Unknown project");
+    });
+
+    it("throws for unknown task", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const tm = new TaskManager(makeConfig());
+
+      expect(() => tm.editTask(PROJECT_ID, "nonexistent" as any, "prompt")).toThrow("Task not found");
     });
   });
 });

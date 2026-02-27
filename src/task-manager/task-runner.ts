@@ -363,7 +363,7 @@ export async function executeTask(
         if (!task.completedAt) {
             task.completedAt = new Date().toISOString();
         }
-        tm.store.save({ ...task, workspaceId: workspace.id });
+        tm.persistEntry(entry);
         // Release chain lock so the next task in the chain can be dequeued
         if (task.chainId !== undefined) {
             tm.unmarkChainActive(task.projectId, task.chainId);
@@ -409,7 +409,7 @@ export function scheduleRetry(
 
     const entry = tm.tasks.get(task.taskId);
     if (entry) {
-        tm.store.save({ ...task, workspaceId: entry.workspaceId });
+        tm.persistEntry(entry);
     }
 
     console.log(
@@ -427,11 +427,7 @@ export function scheduleRetry(
             task.status = "queued";
             tm.enqueue(task.projectId, task.taskId);
             const entry = tm.tasks.get(task.taskId);
-            if (entry)
-                tm.store.save({
-                    ...task,
-                    workspaceId: entry.workspaceId
-                });
+            if (entry) tm.persistEntry(entry);
             console.log(
                 `[${task.taskId}] Retry queued — chain ${task.chainId} is already active`
             );
@@ -443,11 +439,7 @@ export function scheduleRetry(
             task.status = "queued";
             tm.enqueue(task.projectId, task.taskId);
             const entry = tm.tasks.get(task.taskId);
-            if (entry)
-                tm.store.save({
-                    ...task,
-                    workspaceId: entry.workspaceId
-                });
+            if (entry) tm.persistEntry(entry);
             console.log(`[${task.taskId}] Retry queued (no capacity)`);
             return;
         }
@@ -474,11 +466,7 @@ export function scheduleRetry(
             task.status = "queued";
             tm.enqueue(task.projectId, task.taskId);
             const entry = tm.tasks.get(task.taskId);
-            if (entry)
-                tm.store.save({
-                    ...task,
-                    workspaceId: entry.workspaceId
-                });
+            if (entry) tm.persistEntry(entry);
             console.log(`[${task.taskId}] Retry queued after acquire race`);
             return;
         }
@@ -490,8 +478,8 @@ export function scheduleRetry(
                 state.config.claudeCode,
                 state.tokenManager
             );
+            tm.persistEntry(entry);
         }
-        tm.store.save({ ...task, workspaceId: workspace.id });
 
         // Retry on the same branch — Claude can see previous partial work
         executeTask(task, workspace, state, tm, task.branch ?? undefined).catch(
@@ -512,6 +500,7 @@ export async function prepareAndRunTask(
     tm: TaskManager
 ): Promise<void> {
     const { taskId, projectId } = task;
+    const entry = tm.tasks.get(taskId)!;
 
     // Resolve branch and title based on task type
     if (!task.branch) {
@@ -530,7 +519,7 @@ export async function prepareAndRunTask(
         console.log(
             `[${taskId}] Branch: ${task.branch}, Title: ${task.title}`
         );
-        tm.store.save({ ...task, workspaceId: null });
+        tm.persistEntry(entry);
     } else if (!task.title) {
         // Branch already set (e.g., after restart), but title not yet generated
         console.log(`[${taskId}] Generating title...`);
@@ -544,7 +533,7 @@ export async function prepareAndRunTask(
         );
         if (title) task.title = title;
         console.log(`[${taskId}] Title: ${task.title}`);
-        tm.store.save({ ...task, workspaceId: null });
+        tm.persistEntry(entry);
     }
 
     // If the chain is already active (another task in the same chain is running), queue and wait
@@ -580,7 +569,6 @@ export async function prepareAndRunTask(
         state.config.claudeCode,
         state.tokenManager
     );
-    const entry = tm.tasks.get(taskId)!;
     entry.executor = executor;
     task.status = "running";
 
@@ -598,14 +586,14 @@ export async function prepareAndRunTask(
         }
         task.status = "queued";
         entry.executor = null;
-        tm.store.save({ ...task, workspaceId: null });
+        tm.persistEntry(entry);
         tm.enqueue(projectId, taskId);
         console.log(`[${taskId}] Queued after acquire race`);
         return;
     }
 
     entry.workspaceId = workspace.id;
-    tm.store.save({ ...task, workspaceId: workspace.id });
+    tm.persistEntry(entry);
 
     executeTask(task, workspace, state, tm).catch((err) => {
         console.error(`Task ${taskId} failed unexpectedly:`, err);
