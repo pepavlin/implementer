@@ -807,19 +807,69 @@ describe("TaskManager", () => {
       ).rejects.toThrow("Continue from chain-b instead");
     });
 
-    it("rejects continueTaskId for task with null branch", async () => {
+    it("allows continueTaskId for task with null branch (parent made no changes)", async () => {
       const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
-      store.save(makePersistedTask({ taskId: "no-branch", status: "completed", branch: null }));
+      // Parent task completed with no commits — branch is null
+      store.save(makePersistedTask({ taskId: "no-branch", status: "completed", branch: null, output: "Nothing to do." }));
 
       const tm = new TaskManager(config);
       await tm.init();
 
-      await expect(
-        tm.startTask(PROJECT_ID, { prompt: "Continue", continueTaskId: "no-branch" })
-      ).rejects.toThrow("has no branch to continue from");
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "fresh-start", title: "Fresh start" });
+
+      // @ts-expect-error - private
+      const state = tm.projects.get(PROJECT_ID)!;
+      vi.spyOn(state.pool, "acquire").mockRejectedValue(new Error("no capacity"));
+
+      // Should NOT throw — continuation is allowed even when parent made no changes
+      const task = await tm.startTask(PROJECT_ID, { prompt: "Continue anyway", continueTaskId: "no-branch" });
+
+      // Chain metadata is set correctly
+      expect(task.parentTaskId).toBe("no-branch");
+      expect(task.chainId).toBe("no-branch"); // root of the chain
+      // A fresh branch was generated (not inherited)
+      expect(task.branch).toBe("impl/fresh-start-" + task.taskId);
+    });
+
+    it("continuation from branchless parent generates new branch (not checkout)", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const { GitManager } = await import("../src/git-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "branchless", status: "completed", branch: null }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "new-work", title: "New work" });
+
+      const prepareNewBranchSpy = vi.spyOn(GitManager.prototype, "prepareNewBranchAll").mockResolvedValue();
+      const checkoutBranchSpy = vi.spyOn(GitManager.prototype, "checkoutBranchAll").mockResolvedValue();
+      vi.spyOn(GitManager.prototype, "pushBranchAll").mockResolvedValue();
+      vi.spyOn(GitManager.prototype, "getHeadAll").mockResolvedValue(new Map());
+      vi.spyOn(GitManager.prototype, "hasUncommittedChanges").mockResolvedValue(false);
+      vi.spyOn(GitManager.prototype, "ensureBranchAtHeadAll").mockResolvedValue(false);
+
+      // @ts-expect-error - private
+      const state = tm.projects.get(PROJECT_ID)!;
+      const fakeWorkspace = { id: 0, dir: "/fake" };
+      vi.spyOn(state.pool, "acquire").mockResolvedValue(fakeWorkspace);
+      vi.spyOn(Executor.prototype, "run").mockResolvedValue({ exitCode: 0, output: "", timedOut: false });
+
+      await tm.startTask(PROJECT_ID, { prompt: "Do new work", continueTaskId: "branchless" });
+
+      // Allow async work to complete
+      await new Promise((r) => setTimeout(r, 50));
+
+      // prepareNewBranch should be called (create fresh branch), NOT checkoutBranch
+      expect(prepareNewBranchSpy).toHaveBeenCalled();
+      expect(checkoutBranchSpy).not.toHaveBeenCalled();
     });
 
     it("chain tasks run serially (second task queues when chain active)", async () => {
@@ -961,6 +1011,117 @@ describe("TaskManager", () => {
       await expect(
         tm.startTask(PROJECT_ID, { prompt: "Continue from B", continueTaskId: "mt-b" })
       ).rejects.toThrow("not the latest in its chain");
+    });
+
+    it("continuation from branchless parent sets checkoutBranch to undefined (fresh branch)", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "parent-no-branch", status: "completed", branch: null }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "child", title: "Child" });
+
+      // @ts-expect-error - private
+      const state = tm.projects.get(PROJECT_ID)!;
+      // Simulate chain is active so the task gets queued, letting us inspect entry.checkoutBranch
+      tm.markChainActive(PROJECT_ID, "parent-no-branch" as any);
+
+      await tm.startTask(PROJECT_ID, { prompt: "Continue from branchless", continueTaskId: "parent-no-branch" });
+
+      // Allow async branch generation to complete
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Find the new child task
+      const childEntry = Array.from((tm as any).tasks.values()).find(
+        (e: any) => e.task.parentTaskId === "parent-no-branch"
+      ) as any;
+      expect(childEntry).toBeDefined();
+      // checkoutBranch should be undefined: fresh branch must be created, not checked out
+      expect(childEntry.checkoutBranch).toBeUndefined();
+      // Branch should be freshly generated
+      expect(childEntry.task.branch).toMatch(/^impl\/child-/);
+    });
+
+    it("continuation from task with branch sets checkoutBranch to inherited branch", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "parent-with-branch", status: "completed", branch: "impl/parent-xyz" }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "child2", title: "Child2" });
+
+      // Simulate chain is active so the task gets queued
+      tm.markChainActive(PROJECT_ID, "parent-with-branch" as any);
+
+      await tm.startTask(PROJECT_ID, { prompt: "Continue from parent", continueTaskId: "parent-with-branch" });
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      const childEntry = Array.from((tm as any).tasks.values()).find(
+        (e: any) => e.task.parentTaskId === "parent-with-branch"
+      ) as any;
+      expect(childEntry).toBeDefined();
+      // checkoutBranch should be the inherited branch — it must be checked out, not created
+      expect(childEntry.checkoutBranch).toBe("impl/parent-xyz");
+    });
+
+    it("chain context is included in prompt when running continuation task", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const { GitManager } = await import("../src/git-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      const parentOutput = '{"message":{"content":[{"type":"text","text":"Added the login button"}]}}';
+      store.save(makePersistedTask({
+        taskId: "ctx-parent",
+        status: "completed",
+        branch: "impl/ctx-parent",
+        title: "Add login button",
+        output: parentOutput,
+      }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "ctx-child", title: "Ctx child" });
+
+      vi.spyOn(GitManager.prototype, "checkoutBranchAll").mockResolvedValue();
+      vi.spyOn(GitManager.prototype, "pushBranchAll").mockResolvedValue();
+      vi.spyOn(GitManager.prototype, "getHeadAll").mockResolvedValue(new Map());
+      vi.spyOn(GitManager.prototype, "hasUncommittedChanges").mockResolvedValue(false);
+      vi.spyOn(GitManager.prototype, "ensureBranchAtHeadAll").mockResolvedValue(false);
+
+      // @ts-expect-error - private
+      const state = tm.projects.get(PROJECT_ID)!;
+      const fakeWorkspace = { id: 0, dir: "/fake" };
+      vi.spyOn(state.pool, "acquire").mockResolvedValue(fakeWorkspace);
+
+      let capturedPrompt = "";
+      vi.spyOn(Executor.prototype, "run").mockImplementation(async (prompt) => {
+        capturedPrompt = prompt;
+        return { exitCode: 0, output: "", timedOut: false };
+      });
+
+      await tm.startTask(PROJECT_ID, { prompt: "Now add the logout button", continueTaskId: "ctx-parent" });
+
+      // Allow async execution to proceed
+      await new Promise((r) => setTimeout(r, 100));
+
+      // The prompt should include context from the parent task
+      expect(capturedPrompt).toContain("Context from previous tasks in this chain");
+      expect(capturedPrompt).toContain("Add login button");
+      expect(capturedPrompt).toContain("Added the login button");
     });
   });
 

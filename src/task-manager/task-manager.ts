@@ -485,15 +485,11 @@ export class TaskManager {
                     `Task ${request.continueTaskId} is not the latest in its chain. Continue from ${tip} instead.`
                 );
             }
-            // Validate parent has a branch
-            if (!parentEntry.task.branch) {
-                throw new BadRequestError(
-                    `Task ${request.continueTaskId} has no branch to continue from`
-                );
-            }
             parentTaskId = request.continueTaskId;
             chainId =
                 parentEntry.task.chainId ?? (parentEntry.task.taskId as unknown as ChainId);
+            // May be null when the parent task made no changes — the continuation
+            // will generate a fresh branch in that case (same as a new task).
             inheritedBranch = parentEntry.task.branch;
         }
 

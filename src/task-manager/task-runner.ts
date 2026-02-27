@@ -10,12 +10,41 @@ import {
 } from "./utils.js";
 import type { TaskManager } from "./task-manager.js";
 
+/**
+ * Collect outputs from all ancestor tasks in the chain (oldest first) and format
+ * them as context to include in the continuation task's prompt.
+ */
+function buildChainContext(task: Task, tm: TaskManager): string {
+    const chain: Task[] = [];
+    let currentId = task.parentTaskId;
+    while (currentId) {
+        const parentEntry = tm.tasks.get(currentId);
+        if (!parentEntry) break;
+        chain.unshift(parentEntry.task);
+        currentId = parentEntry.task.parentTaskId;
+    }
+    if (chain.length === 0) return "";
+
+    const contextParts = chain.map((t, i) => {
+        const summary = extractLastAssistantMessage(t.output);
+        const label = t.title ?? t.prompt.slice(0, 100);
+        return `### Previous task ${i + 1}: ${label}\n${summary || "(no changes were made)"}`;
+    });
+
+    return `\n\n## Context from previous tasks in this chain\n\n${contextParts.join("\n\n")}`;
+}
+
 export async function executeTask(
     task: Task,
     workspace: { id: number; dir: string },
     state: ProjectState,
     tm: TaskManager,
-    /** Override which branch to checkout. Used for resume/retry. For chain tasks defaults to task.branch. */
+    /**
+     * Branch to check out before execution. Pass the inherited branch name for
+     * continuation tasks (where the parent made commits). Pass undefined to
+     * create a fresh branch from the default branch (new tasks, retries from
+     * scratch, or continuations of branchless parents).
+     */
     checkoutBranch?: string
 ): Promise<void> {
     if (!task.branch) {
@@ -29,10 +58,10 @@ export async function executeTask(
     const executor = entry.executor!;
     const branchName = task.branch;
     const githubToken = state.config.auth?.githubToken;
-    // Chain tasks always check out their existing branch; normal tasks create a new one.
-    const fromBranch =
-        checkoutBranch ??
-        (task.chainId !== undefined ? task.branch : undefined);
+    // Use the explicitly provided checkoutBranch to determine whether to check out an
+    // existing branch or create a fresh one. Callers are responsible for passing the
+    // correct value: inherited branch name for continuations, undefined for new branches.
+    const fromBranch = checkoutBranch;
 
     try {
         // Step 1: Prepare branch in all repos
@@ -86,8 +115,10 @@ export async function executeTask(
             `[${task.taskId}] Running Claude Code in workspace ${workspace.id}...`
         );
         const systemPrompt = state.config.claudeCode.systemPrompt ?? "";
+        const chainContext = buildChainContext(task, tm);
         const fullPrompt =
             task.prompt +
+            chainContext +
             buildSystemInstructions(repos, state.config.protectedPaths) +
             (systemPrompt ? `\n\n${systemPrompt}` : "");
         const result = await executor.run(
@@ -584,9 +615,15 @@ export async function prepareAndRunTask(
     const { taskId, projectId } = task;
     const entry = tm.tasks.get(taskId)!;
 
+    // Remember whether the branch was already set before we enter this function.
+    // An inherited branch (from a parent task with commits) must be checked out.
+    // A freshly generated branch must be created from scratch.
+    const branchWasInherited = !!task.branch;
+
     // Resolve branch and title based on task type
     if (!task.branch) {
-        // Normal task: generate branch slug and title
+        // No branch yet: either a brand-new task or a continuation of a parent that
+        // made no changes (branch was null). Generate a fresh branch slug and title.
         console.log(`[${taskId}] Generating branch name and title...`);
         const metaExecutor = new Executor(
             state.config.claudeCode,
@@ -618,12 +655,20 @@ export async function prepareAndRunTask(
         tm.persistEntry(entry);
     }
 
+    // If the branch was inherited from a parent with commits, check it out.
+    // If the branch is freshly generated (new task or continuation of branchless parent),
+    // pass undefined so executeTask creates a new branch instead.
+    const checkoutBranch: string | undefined = branchWasInherited
+        ? task.branch!
+        : undefined;
+
     // If the chain is already active (another task in the same chain is running), queue and wait
     if (
         task.chainId !== undefined &&
         tm.isChainActive(projectId, task.chainId)
     ) {
         task.status = "queued";
+        entry.checkoutBranch = checkoutBranch;
         tm.persistEntry(entry);
         tm.enqueue(projectId, taskId);
         const queueLen = tm.queues.get(projectId)?.length ?? 0;
@@ -636,6 +681,7 @@ export async function prepareAndRunTask(
     // Queue if at capacity — task will be picked up by tryDequeue when a slot frees
     if (tm.shouldQueue(projectId, state)) {
         task.status = "queued";
+        entry.checkoutBranch = checkoutBranch;
         tm.persistEntry(entry);
         tm.enqueue(projectId, taskId);
         const queueLen = tm.queues.get(projectId)?.length ?? 0;
@@ -672,6 +718,7 @@ export async function prepareAndRunTask(
         }
         task.status = "queued";
         entry.executor = null;
+        entry.checkoutBranch = checkoutBranch;
         tm.persistEntry(entry);
         tm.enqueue(projectId, taskId);
         console.log(`[${taskId}] Queued after acquire race`);
@@ -681,7 +728,7 @@ export async function prepareAndRunTask(
     entry.workspaceId = workspace.id;
     tm.persistEntry(entry);
 
-    executeTask(task, workspace, state, tm).catch((err) => {
+    executeTask(task, workspace, state, tm, checkoutBranch).catch((err) => {
         console.error(`Task ${taskId} failed unexpectedly:`, err);
     });
 }
