@@ -511,7 +511,18 @@ export function dashboardHtml(hasPassword: boolean): string {
   </div>
 
   <script>
-    var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null;
+    var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null,retryCountdownInterval=null;
+    function fmtCountdown(ms){if(ms<=0)return 'now';var s=Math.ceil(ms/1000);if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;return m+'m '+r+'s';}
+    function startRetryCountdown(nextRetryAt){
+      if(retryCountdownInterval)clearInterval(retryCountdownInterval);
+      var el=document.getElementById('retry-countdown');
+      if(!el||!nextRetryAt)return;
+      var target=new Date(nextRetryAt).getTime();
+      function tick(){var rem=target-Date.now();if(el)el.textContent=fmtCountdown(rem);}
+      tick();
+      retryCountdownInterval=setInterval(tick,1000);
+    }
+    function stopRetryCountdown(){if(retryCountdownInterval){clearInterval(retryCountdownInterval);retryCountdownInterval=null;}}
     function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
     var _spin='<span class="badge-spin"></span>';
     var _dots='<span class="badge-dots"><span></span><span></span><span></span></span>';
@@ -614,6 +625,7 @@ export function dashboardHtml(hasPassword: boolean): string {
               return '<a href="'+esc(pr.url)+'" target="_blank" rel="noopener" class="pr-link">'+esc(pr.repo)+' #'+esc(num)+'</a>';
             }).join(' &nbsp;&bull;&nbsp; ');
           }
+          stopRetryCountdown();
           var html='';
           html+='<div class="det-row"><div class="det-lbl">Prompt</div><div class="det-pre">'+esc(t.prompt)+'</div></div>';
           if(t.title)html+='<div class="det-row"><div class="det-lbl">Title</div><div class="det-val">'+esc(t.title)+'</div></div>';
@@ -621,6 +633,9 @@ export function dashboardHtml(hasPassword: boolean): string {
           if(t.branch)html+='<div class="det-row"><div class="det-lbl">Branch</div><div class="det-val mono">'+esc(t.branch)+'</div></div>';
           if(t.chainId)html+='<div class="det-row"><div class="det-lbl">Chain</div><div class="det-val mono">'+esc(t.chainId)+'</div></div>';
           if(t.parentTaskId)html+='<div class="det-row"><div class="det-lbl">Parent Task</div><div class="det-val mono">'+esc(t.parentTaskId)+'</div></div>';
+          var attemptLabel=t.maxAttempts?('Attempt '+t.attempt+' / '+t.maxAttempts):('Attempt '+t.attempt);
+          html+='<div class="det-row"><div class="det-lbl">Attempts</div><div class="det-val mono">'+esc(attemptLabel)+'</div></div>';
+          if(t.status==='retrying'&&t.nextRetryAt)html+='<div class="det-row"><div class="det-lbl">Next Retry</div><div class="det-val mono"><span id="retry-countdown">…</span> &nbsp;<span class="muted" style="font-size:.8em">(at '+esc(fmtDate(t.nextRetryAt))+')</span></div></div>';
           html+='<div class="det-row"><div class="det-lbl">Duration</div><div class="det-val mono">'+dur(t.durationSeconds)+'</div></div>';
           html+='<div class="det-row"><div class="det-lbl">Started</div><div class="det-val mono">'+fmtDate(t.startedAt)+'</div></div>';
           if(t.completedAt)html+='<div class="det-row"><div class="det-lbl">Completed</div><div class="det-val mono">'+fmtDate(t.completedAt)+'</div></div>';
@@ -628,10 +643,12 @@ export function dashboardHtml(hasPassword: boolean): string {
           if(t.error)html+='<div class="det-row"><div class="det-lbl">Error</div><div class="det-err">'+esc(t.error)+'</div></div>';
           if(t.output)html+='<div class="det-row"><div class="det-lbl">Output</div><div class="det-pre">'+esc(t.output)+'</div></div>';
           document.getElementById('task-bd').innerHTML=html;
+          if(t.status==='retrying'&&t.nextRetryAt)startRetryCountdown(t.nextRetryAt);
         })
         .catch(function(){document.getElementById('task-bd').innerHTML='<div class="det-err">Failed to load task details.</div>';});
     }
     function closeTask(){
+      stopRetryCountdown();
       document.getElementById('task-overlay').style.display='none';
       currentTaskId=null;
       currentTaskData=null;
@@ -950,6 +967,8 @@ export function registerDashboardRoutes(
             chainId: task.chainId ?? null,
             status: task.status,
             attempt: task.attempt,
+            maxAttempts: config.projects[task.projectId]?.errorRetry?.maxAttempts ?? null,
+            nextRetryAt: task.nextRetryAt ?? null,
             startedAt: task.startedAt,
             completedAt: task.completedAt,
             durationSeconds: task.status === "queued"
