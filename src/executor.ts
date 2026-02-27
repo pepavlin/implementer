@@ -160,9 +160,13 @@ Task: ${prompt}`,
       proc.stdout?.on("data", (data: Buffer) => { output += data.toString(); });
       proc.stderr?.on("data", (data: Buffer) => { output += data.toString(); });
 
-      proc.on("error", () => resolve({ slug: "task", title: "", estimatedDurationSeconds: 600 }));
+      proc.on("error", (err) => {
+        console.error(`[meta] Docker spawn error: ${err.message}`);
+        resolve({ slug: "task", title: "", estimatedDurationSeconds: 600 });
+      });
       proc.on("close", (code) => {
         if (code !== 0) {
+          console.error(`[meta] Docker exited with code ${code}. Output:\n${output}`);
           resolve({ slug: "task", title: "", estimatedDurationSeconds: 600 });
           return;
         }
