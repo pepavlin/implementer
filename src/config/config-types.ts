@@ -63,7 +63,7 @@ export interface ProjectConfig {
     repositories: RepositoryConfig[];
     claudeCode: ClaudeCodeConfig;
     auth?: ProjectAuth;
-    errorRetry?: ErrorRetryConfig;
+    errorRetry: ErrorRetryConfig;
     /** Paths (files or directories) that Claude must not modify. Changes to these paths are reverted before PR creation. Supports git pathspec patterns (e.g. ".github", "Dockerfile", "docker-compose*.yml"). */
     protectedPaths?: string[];
 }
@@ -136,7 +136,7 @@ const ProjectSchema = z
         repositories: z.array(RepositorySchema).min(1),
         claudeCode: ClaudeCodeSchema.default({}),
         auth: ProjectAuthSchema.optional(),
-        errorRetry: ErrorRetrySchema.optional(),
+        errorRetry: ErrorRetrySchema.default({ maxAttempts: 3, delaySeconds: 60 }),
         protectedPaths: z.array(z.string()).optional()
     })
     .strict();

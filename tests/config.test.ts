@@ -382,6 +382,47 @@ projects:
         expect(config.projects["my-project"].protectedPaths).toBeUndefined();
     });
 
+    it("applies default errorRetry when not configured", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.projects["my-project"].errorRetry).toEqual({
+            maxAttempts: 3,
+            delaySeconds: 60
+        });
+    });
+
+    it("allows overriding errorRetry in project config", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+    errorRetry:
+      maxAttempts: 5
+      delaySeconds: 30
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.projects["my-project"].errorRetry).toEqual({
+            maxAttempts: 5,
+            delaySeconds: 30
+        });
+    });
+
 });
 
 describe("defaults merging", () => {

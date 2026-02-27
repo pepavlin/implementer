@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { nanoid } from "nanoid";
 import type { ClaudeCodeConfig } from "./config/config-types.js";
 import type { TokenManager } from "./auth.js";
 
@@ -42,10 +43,19 @@ export class Executor {
   /** Sandbox Docker image name from SANDBOX_IMAGE env var. */
   private sandboxImage: string;
 
+  /**
+   * Unique ID for this Executor instance. Included in container names to prevent
+   * name collisions when a task is resumed after a server restart — the old container
+   * (started by a previous Executor) may still be running, so a fresh Executor must
+   * use a different name prefix.
+   */
+  private instanceId: string;
+
   constructor(config: ClaudeCodeConfig, tokenManager: TokenManager) {
     this.config = config;
     this.tokenManager = tokenManager;
     this.sandboxImage = process.env.SANDBOX_IMAGE || "implementer-sandbox";
+    this.instanceId = nanoid(6);
   }
 
   getOutput(): string {
@@ -73,7 +83,7 @@ export class Executor {
     const dockerArgs = [
       "run",
       "--rm",
-      "--name", `${process.env.INSTANCE_NAME || "implementer"}-slug-${taskId ?? Date.now()}`,
+      "--name", `${process.env.INSTANCE_NAME || "implementer"}-slug-${taskId ?? Date.now()}-${this.instanceId}`,
       "--cpus=0.4",
       "-e", `${creds.envName}=${creds.value}`,
       this.sandboxImage,
@@ -131,7 +141,7 @@ Task: ${prompt}`,
     const dockerArgs = [
       "run",
       "--rm",
-      "--name", `${process.env.INSTANCE_NAME || "implementer"}-meta-${taskId ?? Date.now()}`,
+      "--name", `${process.env.INSTANCE_NAME || "implementer"}-meta-${taskId ?? Date.now()}-${this.instanceId}`,
       "--cpus=0.4",
       "-e", `${creds.envName}=${creds.value}`,
       this.sandboxImage,
@@ -187,7 +197,7 @@ Task: ${prompt}`,
     const dockerArgs = [
       "run",
       "--rm",
-      "--name", `${process.env.INSTANCE_NAME || "implementer"}-title-${taskId ?? Date.now()}`,
+      "--name", `${process.env.INSTANCE_NAME || "implementer"}-title-${taskId ?? Date.now()}-${this.instanceId}`,
       "--cpus=0.4",
       "-e", `${creds.envName}=${creds.value}`,
       this.sandboxImage,
@@ -239,7 +249,7 @@ Task: ${prompt}`,
       claudeArgs.push("--model", this.config.model);
     }
 
-    const containerName = `${process.env.INSTANCE_NAME || "implementer"}-${taskId ?? Date.now()}-${this.runCounter++}`;
+    const containerName = `${process.env.INSTANCE_NAME || "implementer"}-${taskId ?? Date.now()}-${this.instanceId}-${this.runCounter++}`;
 
     const dockerArgs = [
       "run",
