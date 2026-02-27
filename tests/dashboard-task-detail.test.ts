@@ -364,3 +364,67 @@ describe("dashboard HTML - completed vs cancelled visual distinction", () => {
         expect(html).toContain("--b-can-fg:#64748b");
     });
 });
+
+describe("buildDashboardData - completedAt field", () => {
+    it("includes completedAt in task list data", () => {
+        const completedAt = new Date("2024-01-01T10:05:00Z").toISOString();
+        const tasks: Task[] = [makeTask({ status: "completed", completedAt })];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        expect(data.tasks).toHaveLength(1);
+        expect((data.tasks[0] as Record<string, unknown>).completedAt).toBe(completedAt);
+    });
+
+    it("includes null completedAt for non-completed tasks", () => {
+        const tasks: Task[] = [makeTask({ status: "running", completedAt: null })];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        expect((data.tasks[0] as Record<string, unknown>).completedAt).toBeNull();
+    });
+});
+
+describe("dashboard HTML - completed badge recency styling", () => {
+    it("includes b-completed-old CSS class for muted old completed badges", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain(".b-completed-old{");
+    });
+
+    it("includes tr-completed-old CSS class for old completed rows", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain(".tr-completed-old td:first-child{border-left:3px solid #47556930}");
+    });
+
+    it("includes isRecentCompleted helper in JS with 20-minute threshold", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        // 20 minutes = 1200000 ms
+        expect(res.text).toContain("isRecentCompleted");
+        expect(res.text).toContain("1200000");
+    });
+});
