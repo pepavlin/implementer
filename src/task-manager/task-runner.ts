@@ -315,8 +315,8 @@ export async function executeTask(
             // Always preserve the branch so the next attempt can continue from where we left off.
             // Increment attempt so recoverTask() knows to check out the existing branch on restart.
             task.attempt += 1;
-            task.status = "retrying";
             task.error = `Timed out after ${state.config.claudeCode.timeoutSeconds} seconds`;
+            tm.push_front(task.projectId, task.taskId); // Re-enqueue at the front so it gets picked up immediately on restart
             console.log(
                 `[${task.taskId}] Timed out — status set to retrying. Will resume on next server start or manual retry.`
             );

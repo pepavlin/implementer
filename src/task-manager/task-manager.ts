@@ -18,7 +18,7 @@ import { ProjectState, TaskEntry } from "./types.js";
 import { TaskActiveError, TaskCancelError, TaskEditError } from "./errors.js";
 import { BadRequestError } from "../errors.js";
 import { fireWebhook } from "./utils.js";
-import { executeTask, scheduleRetry, prepareMetadata } from "./task-runner.js";
+import { executeTask, prepareMetadata } from "./task-runner.js";
 export { TaskActiveError, TaskCancelError, TaskEditError };
 
 export class TaskManager {
