@@ -82,6 +82,27 @@ describe("GitManager", () => {
       const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
       expect(branch).toBe("impl/new-task");
     });
+
+    it("succeeds when the branch already exists locally (resuming a previous task)", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Pre-create the branch as if a previous task run had already done so
+      await shell("git checkout -b impl/task-resume", repoDir);
+      await shell("echo work > work.txt && git add . && git commit -m 'wip'", repoDir);
+      await shell("git checkout main", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      // Should not throw even though impl/task-resume already exists
+      await gm.prepareNewBranchAll(workDir, repos, "impl/task-resume");
+
+      const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
+      expect(branch).toBe("impl/task-resume");
+    });
   });
 
   describe("resetToDefaultAll", () => {

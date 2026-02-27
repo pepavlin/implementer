@@ -62,6 +62,8 @@ export class GitManager {
 
   /**
    * Create a new branch from the default branch in all repos.
+   * If the branch already exists locally (e.g. resuming a previous task),
+   * falls back to a plain checkout without -b.
    */
   async prepareNewBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string, githubToken?: string): Promise<void> {
     for (const repo of repos) {
@@ -70,7 +72,12 @@ export class GitManager {
       await git(["reset", "--hard", "HEAD"], repoDir);
       await git(["checkout", repo.defaultBranch], repoDir);
       await git(["reset", "--hard", `origin/${repo.defaultBranch}`], repoDir);
-      await git(["checkout", "-b", branchName], repoDir);
+      try {
+        await git(["checkout", "-b", branchName], repoDir);
+      } catch {
+        // Branch already exists locally — just check it out
+        await git(["checkout", branchName], repoDir);
+      }
     }
   }
 
