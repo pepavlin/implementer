@@ -342,31 +342,6 @@ Task: ${prompt}`,
   }
 
   /**
-   * Kill and remove all Docker containers whose name starts with the
-   * instance prefix. Call this on startup to clean up orphaned containers
-   * left behind by a previous server process that exited abnormally.
-   */
-  static cleanupStaleContainers(): void {
-    const prefix = process.env.INSTANCE_NAME || "implementer";
-    try {
-      const output = execFileSync(
-        "docker",
-        ["ps", "-a", "--filter", `name=^${prefix}-`, "--format", "{{.Names}}"],
-        { encoding: "utf-8", timeout: 10_000 }
-      ).trim();
-      if (!output) return;
-      const names = output.split("\n").filter(Boolean);
-      for (const name of names) {
-        console.log(`[cleanup] Removing stale container: ${name}`);
-        Executor.removeContainer(name);
-      }
-      console.log(`[cleanup] Removed ${names.length} stale container(s)`);
-    } catch {
-      // Docker not available or command failed — skip cleanup
-    }
-  }
-
-  /**
    * Kill the running executor process.
    * Sends SIGTERM to the `docker run` child process AND issues `docker kill` directly
    * against the container name to ensure the container stops even if signal forwarding fails.

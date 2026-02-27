@@ -3,7 +3,6 @@ import { Config } from "./config/config.js";
 import { TaskManager } from "./task-manager/task-manager.js";
 import { createServer } from "./server.js";
 import { ensureAndPrepareDockerImage, getSandboxImageName } from "./docker.js";
-import { Executor } from "./executor.js";
 import { exit } from "node:process";
 
 function checkGitHubCLI() {
@@ -28,14 +27,11 @@ async function main() {
     // 3. Check for GitHub CLI
     checkGitHubCLI();
 
-    // 4. Clean up stale Docker containers from previous run
-    Executor.cleanupStaleContainers();
-
-    // 5. Initialize Task Manager
+    // 4. Initialize Task Manager
     const taskManager = new TaskManager(config);
     await taskManager.init();
 
-    // 6. Start API server
+    // 5. Start API server
     const app = createServer(taskManager, config);
     const port = Number(process.env.PORT) || 3000;
     app.listen(port, () => {
