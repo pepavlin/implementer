@@ -63,6 +63,7 @@ export function buildDashboardData(
         prompt: task.prompt,
         status: task.status,
         startedAt: task.startedAt,
+        completedAt: task.completedAt,
         durationSeconds: task.status === "queued"
             ? null
             : Math.round(
@@ -250,6 +251,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     .tr-retrying td{animation:retrying-row-pulse 2s ease-in-out infinite}
     .tr-retrying td:first-child{border-left:3px solid #60a5fa80}
     .tr-completed td:first-child{border-left:3px solid #34d39960}
+    .tr-completed-old td:first-child{border-left:3px solid #47556930}
     .tr-cancelled td:first-child{border-left:3px solid #47556940}
     .stats{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
     .stat{background:var(--bg-card);border-radius:8px;padding:14px 20px;min-width:110px;transition:box-shadow .3s}
@@ -294,6 +296,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     .b-queued{background:var(--b-q-bg);color:var(--b-q-fg)}
     .b-retrying{background:var(--b-ret-bg);color:var(--b-ret-fg)}
     .b-completed{background:var(--b-done-bg);color:var(--b-done-fg)}
+    .b-completed-old{background:transparent;color:var(--text3);font-weight:400}
     .b-failed{background:var(--b-fail-bg);color:var(--b-fail-fg)}
     .b-interrupted{background:var(--b-int-bg);color:var(--b-int-fg)}
     .b-cancelled{background:var(--b-can-bg);color:var(--b-can-fg)}
@@ -535,7 +538,8 @@ export function dashboardHtml(hasPassword: boolean): string {
     function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
     var _spin='<span class="badge-spin"></span>';
     var _dots='<span class="badge-dots"><span></span><span></span><span></span></span>';
-    function badge(s){var m={running:['b-running',_spin+'Running'],starting:['b-starting',_spin+'Starting'],queued:['b-queued','Queued'+_dots],retrying:['b-retrying',_spin+'Retrying'],completed:['b-completed','&#10003; Completed'],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','&#215; Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
+    function isRecentCompleted(ca){return!!ca&&(Date.now()-new Date(ca).getTime())<1200000;}
+    function badge(s,completedAt){var cc=isRecentCompleted(completedAt)?'b-completed':'b-completed-old';var m={running:['b-running',_spin+'Running'],starting:['b-starting',_spin+'Starting'],queued:['b-queued','Queued'+_dots],retrying:['b-retrying',_spin+'Retrying'],completed:[cc,'&#10003; Completed'],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','&#215; Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
     function dur(s){if(s==null)return '—';if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
     function fmtDate(d){try{return new Date(d).toLocaleString();}catch(e){return String(d);}}
     function setFilter(f){
@@ -593,8 +597,10 @@ export function dashboardHtml(hasPassword: boolean): string {
         tb.innerHTML='<tr><td colspan="6" class="empty">'+msg+'</td></tr>';return;
       }
       tb.innerHTML=filtered.map(function(t){
-        return '<tr class="clickable tr-'+esc(t.status)+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'">'
-          +'<td>'+badge(t.status)+'</td>'
+        var rowClass='clickable tr-'+esc(t.status);
+        if(t.status==='completed'&&!isRecentCompleted(t.completedAt))rowClass+=' tr-completed-old';
+        return '<tr class="'+rowClass+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'">'
+          +'<td>'+badge(t.status,t.completedAt)+'</td>'
           +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
           +'<td class="td-taskid"><span class="mono">'+esc(t.taskId)+'</span></td>'
           +'<td>'+(t.title?'<div class="ttitle">'+esc(t.title)+'</div>':'')+'<div class="tprompt">'+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+'</div></td>'
@@ -621,7 +627,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         .then(function(r){return r.json();})
         .then(function(t){
           currentTaskData=t;
-          document.getElementById('task-badge').innerHTML=badge(t.status);
+          document.getElementById('task-badge').innerHTML=badge(t.status,t.completedAt);
           var active=['queued','starting','running','retrying'];
           document.getElementById('task-retry').style.display=active.includes(t.status)?'none':'';
           document.getElementById('task-cancel').style.display=active.includes(t.status)?'':'none';
