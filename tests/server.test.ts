@@ -52,16 +52,16 @@ function makeMockTask(overrides: Partial<Task> = {}): Task {
         completedAt: null,
         output: "",
         attempt: 1,
+        chainId: "chain1",
         ...overrides
     };
 }
 
 function makeMockTaskManager(overrides: Partial<TaskManager> = {}) {
     return {
-        startTask: vi.fn(),
+        createNewTask: vi.fn(),
         getTask: vi.fn(),
         listTasks: vi.fn().mockReturnValue([]),
-        listAllActiveTasks: vi.fn().mockReturnValue([]),
         listAllTasks: vi.fn().mockReturnValue([]),
         getOutput: vi.fn().mockReturnValue(""),
         retryTask: vi.fn(),
@@ -145,7 +145,7 @@ describe("server", () => {
         it("creates a task and returns taskId with queued status and null branch", async () => {
             const task = makeMockTask({ status: "queued", branch: null });
             const tm = makeMockTaskManager({
-                startTask: vi.fn().mockResolvedValue(task)
+                createNewTask: vi.fn().mockResolvedValue(task)
             });
             const app = createServer(tm, makeConfig());
 
@@ -172,7 +172,7 @@ describe("server", () => {
         it("returns queued status when at capacity", async () => {
             const task = makeMockTask({ status: "queued" });
             const tm = makeMockTaskManager({
-                startTask: vi.fn().mockResolvedValue(task)
+                createNewTask: vi.fn().mockResolvedValue(task)
             });
             const app = createServer(tm, makeConfig());
 
@@ -186,7 +186,7 @@ describe("server", () => {
 
         it("returns 500 on unexpected error", async () => {
             const tm = makeMockTaskManager({
-                startTask: vi.fn().mockRejectedValue(new Error("boom"))
+                createNewTask: vi.fn().mockRejectedValue(new Error("boom"))
             });
             const app = createServer(tm, makeConfig());
 
@@ -198,15 +198,15 @@ describe("server", () => {
             expect(res.body.error).toBe("boom");
         });
 
-        it("accepts continueTaskId and passes it to startTask", async () => {
+        it("accepts continueTaskId and passes it to createNewTask", async () => {
             const task = makeMockTask({
                 status: "queued",
                 branch: "impl/inherited-branch",
                 parentTaskId: "parentXYZ",
                 chainId: "rootABC"
             });
-            const startTask = vi.fn().mockResolvedValue(task);
-            const tm = makeMockTaskManager({ startTask });
+            const createNewTask = vi.fn().mockResolvedValue(task);
+            const tm = makeMockTaskManager({ createNewTask });
             const app = createServer(tm, makeConfig());
 
             const res = await request(app)
@@ -217,7 +217,7 @@ describe("server", () => {
             expect(res.body.taskId).toBe("abc123");
             expect(res.body.parentTaskId).toBe("parentXYZ");
             expect(res.body.chainId).toBe("rootABC");
-            expect(startTask).toHaveBeenCalledWith(expect.any(String), {
+            expect(createNewTask).toHaveBeenCalledWith(expect.any(String), {
                 prompt: "Continue work",
                 continueTaskId: "parentXYZ"
             });
@@ -231,7 +231,7 @@ describe("server", () => {
                 chainId: "chain1"
             });
             const tm = makeMockTaskManager({
-                startTask: vi.fn().mockResolvedValue(task)
+                createNewTask: vi.fn().mockResolvedValue(task)
             });
             const app = createServer(tm, makeConfig());
 
@@ -247,7 +247,7 @@ describe("server", () => {
         it("returns null parentTaskId and chainId for standalone tasks", async () => {
             const task = makeMockTask({ status: "queued", branch: null });
             const tm = makeMockTaskManager({
-                startTask: vi.fn().mockResolvedValue(task)
+                createNewTask: vi.fn().mockResolvedValue(task)
             });
             const app = createServer(tm, makeConfig());
 
@@ -257,7 +257,8 @@ describe("server", () => {
                 .expect(200);
 
             expect(res.body.parentTaskId).toBeNull();
-            expect(res.body.chainId).toBeNull();
+            // Standalone tasks now always have a chainId (auto-generated)
+            expect(res.body.chainId).toBe("chain1");
         });
     });
 
@@ -369,7 +370,7 @@ describe("server", () => {
             expect(res.body.tasks[0].chainId).toBe("chain1");
         });
 
-        it("returns null parentTaskId and chainId for standalone tasks", async () => {
+        it("returns null parentTaskId for standalone tasks (chainId always present)", async () => {
             const task = makeMockTask({
                 status: "completed",
                 completedAt: "2025-01-01T01:00:00.000Z"
@@ -381,7 +382,8 @@ describe("server", () => {
 
             const res = await request(app).get("/tasks").expect(200);
             expect(res.body.tasks[0].parentTaskId).toBeNull();
-            expect(res.body.tasks[0].chainId).toBeNull();
+            // Standalone tasks now always have a chainId (auto-generated)
+            expect(res.body.tasks[0].chainId).toBe("chain1");
         });
 
         it("passes chainId query filter to listTasks", async () => {
@@ -432,7 +434,7 @@ describe("server", () => {
             expect(res.body.chainId).toBe("chain1");
         });
 
-        it("returns null parentTaskId and chainId for standalone tasks", async () => {
+        it("returns null parentTaskId for standalone tasks (chainId always present)", async () => {
             const task = makeMockTask({
                 status: "completed",
                 completedAt: "2025-01-01T00:05:00.000Z"
@@ -444,7 +446,8 @@ describe("server", () => {
 
             const res = await request(app).get("/task/abc123").expect(200);
             expect(res.body.parentTaskId).toBeNull();
-            expect(res.body.chainId).toBeNull();
+            // Standalone tasks now always have a chainId (auto-generated)
+            expect(res.body.chainId).toBe("chain1");
         });
 
         it("returns pullRequests when present", async () => {
@@ -1079,8 +1082,8 @@ describe("server", () => {
 
         it("creates a task and returns taskId", async () => {
             const task = makeMockTask({ status: "queued", branch: null });
-            const startTask = vi.fn().mockResolvedValue(task);
-            const tm = makeMockTaskManager({ startTask });
+            const createNewTask = vi.fn().mockResolvedValue(task);
+            const tm = makeMockTaskManager({ createNewTask });
             const app = createServer(tm, makeConfigWithAdmin());
             const cookie = await getAdminCookie(app);
 
@@ -1092,7 +1095,7 @@ describe("server", () => {
 
             expect(res.body.taskId).toBe("abc123");
             expect(res.body.status).toBe("queued");
-            expect(startTask).toHaveBeenCalledWith(PROJECT_ID, {
+            expect(createNewTask).toHaveBeenCalledWith(PROJECT_ID, {
                 prompt: "Add a button",
                 continueTaskId: undefined
             });
