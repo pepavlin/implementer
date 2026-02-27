@@ -29,10 +29,12 @@ export async function executeTask(
     const executor = entry.executor!;
     const branchName = task.branch;
     const githubToken = state.config.auth?.githubToken;
-    // Chain tasks always check out their existing branch; normal tasks create a new one.
+    // Resumed/retried tasks check out the specified branch.
+    // Chain continuation tasks (with parentTaskId) check out the inherited branch.
+    // New standalone tasks create a new branch (fromBranch is undefined).
     const fromBranch =
         checkoutBranch ??
-        (task.chainId !== undefined ? task.branch : undefined);
+        (task.parentTaskId !== undefined ? task.branch : undefined);
 
     try {
         // Step 1: Prepare branch in all repos
@@ -237,25 +239,10 @@ export async function executeTask(
                     `[${task.taskId}] Completed and pushed successfully.`
                 );
             } else {
-                // Success with no commits
-                if (task.chainId !== undefined) {
-                    // Chain task: keep the branch — future chain tasks may need it
-                    console.log(
-                        `[${task.taskId}] No new commits on continuation branch — leaving branch intact.`
-                    );
-                } else {
-                    // Normal task: delete remote branch and clear branch ref
-                    console.log(
-                        `[${task.taskId}] No new commits — cleaning up remote branch.`
-                    );
-                    await tm.gitManager.deleteRemoteBranchAll(
-                        workspace.dir,
-                        repos,
-                        branchName,
-                        githubToken
-                    );
-                    task.branch = null;
-                }
+                // Success with no commits — keep the branch for future chain tasks
+                console.log(
+                    `[${task.taskId}] No new commits — leaving branch intact.`
+                );
                 task.status = "completed";
             }
         } else if (result.timedOut) {
@@ -396,25 +383,10 @@ export async function executeTask(
                     );
                 }
             } else {
-                // Failure with no commits
-                if (task.chainId !== undefined) {
-                    // Chain task: keep the branch
-                    console.log(
-                        `[${task.taskId}] Failed with no commits on continuation branch — leaving branch intact.`
-                    );
-                } else {
-                    // Normal task: delete remote branch
-                    console.log(
-                        `[${task.taskId}] Failed with no commits — cleaning up remote branch.`
-                    );
-                    await tm.gitManager.deleteRemoteBranchAll(
-                        workspace.dir,
-                        repos,
-                        branchName,
-                        githubToken
-                    );
-                    task.branch = null;
-                }
+                // Failure with no commits — keep the branch for potential retries
+                console.log(
+                    `[${task.taskId}] Failed with no commits — leaving branch intact.`
+                );
             }
 
             task.status = "failed";
@@ -443,9 +415,7 @@ export async function executeTask(
         }
         tm.saveTask(entry);
         // Release chain lock so the next task in the chain can be dequeued
-        if (task.chainId !== undefined) {
-            tm.unmarkChainActive(task.projectId, task.chainId);
-        }
+        tm.unmarkChainActive(task.projectId, task.chainId);
         state.pool.release(workspace.id);
         // Start next queued task for this project if capacity is now available
         tm.dequeueAvailableTasks();

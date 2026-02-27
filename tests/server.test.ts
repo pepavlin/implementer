@@ -3,7 +3,7 @@ import request from "supertest";
 import { createServer } from "../src/server.js";
 import type { TaskManager } from "../src/task-manager/task-manager.js";
 import type { Task } from "../src/types.js";
-import { TaskActiveError, TaskCancelError, TaskEditError } from "../src/task-manager/task-manager.js";
+import { TaskActiveError, TaskCancelError } from "../src/task-manager/task-manager.js";
 import type { Config } from "../src/config/config.js";
 
 const PROJECT_ID = "test-project";
@@ -66,7 +66,6 @@ function makeMockTaskManager(overrides: Partial<TaskManager> = {}) {
         getOutput: vi.fn().mockReturnValue(""),
         retryTask: vi.fn(),
         cancelTask: vi.fn(),
-        editTask: vi.fn(),
         ...overrides
     } as unknown as TaskManager;
 }
@@ -1523,127 +1522,6 @@ describe("server", () => {
             const res = await request(app)
                 .post("/dashboard/api/task/abc123/cancel")
                 .set("Cookie", cookie)
-                .expect(500);
-
-            expect(res.body.error).toBe("unexpected");
-        });
-    });
-
-    describe("PATCH /dashboard/api/task/:taskId", () => {
-        it("returns 404 when adminPassword is not configured", async () => {
-            const app = createServer(makeMockTaskManager(), makeConfig());
-            await request(app)
-                .patch("/dashboard/api/task/abc123")
-                .send({ prompt: "new prompt" })
-                .expect(404);
-        });
-
-        it("returns 401 when not authenticated", async () => {
-            const app = createServer(
-                makeMockTaskManager(),
-                makeConfigWithAdmin()
-            );
-            await request(app)
-                .patch("/dashboard/api/task/abc123")
-                .send({ prompt: "new prompt" })
-                .expect(401);
-        });
-
-        it("returns 404 for unknown task", async () => {
-            const tm = makeMockTaskManager({
-                listAllTasks: vi.fn().mockReturnValue([])
-            });
-            const app = createServer(tm, makeConfigWithAdmin());
-            const cookie = await getAdminCookie(app);
-
-            await request(app)
-                .patch("/dashboard/api/task/nonexistent")
-                .set("Cookie", cookie)
-                .send({ prompt: "new prompt" })
-                .expect(404);
-        });
-
-        it("returns 400 when prompt is missing", async () => {
-            const task = makeMockTask({ status: "queued" });
-            const tm = makeMockTaskManager({
-                listAllTasks: vi.fn().mockReturnValue([task])
-            });
-            const app = createServer(tm, makeConfigWithAdmin());
-            const cookie = await getAdminCookie(app);
-
-            const res = await request(app)
-                .patch("/dashboard/api/task/abc123")
-                .set("Cookie", cookie)
-                .send({})
-                .expect(400);
-
-            expect(res.body.error).toBeTruthy();
-        });
-
-        it("updates the prompt of a queued task", async () => {
-            const task = makeMockTask({ status: "queued" });
-            const updated = makeMockTask({
-                status: "queued",
-                prompt: "Updated prompt"
-            });
-            const tm = makeMockTaskManager({
-                listAllTasks: vi.fn().mockReturnValue([task]),
-                editTask: vi.fn().mockReturnValue(updated)
-            });
-            const app = createServer(tm, makeConfigWithAdmin());
-            const cookie = await getAdminCookie(app);
-
-            const res = await request(app)
-                .patch("/dashboard/api/task/abc123")
-                .set("Cookie", cookie)
-                .send({ prompt: "Updated prompt" })
-                .expect(200);
-
-            expect(res.body.taskId).toBe("abc123");
-            expect(res.body.prompt).toBe("Updated prompt");
-            expect(res.body.status).toBe("queued");
-            expect(tm.editTask).toHaveBeenCalledWith(
-                PROJECT_ID,
-                "abc123",
-                "Updated prompt"
-            );
-        });
-
-        it("returns 409 when task cannot be edited", async () => {
-            const task = makeMockTask({ status: "running" });
-            const tm = makeMockTaskManager({
-                listAllTasks: vi.fn().mockReturnValue([task]),
-                editTask: vi.fn().mockImplementation(() => {
-                    throw new TaskEditError("Task is not queued");
-                })
-            });
-            const app = createServer(tm, makeConfigWithAdmin());
-            const cookie = await getAdminCookie(app);
-
-            const res = await request(app)
-                .patch("/dashboard/api/task/abc123")
-                .set("Cookie", cookie)
-                .send({ prompt: "new prompt" })
-                .expect(409);
-
-            expect(res.body.error).toContain("not queued");
-        });
-
-        it("returns 500 on unexpected error", async () => {
-            const task = makeMockTask({ status: "queued" });
-            const tm = makeMockTaskManager({
-                listAllTasks: vi.fn().mockReturnValue([task]),
-                editTask: vi.fn().mockImplementation(() => {
-                    throw new Error("unexpected");
-                })
-            });
-            const app = createServer(tm, makeConfigWithAdmin());
-            const cookie = await getAdminCookie(app);
-
-            const res = await request(app)
-                .patch("/dashboard/api/task/abc123")
-                .set("Cookie", cookie)
-                .send({ prompt: "new prompt" })
                 .expect(500);
 
             expect(res.body.error).toBe("unexpected");

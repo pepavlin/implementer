@@ -19,8 +19,6 @@ import { TaskActiveError, TaskCancelError, TaskEditError } from "./errors.js";
 import { BadRequestError } from "../errors.js";
 import { fireWebhook } from "./utils.js";
 import { executeTask, scheduleRetry, prepareMetadata } from "./task-runner.js";
-import { nan } from "zod/v4";
-
 export { TaskActiveError, TaskCancelError, TaskEditError };
 
 export class TaskManager {
@@ -123,7 +121,10 @@ export class TaskManager {
 
     async dequeueAvailableTasks(): Promise<void> {
         for (const taskInQueue of this.queue) {
-            if (this.activeChains.size >= this.globalMaxConcurrentTasks) break; // If any chain is active, skip dequeueing to respect serial constraint
+            let totalActive = 0;
+            for (const chains of this.activeChains.values())
+                totalActive += chains.size;
+            if (totalActive >= this.globalMaxConcurrentTasks) break;
             const entry = this.tasks.get(taskInQueue);
             if (!entry) continue;
             if (!this.canTaskBeDequeued(entry)) continue;
@@ -163,7 +164,6 @@ export class TaskManager {
         if (!task.branch) {
             await prepareMetadata(task, state, this, entry);
         }
-
         entry.executor = new Executor(
             state.config.claudeCode,
             state.tokenManager
@@ -191,9 +191,7 @@ export class TaskManager {
                     err instanceof Error ? err.message : String(err)
                 );
                 // Release chain lock on failure
-                if (task.chainId !== undefined) {
-                    this.unmarkChainActive(projectId, task.chainId);
-                }
+                this.unmarkChainActive(projectId, task.chainId);
                 if (task.callbackUrl) {
                     fireWebhook(task.taskId, task.status, task.callbackUrl);
                 }
@@ -440,9 +438,7 @@ export class TaskManager {
         const entry = this.getTaskEntry(projectId, taskId);
         const task = entry.task;
 
-        if (
-            !["queued", "starting", "running", "retrying"].includes(task.status)
-        ) {
+        if (!["queued", "running", "retrying"].includes(task.status)) {
             throw new TaskCancelError(task.status);
         }
 
@@ -455,7 +451,11 @@ export class TaskManager {
                 const idx = queue.indexOf(taskId);
                 if (idx !== -1) queue.splice(idx, 1);
             }
+            // Set cancelled flag so background prepareMetadata flow detects it
+            entry.cancelled = true;
             this.finishTask(entry, "cancelled");
+            // Release chain lock (was marked active when task transitioned to starting)
+            this.unmarkChainActive(task.projectId, task.chainId);
             console.log(`[${taskId}] Cancelled (was ${previousStatus})`);
         } else if (previousStatus === "retrying") {
             // Clear the pending retry timer

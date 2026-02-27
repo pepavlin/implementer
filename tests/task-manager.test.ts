@@ -1399,5 +1399,148 @@ describe("TaskManager", () => {
     });
   });
 
+  describe("bug fixes", () => {
+    it("global concurrency counts total active chains, not project count", async () => {
+      // Bug #2: activeChains.size counted Map entries (projects), not total chains
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig({ server: { workspaceDir: TMP, maxConcurrentTasks: 2 } });
+      const tm = new TaskManager(config);
+
+      // Mark two chains active under the same project
+      tm.markChainActive(PROJECT_ID, "chain-1" as any);
+      tm.markChainActive(PROJECT_ID, "chain-2" as any);
+
+      // Queue a task
+      const store = new TaskStore(TMP);
+      store.save(makePersistedTask({ taskId: "queued-task", status: "queued", chainId: "chain-3" as any }));
+      await tm.init();
+
+      // dequeueAvailableTasks should NOT dequeue because totalActive (2) >= maxConcurrentTasks (2)
+      expect(tm.queue).toContain("queued-task");
+      await tm.dequeueAvailableTasks();
+      // Task should still be in queue because we've hit the global limit
+      expect(tm.queue).toContain("queued-task");
+    });
+
+    it("cancelling a 'starting' task sets cancelled flag and releases chain lock", async () => {
+      // Bug #3: cancelling a "starting" task didn't set entry.cancelled or release chain lock
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig();
+      const tm = new TaskManager(config);
+
+      // Create a task entry directly in memory (no disk needed)
+      const task = {
+        taskId: "starting-task" as any,
+        projectId: PROJECT_ID,
+        branch: "impl/test-starting-task",
+        chainId: "chain-start" as any,
+        prompt: "Do something",
+        status: "starting" as any,
+        startedAt: new Date().toISOString(),
+        completedAt: null,
+        output: "",
+        attempt: 1,
+      };
+      const entry = { task, executor: null, workspaceId: null } as any;
+      tm.tasks.set(task.taskId, entry);
+      // Manually mark chain active (normally done by runOrContinueTaskFromEntry)
+      tm.markChainActive(PROJECT_ID, "chain-start" as any);
+
+      // Mock saveTask to avoid disk writes
+      vi.spyOn(tm, "saveTask").mockImplementation(() => {});
+
+      const result = tm.cancelTask(PROJECT_ID, "starting-task" as any);
+
+      expect(result.status).toBe("cancelled");
+      expect(entry.cancelled).toBe(true);
+      // Chain lock should be released
+      expect(tm.isChainActive(PROJECT_ID, "chain-start" as any)).toBe(false);
+    });
+
+    it("prepareMetadata failure stops execution and releases chain lock", async () => {
+      // Bug #5: after prepareMetadata failed, code continued to pool.acquire
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const tm = new TaskManager(config);
+
+      // @ts-expect-error - accessing private projects map
+      const projectState = tm.projects.get(PROJECT_ID)!;
+
+      // Create a branchless task entry
+      const task = {
+        taskId: "meta-fail" as any,
+        projectId: PROJECT_ID,
+        branch: null,
+        chainId: "chain-meta" as any,
+        prompt: "Do something",
+        status: "queued" as any,
+        startedAt: new Date().toISOString(),
+        completedAt: null,
+        output: "",
+        attempt: 1,
+      };
+      const entry = { task, executor: null, workspaceId: null };
+      tm.tasks.set(task.taskId, entry as any);
+
+      // Mock prepareMetadata to fail (set task to "failed")
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockRejectedValue(new Error("API error"));
+
+      // Mock saveTask to avoid disk writes
+      vi.spyOn(tm, "saveTask").mockImplementation(() => {});
+
+      // Mock pool.acquire — should NOT be called
+      const acquireSpy = vi.spyOn(projectState.pool, "acquire").mockResolvedValue({ id: 0, dir: TMP });
+
+      // Run the method
+      // @ts-expect-error - accessing private method
+      await tm.runOrContinueTaskFromEntry(entry);
+
+      // Task should be failed
+      expect(task.status).toBe("failed");
+      // Chain lock should be released
+      expect(tm.isChainActive(PROJECT_ID, "chain-meta" as any)).toBe(false);
+      // pool.acquire should NOT have been called
+      expect(acquireSpy).not.toHaveBeenCalled();
+    });
+
+    it("new standalone tasks use prepareNewBranch (no checkoutBranch set)", async () => {
+      // Bug #4: chainId is always set, so fromBranch always used task.branch
+      // instead of undefined for new standalone tasks
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const tm = new TaskManager(config);
+
+      // @ts-expect-error - accessing private projects map
+      const projectState = tm.projects.get(PROJECT_ID)!;
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "new-task", title: "New Task" });
+      vi.spyOn(projectState.pool, "hasFreeSlot").mockReturnValue(true);
+      vi.spyOn(projectState.pool, "acquire").mockResolvedValue({ id: 0, dir: TMP });
+      vi.spyOn(projectState.pool, "release").mockReturnValue(undefined);
+
+      const checkoutSpy = vi.spyOn(tm.gitManager, "checkoutBranchAll").mockResolvedValue(undefined);
+      const prepareSpy = vi.spyOn(tm.gitManager, "prepareNewBranchAll").mockResolvedValue(undefined);
+      vi.spyOn(tm.gitManager, "pushBranchAll").mockResolvedValue(undefined);
+      vi.spyOn(tm.gitManager, "getHeadAll").mockResolvedValue(new Map());
+      vi.spyOn(tm.gitManager, "hasUncommittedChanges").mockResolvedValue(false);
+      vi.spyOn(tm.gitManager, "revertProtectedPathsAll").mockResolvedValue(undefined);
+      vi.spyOn(tm.gitManager, "ensureBranchAtHeadAll").mockResolvedValue(false);
+      vi.spyOn(Executor.prototype, "run").mockResolvedValue({ exitCode: 0, output: "done", timedOut: false });
+      vi.spyOn(Executor.prototype, "getOutput").mockReturnValue("");
+
+      await tm.init();
+      const task = await tm.createNewTask(PROJECT_ID, { prompt: "Do new thing" });
+
+      // Wait for background processing
+      await new Promise((r) => setTimeout(r, 100));
+
+      // prepareNewBranchAll should be called (new standalone task, not a chain continuation)
+      expect(prepareSpy).toHaveBeenCalled();
+      // checkoutBranchAll should NOT be called for a new standalone task
+      expect(checkoutSpy).not.toHaveBeenCalled();
+    });
+  });
 
 });

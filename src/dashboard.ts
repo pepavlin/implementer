@@ -3,8 +3,7 @@ import type express from "express";
 import {
     TaskManager,
     TaskActiveError,
-    TaskCancelError,
-    TaskEditError
+    TaskCancelError
 } from "./task-manager/task-manager.js";
 import { extractLastAssistantMessage } from "./executor.js";
 import type { Config } from "./config/config.js";
@@ -1064,53 +1063,6 @@ export function registerDashboardRoutes(
             });
         } catch (err) {
             if (err instanceof TaskCancelError) {
-                res.status(409).json({ error: err.message });
-                return;
-            }
-            res.status(500).json({
-                error:
-                    err instanceof Error ? err.message : "Internal server error"
-            });
-        }
-    });
-
-    app.patch("/dashboard/api/task/:taskId", (req, res) => {
-        if (!adminPassword) {
-            res.status(404).send("Not Found");
-            return;
-        }
-        if (!isDashboardAuthenticated(req, adminPassword)) {
-            res.status(401).json({ error: "Unauthorized" });
-            return;
-        }
-        const task = taskManager
-            .listAllTasks()
-            .find((t) => t.taskId === req.params.taskId);
-        if (!task) {
-            res.status(404).json({ error: "Task not found" });
-            return;
-        }
-        const { prompt } = req.body ?? {};
-        if (typeof prompt !== "string" || !prompt.trim()) {
-            res.status(400).json({ error: "Prompt is required" });
-            return;
-        }
-        try {
-            const updated = taskManager.editTask(
-                task.projectId,
-                task.taskId,
-                prompt
-            );
-            res.json({
-                taskId: updated.taskId,
-                projectId: updated.projectId,
-                branch: updated.branch,
-                prompt: updated.prompt,
-                title: updated.title ?? null,
-                status: updated.status
-            });
-        } catch (err) {
-            if (err instanceof TaskEditError) {
                 res.status(409).json({ error: err.message });
                 return;
             }
