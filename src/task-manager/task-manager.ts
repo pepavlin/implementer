@@ -381,6 +381,30 @@ export class TaskManager {
 
         const task = entry.task;
 
+        console.log(
+            `[${taskId}] Dequeuing task (${queue.length} still queued for ${projectId})`
+        );
+
+        // Task has no branch yet (e.g. server crashed before slug generation completed).
+        // Route through prepareAndRunTask so the slug is generated before execution.
+        if (!task.branch) {
+            console.log(
+                `[${taskId}] Branch not set — running slug generation before execution`
+            );
+            prepareAndRunTask(task, state, this).catch((err) => {
+                console.error(`[${taskId}] Failed to prepare branchless task:`, err);
+                this.finishTask(
+                    entry,
+                    "failed",
+                    err instanceof Error ? err.message : String(err)
+                );
+                if (task.callbackUrl) {
+                    fireWebhook(task.taskId, task.status, task.callbackUrl);
+                }
+            });
+            return;
+        }
+
         // Mark chain as active immediately (synchronously) before any async work
         if (task.chainId !== undefined) {
             this.markChainActive(projectId, task.chainId);
@@ -392,10 +416,6 @@ export class TaskManager {
         );
         entry.executor = executor;
         task.status = "running";
-
-        console.log(
-            `[${taskId}] Dequeuing task (${queue.length} still queued for ${projectId})`
-        );
 
         state.pool
             .acquire(state.config.repositories, state.config.auth?.githubToken)

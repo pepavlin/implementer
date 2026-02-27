@@ -18,15 +18,21 @@ export async function executeTask(
     /** Override which branch to checkout. Used for resume/retry. For chain tasks defaults to task.branch. */
     checkoutBranch?: string
 ): Promise<void> {
+    if (!task.branch) {
+        throw new Error(
+            `Cannot execute task ${task.taskId}: branch is not set`
+        );
+    }
+
     const repos = state.config.repositories;
     const entry = tm.tasks.get(task.taskId)!;
     const executor = entry.executor!;
-    const branchName = task.branch!;
+    const branchName = task.branch;
     const githubToken = state.config.auth?.githubToken;
     // Chain tasks always check out their existing branch; normal tasks create a new one.
     const fromBranch =
         checkoutBranch ??
-        (task.chainId !== undefined ? task.branch! : undefined);
+        (task.chainId !== undefined ? task.branch : undefined);
 
     try {
         // Step 1: Prepare branch in all repos

@@ -1188,4 +1188,80 @@ describe("TaskManager", () => {
       expect(() => tm.editTask(PROJECT_ID, "nonexistent" as any, "prompt")).toThrow("Task not found");
     });
   });
+
+  describe("branchless task recovery", () => {
+    it("tryDequeue routes branchless queued task through prepareAndRunTask for slug generation", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      // Simulate a task that was persisted with branch=null and status=queued
+      // (server crashed before slug generation completed)
+      store.save(makePersistedTask({
+        taskId: "branchless-task",
+        status: "queued",
+        branch: null,
+        completedAt: null,
+      }));
+
+      const tm = new TaskManager(config);
+
+      // @ts-expect-error - accessing private projects map for testing
+      const state = tm.projects.get(PROJECT_ID)!;
+
+      // Mock slug generation to succeed
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "fix-bug", title: "Fix Bug" });
+
+      // Allow dequeue (hasFreeSlot=true) so tryDequeue reaches the branchless task,
+      // but reject acquire so prepareAndRunTask queues the task instead of running it
+      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(true);
+      vi.spyOn(state.pool, "acquire").mockRejectedValue(new Error("no capacity"));
+
+      await tm.init();
+
+      // Wait for prepareAndRunTask (slug generation) to complete
+      await new Promise((r) => setTimeout(r, 200));
+
+      const task = tm.getTask(PROJECT_ID, "branchless-task");
+      // Branch should now be set (slug generation happened)
+      expect(task?.branch).toBe("impl/fix-bug-branchless-task");
+      expect(task?.title).toBe("Fix Bug");
+      // Task should be queued (acquire rejected)
+      expect(task?.status).toBe("queued");
+    });
+
+    it("tryDequeue does not pass null branch to executeTask", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      // Simulate branchless queued task
+      store.save(makePersistedTask({
+        taskId: "null-branch-task",
+        status: "queued",
+        branch: null,
+        completedAt: null,
+      }));
+
+      const tm = new TaskManager(config);
+
+      // @ts-expect-error - accessing private projects map for testing
+      const state = tm.projects.get(PROJECT_ID)!;
+
+      // Slug generation fails — task should be marked as failed, not crash with "branch null"
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockRejectedValue(new Error("API error"));
+      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(true);
+
+      await tm.init();
+
+      // Wait for the failed prepareAndRunTask
+      await new Promise((r) => setTimeout(r, 200));
+
+      const task = tm.getTask(PROJECT_ID, "null-branch-task");
+      expect(task?.status).toBe("failed");
+      expect(task?.error).toContain("API error");
+    });
+  });
 });
