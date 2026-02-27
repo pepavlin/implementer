@@ -661,6 +661,75 @@ describe("GitManager", () => {
     });
   });
 
+  describe("createEmptyCommitAll", () => {
+    it("creates an empty commit on the feature branch", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      await shell("git checkout -b impl/feature", repoDir);
+      const headBefore = await shell("git rev-parse HEAD", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      await gm.createEmptyCommitAll(workDir, repos, "chore: task completed with no code changes");
+
+      const headAfter = await shell("git rev-parse HEAD", repoDir);
+      // HEAD should have moved (new commit created)
+      expect(headAfter).not.toBe(headBefore);
+
+      // Working tree should still be clean
+      const status = await shell("git status --porcelain", repoDir);
+      expect(status).toBe("");
+
+      // Commit message should match
+      const message = await shell("git log -1 --format=%s", repoDir);
+      expect(message).toBe("chore: task completed with no code changes");
+    });
+
+    it("skips repos on the default branch", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Stay on main
+      const headBefore = await shell("git rev-parse HEAD", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      await gm.createEmptyCommitAll(workDir, repos, "chore: test");
+
+      const headAfter = await shell("git rev-parse HEAD", repoDir);
+      // HEAD should NOT have moved (default branch is skipped)
+      expect(headAfter).toBe(headBefore);
+    });
+
+    it("allows creating a PR on a branch that has no real code changes", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      await shell("git checkout -b impl/feature", repoDir);
+
+      // Before empty commit: branch is identical to default → push only (no commits ahead)
+      await shell("git push origin impl/feature", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      await gm.createEmptyCommitAll(workDir, repos, "chore: task completed with no code changes");
+
+      // After the empty commit the branch is 1 ahead of main
+      const ahead = await shell("git rev-list --count main..impl/feature", repoDir);
+      expect(Number(ahead)).toBe(1);
+    });
+  });
+
   describe("getPullRequestBranch", () => {
     it("throws when gh fails (e.g. PR does not exist or no GitHub auth)", async () => {
       const workDir = join(TMP, "workspace");

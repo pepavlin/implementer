@@ -77,6 +77,30 @@ On server restart:
 - `retrying` → `queued`: dropped delay, retried as soon as capacity is available.
 - `queued` → `queued`: stays in queue, re-enqueued on startup.
 
+## Pull Requests — Always Created
+
+A PR and public branch are **always** created for every task, even when the agent makes no code changes.
+
+### When the agent makes commits (normal case)
+
+A ready (or draft) PR is created containing:
+- **PR body**: agent summary + commit list
+- **PR comment**: original task prompt
+
+### When the agent makes no commits
+
+A PR is still created so reviewers can see what the agent did and why no changes were made:
+
+1. An empty git commit (`chore: task completed with no code changes`) is added to the branch so GitHub allows PR creation (GitHub rejects PRs where head equals base).
+2. The branch is pushed with `--force-with-lease`.
+3. A PR is created:
+   - **Non-draft** if the agent exited successfully (exit code 0)
+   - **Draft** if the agent failed or timed out
+4. **PR body**: agent summary + `_No code changes were committed._`
+5. **PR comment**: original task prompt + full agent output
+
+This ensures a complete audit trail even for tasks where no changes were needed.
+
 ## Known Limitations
 
 - `timeoutSeconds` governs each individual `executor.run()` call. A single task execution may involve multiple `run()` calls (main run + commit fix + rebase conflict resolution). Each call has its own timer.

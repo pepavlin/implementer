@@ -34,6 +34,73 @@ function buildChainContext(task: Task, tm: TaskManager): string {
     return `\n\n## Context from previous tasks in this chain\n\n${contextParts.join("\n\n")}`;
 }
 
+/**
+ * Create an empty commit on the branch (so GitHub allows PR creation) and open a pull
+ * request containing the agent's output as a comment. Used whenever the agent finishes
+ * without producing any committed code changes.
+ */
+async function createPrForNoCommits(
+    task: Task,
+    workspaceDir: string,
+    state: ProjectState,
+    tm: TaskManager,
+    branchName: string,
+    draft: boolean
+): Promise<void> {
+    const repos = state.config.repositories;
+    const githubToken = state.config.auth?.githubToken;
+
+    // An empty commit is required so the branch has at least one commit ahead of
+    // the default branch — GitHub rejects PRs where head equals base.
+    await tm.gitManager.createEmptyCommitAll(
+        workspaceDir,
+        repos,
+        "chore: task completed with no code changes"
+    );
+
+    // Force-push: the remote branch was pushed at the start (same HEAD as default),
+    // so we need --force-with-lease to update it with the empty commit.
+    await tm.gitManager.pushBranchAll(workspaceDir, repos, branchName, true, githubToken);
+
+    const assistantMessage = extractLastAssistantMessage(task.output);
+    const prBody =
+        buildPrBody(assistantMessage, new Map()) + "\n\n_No code changes were committed._";
+    const prTitle = task.prompt.split("\n")[0].slice(0, 120);
+
+    try {
+        const pullRequests = await tm.gitManager.createPullRequestAll(
+            workspaceDir,
+            repos,
+            branchName,
+            prTitle,
+            prBody,
+            draft,
+            githubToken
+        );
+        if (pullRequests.length > 0) {
+            task.pullRequests = pullRequests;
+            console.log(
+                `[${task.taskId}] Created ${pullRequests.length} PR(s): ${pullRequests.map((pr) => pr.url).join(", ")}`
+            );
+
+            // Post task prompt + full agent output as comment
+            const agentOutput = assistantMessage || "(no output)";
+            const taskComment = `## Task\n\n${task.prompt}\n\n## Agent Output\n\n${agentOutput}`;
+            await tm.gitManager.commentOnPullRequestAll(
+                workspaceDir,
+                pullRequests,
+                taskComment,
+                githubToken
+            );
+        }
+    } catch (prErr) {
+        console.error(
+            `[${task.taskId}] PR creation failed:`,
+            prErr instanceof Error ? prErr.message : String(prErr)
+        );
+    }
+}
+
 export async function executeTask(
     task: Task,
     workspace: { id: number; dir: string },
@@ -272,25 +339,18 @@ export async function executeTask(
                     `[${task.taskId}] Completed and pushed successfully.`
                 );
             } else {
-                // Success with no commits
-                if (task.chainId !== undefined) {
-                    // Chain task: keep the branch — future chain tasks may need it
-                    console.log(
-                        `[${task.taskId}] No new commits on continuation branch — leaving branch intact.`
-                    );
-                } else {
-                    // Normal task: delete remote branch and clear branch ref
-                    console.log(
-                        `[${task.taskId}] No new commits — cleaning up remote branch.`
-                    );
-                    await tm.gitManager.deleteRemoteBranchAll(
-                        workspace.dir,
-                        repos,
-                        branchName,
-                        githubToken
-                    );
-                    task.branch = null;
-                }
+                // Success with no commits: always create a PR with the agent output
+                console.log(
+                    `[${task.taskId}] No new commits — creating PR with agent output.`
+                );
+                await createPrForNoCommits(
+                    task,
+                    workspace.dir,
+                    state,
+                    tm,
+                    branchName,
+                    false
+                );
                 task.status = "completed";
             }
         } else if (result.timedOut) {
@@ -355,8 +415,17 @@ export async function executeTask(
                     );
                 }
             } else {
+                // Timeout with no commits: create a draft PR with the agent output
                 console.log(
-                    `[${task.taskId}] Timed out with no commits — branch preserved for continuation.`
+                    `[${task.taskId}] Timed out with no commits — creating draft PR with agent output.`
+                );
+                await createPrForNoCommits(
+                    task,
+                    workspace.dir,
+                    state,
+                    tm,
+                    branchName,
+                    true
                 );
             }
 
@@ -431,25 +500,18 @@ export async function executeTask(
                     );
                 }
             } else {
-                // Failure with no commits
-                if (task.chainId !== undefined) {
-                    // Chain task: keep the branch
-                    console.log(
-                        `[${task.taskId}] Failed with no commits on continuation branch — leaving branch intact.`
-                    );
-                } else {
-                    // Normal task: delete remote branch
-                    console.log(
-                        `[${task.taskId}] Failed with no commits — cleaning up remote branch.`
-                    );
-                    await tm.gitManager.deleteRemoteBranchAll(
-                        workspace.dir,
-                        repos,
-                        branchName,
-                        githubToken
-                    );
-                    task.branch = null;
-                }
+                // Failure with no commits: always create a draft PR with the agent output
+                console.log(
+                    `[${task.taskId}] Failed with no commits — creating draft PR with agent output.`
+                );
+                await createPrForNoCommits(
+                    task,
+                    workspace.dir,
+                    state,
+                    tm,
+                    branchName,
+                    true
+                );
             }
 
             task.status = "failed";

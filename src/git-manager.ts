@@ -396,6 +396,26 @@ export class GitManager {
   }
 
   /**
+   * Create an empty commit (with --allow-empty) on the current branch in all repos
+   * that are NOT on the default branch. Used to ensure a branch has at least one commit
+   * ahead of the default branch, which is required to open a GitHub pull request.
+   */
+  async createEmptyCommitAll(baseDir: string, repos: RepositoryConfig[], message: string): Promise<void> {
+    for (const repo of repos) {
+      const repoDir = this.getRepoDir(baseDir, repo.name);
+      try {
+        const currentBranch = await git(["rev-parse", "--abbrev-ref", "HEAD"], repoDir);
+        if (currentBranch === repo.defaultBranch) continue;
+        await git(["commit", "--allow-empty", "-m", message], repoDir);
+      } catch (err) {
+        console.error(
+          `[git-manager] Failed to create empty commit in ${repo.name}: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+  }
+
+  /**
    * Resolve the head branch name of a pull request by its number.
    * Uses the gh CLI with --repo so it works from any working directory.
    * The repo URL is expected to be a GitHub HTTPS URL (https://github.com/owner/repo.git).
