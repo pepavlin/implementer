@@ -334,6 +334,9 @@ Tasks for the same PR are always serialised: a second task waits in the queue un
 
 Task state is persisted to disk so the service survives restarts. On startup the following happens automatically:
 
+1. **Stale container cleanup** — All sandbox containers from the previous run that are still alive are killed before any new containers are started. This ensures the running container count never exceeds `maxConcurrentTasks` during restart recovery.
+2. **Task recovery** — Persisted task states are loaded and handled:
+
 | State before restart | State after restart |
 |---|---|
 | `running` | Resumed immediately on the same branch. If the resumed attempt fails, the retry fires with **no delay** (delay = 0 s) so the task gets back to work right away instead of waiting for the configured `errorRetry.delaySeconds`. Subsequent automatic retries use the normal configured delay. |

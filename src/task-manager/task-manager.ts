@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { nanoid } from "nanoid";
 import type { ChainId, PersistedTask, ProjectId, Task, TaskCreateRequest, TaskId } from "../types.js";
 import { GitManager } from "../git-manager.js";
-import { Executor } from "../executor.js";
+import { Executor, killStaleContainers } from "../executor.js";
 import { WorkspacePool } from "../workspace-pool.js";
 import { TaskStore } from "../task-store.js";
 import { TokenManager } from "../auth.js";
@@ -104,8 +104,16 @@ export class TaskManager {
     /**
      * Initialize task manager: rediscover workspaces, load persisted tasks,
      * mark running tasks as interrupted, and resume them.
+     *
+     * Kills any sandbox containers left over from the previous server run before
+     * resuming interrupted tasks — this prevents the total running container count
+     * from exceeding maxConcurrentTasks when old containers haven't exited yet.
      */
     async init(): Promise<void> {
+        // Kill leftover containers from a previous server run first so we never
+        // exceed maxConcurrentTasks when we resume interrupted tasks below.
+        await killStaleContainers();
+
         // Rediscover existing workspace directories from disk for each project
         for (const state of this.projects.values()) {
             state.pool.initFromDisk();

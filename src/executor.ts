@@ -3,6 +3,64 @@ import { nanoid } from "nanoid";
 import type { ClaudeCodeConfig } from "./types.js";
 import type { TokenManager } from "./auth.js";
 
+/**
+ * Stop all sandbox containers from a previous run of this implementer instance
+ * that may still be running. Called on startup before resuming interrupted tasks
+ * to ensure the total running container count never exceeds maxConcurrentTasks.
+ *
+ * Containers are matched by the INSTANCE_NAME prefix, e.g. "implementer-".
+ * Uses `docker kill` (SIGKILL) since the containers belong to interrupted tasks
+ * and will be re-run with fresh containers anyway.
+ */
+export async function killStaleContainers(): Promise<void> {
+    const instanceName = process.env.INSTANCE_NAME || "implementer";
+    const nameFilter = `${instanceName}-`;
+
+    return new Promise<void>((resolve) => {
+        // List all running containers whose name contains the instance prefix
+        const listProc = spawn(
+            "docker",
+            ["ps", "--filter", `name=${nameFilter}`, "--format", "{{.Names}}"],
+            { stdio: ["ignore", "pipe", "pipe"] }
+        );
+
+        let output = "";
+        listProc.stdout?.on("data", (d: Buffer) => { output += d.toString(); });
+
+        listProc.on("error", (err) => {
+            console.warn(`[executor] Failed to list stale containers: ${err.message}`);
+            resolve();
+        });
+
+        listProc.on("close", () => {
+            const containers = output.trim().split("\n").filter(Boolean);
+            if (containers.length === 0) {
+                console.log("[executor] No stale containers to clean up");
+                resolve();
+                return;
+            }
+
+            console.log(
+                `[executor] Killing ${containers.length} stale container(s): ${containers.join(", ")}`
+            );
+
+            const killProc = spawn("docker", ["kill", ...containers], {
+                stdio: ["ignore", "pipe", "pipe"],
+            });
+
+            killProc.on("error", (err) => {
+                console.warn(`[executor] Failed to kill stale containers: ${err.message}`);
+                resolve();
+            });
+
+            killProc.on("close", () => {
+                console.log("[executor] Stale containers killed");
+                resolve();
+            });
+        });
+    });
+}
+
 export interface ExecutorResult {
   exitCode: number | null;
   output: string;
