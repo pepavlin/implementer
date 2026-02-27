@@ -269,6 +269,58 @@ describe("buildDashboardData", () => {
         expect(taskList[1].taskId).toBe("queued-old");
         expect(taskList[2].taskId).toBe("completed1");
     });
+
+    it("includes estimatedDurationSeconds in task list when available", () => {
+        const task = makeTask({
+            status: "running",
+            completedAt: null,
+            estimatedDurationSeconds: 600
+        });
+        const tm = makeTaskManager([task]) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+        const taskList = data.tasks as Array<{ taskId: string; estimatedDurationSeconds: number | null }>;
+
+        expect(taskList[0].estimatedDurationSeconds).toBe(600);
+    });
+
+    it("includes null estimatedDurationSeconds when not set", () => {
+        const task = makeTask({ status: "completed" });
+        const tm = makeTaskManager([task]) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+        const taskList = data.tasks as Array<{ taskId: string; estimatedDurationSeconds: number | null }>;
+
+        expect(taskList[0].estimatedDurationSeconds).toBeNull();
+    });
+});
+
+describe("GET /dashboard/api/task/:taskId - estimatedDurationSeconds", () => {
+    it("returns estimatedDurationSeconds when set on task", async () => {
+        const task = makeTask({ estimatedDurationSeconds: 900 });
+        const app = createApp([task], makeConfig() as unknown as Config);
+
+        const res = await request(app)
+            .get("/dashboard/api/task/abc12345")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.body.estimatedDurationSeconds).toBe(900);
+    });
+
+    it("returns null estimatedDurationSeconds when not set", async () => {
+        const task = makeTask();
+        const app = createApp([task], makeConfig() as unknown as Config);
+
+        const res = await request(app)
+            .get("/dashboard/api/task/abc12345")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.body.estimatedDurationSeconds).toBeNull();
+    });
 });
 
 describe("dashboard HTML - completed vs cancelled visual distinction", () => {
