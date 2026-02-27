@@ -497,3 +497,153 @@ describe("POST /dashboard/api/task/:taskId/retry-now", () => {
         expect(res.text).toContain("retry-now");
     });
 });
+
+describe("dashboard HTML - Scheduled Retry badge", () => {
+    it("shows 'Scheduled Retry' text instead of 'Retrying' for retrying tasks", async () => {
+        const task = makeTask({ status: "retrying", completedAt: null });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("Scheduled Retry");
+        expect(res.text).not.toContain("'Retrying'");
+    });
+
+    it("uses clock SVG icon instead of spinning badge for retrying status", async () => {
+        const task = makeTask({ status: "retrying", completedAt: null });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        // clock SVG variable should be defined and used for retrying
+        expect(res.text).toContain("badge-clock-ico");
+        // badge() function should use _clock for retrying, not _spin+'Retrying'
+        expect(res.text).toContain("_clock+'Scheduled Retry'");
+    });
+
+    it("includes badge-clock-ico CSS class in dashboard HTML", async () => {
+        const task = makeTask({ status: "retrying", completedAt: null });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain(".badge-clock-ico{");
+    });
+
+    it("project card shows 'scheduled' label for retrying tasks instead of 'retrying'", async () => {
+        const task = makeTask({ status: "retrying", completedAt: null });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        // The project stats rendering uses 'scheduled' for retrying count (not 'retrying')
+        expect(res.text).toContain("scheduled</span>");
+        // Should not use 'retrying' label in project stats
+        expect(res.text).not.toContain("retrying</span>");
+    });
+});
+
+describe("dashboard HTML - unviewed completed task highlight", () => {
+    it("includes b-completed-new CSS class for unviewed completed badge styling", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain(".b-completed-new{");
+    });
+
+    it("includes tr-completed-new CSS class for unviewed completed row styling", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain(".tr-completed-new td:first-child{border-left:3px solid #34d399!important}");
+    });
+
+    it("includes badge-new-dot CSS class for pulsing new indicator dot", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain(".badge-new-dot{");
+    });
+
+    it("includes viewedTasks Set initialized from localStorage", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("viewedTasks");
+        expect(res.text).toContain("seenCompletedTasks");
+    });
+
+    it("openTask marks task as viewed in localStorage", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        // openTask should add to viewedTasks and persist to localStorage
+        expect(res.text).toContain("viewedTasks.add(taskId)");
+        expect(res.text).toContain("localStorage.setItem('seenCompletedTasks'");
+    });
+
+    it("badge function accepts taskId parameter for unviewed detection", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        // badge function signature includes taskId
+        expect(res.text).toContain("function badge(s,completedAt,taskId)");
+        // uses isNew logic
+        expect(res.text).toContain("isNew");
+        expect(res.text).toContain("b-completed-new");
+    });
+
+    it("includes badge-new-glow animation keyframes for unviewed completed badge", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("badge-new-glow");
+    });
+});

@@ -235,13 +235,18 @@ export function dashboardHtml(hasPassword: boolean): string {
     @keyframes starting-row-pulse{0%,100%{background:transparent}50%{background:rgba(34,211,238,.04)}}
     @keyframes retrying-row-pulse{0%,100%{background:transparent}50%{background:rgba(96,165,250,.04)}}
     .badge-spin{display:inline-block;width:9px;height:9px;border:1.5px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;margin-right:5px;vertical-align:middle;flex-shrink:0}
+    .badge-clock-ico{width:10px;height:10px;margin-right:5px;vertical-align:middle;flex-shrink:0;display:inline-block}
     .badge-dots{display:inline-flex;gap:2px;margin-left:5px;align-items:center}
     .badge-dots span{display:inline-block;width:3px;height:3px;border-radius:50%;background:currentColor;animation:dot-bounce 1.2s ease-in-out infinite}
     .badge-dots span:nth-child(2){animation-delay:.16s}
     .badge-dots span:nth-child(3){animation-delay:.32s}
+    .badge-new-dot{display:inline-block;width:5px;height:5px;background:currentColor;border-radius:50%;margin-left:5px;flex-shrink:0;animation:pulse 1.5s ease-in-out infinite}
     .b-running{animation:badge-run-pulse 2s ease-in-out infinite}
     .b-queued{animation:badge-q-pulse 1.6s ease-in-out infinite}
     .b-retrying{animation:badge-ret-pulse 1.8s ease-in-out infinite}
+    .b-completed-new{background:var(--b-done-bg);color:var(--b-done-fg);animation:badge-new-glow 2s ease-in-out infinite}
+    @keyframes badge-new-glow{0%,100%{box-shadow:0 0 0 0 rgba(52,211,153,.55)}50%{box-shadow:0 0 0 6px rgba(52,211,153,0)}}
+    @keyframes completed-new-row{0%,100%{background:transparent}50%{background:rgba(52,211,153,.05)}}
     .tr-running td{animation:run-row-glow 2.5s ease-in-out infinite}
     .tr-running td:first-child{border-left:3px solid #22c55e80}
     .tr-queued td{animation:queued-row-pulse 2s ease-in-out infinite}
@@ -252,7 +257,10 @@ export function dashboardHtml(hasPassword: boolean): string {
     .tr-retrying td:first-child{border-left:3px solid #60a5fa80}
     .tr-completed td:first-child{border-left:3px solid #34d39960}
     .tr-completed-old td:first-child{border-left:3px solid #47556930}
+    .tr-completed-new td{animation:completed-new-row 2.5s ease-in-out infinite}
+    .tr-completed-new td:first-child{border-left:3px solid #34d399!important}
     .tr-cancelled td:first-child{border-left:3px solid #47556940}
+    .ps .badge-clock-ico{width:8px;height:8px;margin-right:2px}
     .stats{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
     .stat{background:var(--bg-card);border-radius:8px;padding:14px 20px;min-width:110px;transition:box-shadow .3s}
     .stat.stat-has-running{box-shadow:0 0 0 1px rgba(34,197,94,.3),0 0 12px rgba(34,197,94,.1)}
@@ -525,6 +533,7 @@ export function dashboardHtml(hasPassword: boolean): string {
 
   <script>
     var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null,retryCountdownInterval=null;
+    var viewedTasks=new Set(JSON.parse(localStorage.getItem('seenCompletedTasks')||'[]'));
     function fmtCountdown(ms){if(ms<=0)return 'now';var s=Math.ceil(ms/1000);if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;return m+'m '+r+'s';}
     function startRetryCountdown(nextRetryAt){
       if(retryCountdownInterval)clearInterval(retryCountdownInterval);
@@ -539,8 +548,9 @@ export function dashboardHtml(hasPassword: boolean): string {
     function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
     var _spin='<span class="badge-spin"></span>';
     var _dots='<span class="badge-dots"><span></span><span></span><span></span></span>';
+    var _clock='<svg class="badge-clock-ico" viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5" xmlns="http://www.w3.org/2000/svg"><circle cx="6" cy="6" r="5"/><path stroke-linecap="round" d="M6 3v3l2 1"/></svg>';
     function isRecentCompleted(ca){return!!ca&&(Date.now()-new Date(ca).getTime())<1200000;}
-    function badge(s,completedAt){var cc=isRecentCompleted(completedAt)?'b-completed':'b-completed-old';var m={running:['b-running',_spin+'Running'],starting:['b-starting',_spin+'Starting'],queued:['b-queued','Queued'+_dots],retrying:['b-retrying',_spin+'Retrying'],completed:[cc,'&#10003; Completed'],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','&#215; Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
+    function badge(s,completedAt,taskId){var isNew=s==='completed'&&!!taskId&&!viewedTasks.has(taskId);var cc=isNew?'b-completed-new':(isRecentCompleted(completedAt)?'b-completed':'b-completed-old');var newDot=isNew?'<span class="badge-new-dot"></span>':'';var m={running:['b-running',_spin+'Running'],starting:['b-starting',_spin+'Starting'],queued:['b-queued','Queued'+_dots],retrying:['b-retrying',_clock+'Scheduled Retry'],completed:[cc,'&#10003; Completed'+newDot],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','&#215; Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
     function dur(s){if(s==null)return '—';if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
     function fmtDate(d){try{return new Date(d).toLocaleString();}catch(e){return String(d);}}
     function setFilter(f){
@@ -570,7 +580,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         if(p.running)parts.push('<span class="ps ps-running">'+_spin+p.running+' running</span>');
         if(p.starting)parts.push('<span class="ps ps-starting">'+_spin+p.starting+' starting</span>');
         if(p.queued)parts.push('<span class="ps ps-queued">'+p.queued+' queued'+_dots+'</span>');
-        if(p.retrying)parts.push('<span class="ps ps-retrying">'+_spin+p.retrying+' retrying</span>');
+        if(p.retrying)parts.push('<span class="ps ps-retrying">'+_clock+p.retrying+' scheduled</span>');
         if(p.completed)parts.push('<span class="ps ps-completed">'+p.completed+' done</span>');
         if(p.failed)parts.push('<span class="ps ps-failed">'+p.failed+' failed</span>');
         if(!parts.length)parts.push('<span class="muted" style="font-size:.72rem">No tasks</span>');
@@ -600,8 +610,9 @@ export function dashboardHtml(hasPassword: boolean): string {
       tb.innerHTML=filtered.map(function(t){
         var rowClass='clickable tr-'+esc(t.status);
         if(t.status==='completed'&&!isRecentCompleted(t.completedAt))rowClass+=' tr-completed-old';
+        if(t.status==='completed'&&!viewedTasks.has(t.taskId))rowClass+=' tr-completed-new';
         return '<tr class="'+rowClass+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'">'
-          +'<td>'+badge(t.status,t.completedAt)+'</td>'
+          +'<td>'+badge(t.status,t.completedAt,t.taskId)+'</td>'
           +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
           +'<td class="td-taskid"><span class="mono">'+esc(t.taskId)+'</span></td>'
           +'<td>'+(t.title?'<div class="ttitle">'+esc(t.title)+'</div>':'')+'<div class="tprompt">'+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+'</div></td>'
@@ -616,6 +627,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     function openTask(taskId,projectId){
       currentTaskId=taskId;
       currentTaskData=null;
+      viewedTasks.add(taskId);try{localStorage.setItem('seenCompletedTasks',JSON.stringify(Array.from(viewedTasks)));}catch(e){}
       document.getElementById('task-ttl').textContent='Task '+taskId;
       document.getElementById('task-badge').innerHTML='';
       document.getElementById('task-bd').innerHTML='<div class="muted" style="text-align:center;padding:32px">Loading\u2026</div>';
