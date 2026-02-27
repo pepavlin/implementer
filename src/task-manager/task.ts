@@ -106,7 +106,6 @@ export class Task {
             "queued",
             "starting",
             "interrupted",
-            "creating",
             "running",
             "retrying"
         ].includes(this.data.status);
@@ -124,10 +123,8 @@ export class Task {
 
         this.data.nextRetryAt = undefined;
         this.data.attempt++;
-        this.unshift();
         console.log(`[${this.id}] Manual retry requested`);
-
-        this.tickUpdate();
+        this.unshift();
     }
 
     /** Mark the task as completed. Sets completedAt and persists. */
@@ -138,7 +135,6 @@ export class Task {
         }
         this.tickUpdate();
     }
-
     /**
      * Mark the task as failed. If errorRetry is configured and attempts remain,
      * sets status to "retrying" with a scheduled nextRetryAt. Otherwise sets "failed".

@@ -10,11 +10,11 @@ import { GitManager } from "../git-manager.js";
 import { TaskStore } from "../task-store.js";
 import { Config } from "../config/config.js";
 import { Project } from "../config/project.js";
-import { TaskActiveError, TaskCancelError, TaskEditError } from "./errors.js";
+import { TaskActiveError } from "./errors.js";
 import { BadRequestError } from "../errors.js";
 import { Task } from "./task.js";
 import { PrPoller, type PollableTask } from "../pr-poller.js";
-export { TaskActiveError, TaskCancelError, TaskEditError };
+export { TaskActiveError };
 
 export class TaskManager {
     config: Config;

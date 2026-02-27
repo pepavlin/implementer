@@ -2,8 +2,7 @@ import { createHash } from "node:crypto";
 import type express from "express";
 import {
     TaskManager,
-    TaskActiveError,
-    TaskCancelError
+    TaskActiveError
 } from "./task-manager/task-manager.js";
 import { extractLastAssistantMessage } from "./executor.js";
 import type { Config } from "./config/config.js";
@@ -1212,26 +1211,15 @@ export function registerDashboardRoutes(
             res.status(404).json({ error: "Task not found" });
             return;
         }
-        try {
-            const cancelled = await taskManager.cancelTask(
-                task.data.projectId,
-                task.id
-            );
-            res.json({
-                taskId: cancelled.id,
-                branch: cancelled.branch,
-                status: cancelled.data.status
-            });
-        } catch (err) {
-            if (err instanceof TaskCancelError) {
-                res.status(409).json({ error: err.message });
-                return;
-            }
-            res.status(500).json({
-                error:
-                    err instanceof Error ? err.message : "Internal server error"
-            });
-        }
+        const cancelled = await taskManager.cancelTask(
+            task.data.projectId,
+            task.id
+        );
+        res.json({
+            taskId: cancelled.id,
+            branch: cancelled.branch,
+            status: cancelled.data.status
+        });
     });
 
     app.post("/dashboard/api/task/:taskId/retry", async (req, res) => {

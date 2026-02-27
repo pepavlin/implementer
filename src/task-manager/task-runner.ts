@@ -301,7 +301,6 @@ export async function executeTask(task: Task): Promise<void> {
             task.fail(
                 `Timed out after ${project.data.claudeCode.timeoutSeconds} seconds`
             );
-            console.log(`[${task.id}] Timed out — re-enqueued for retry.`);
         } else {
             if (hasCommits) {
                 // Failure with commits: force-push partial work and create draft PR
