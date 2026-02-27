@@ -102,13 +102,7 @@ export class Task {
     }
 
     isActive(): boolean {
-        return [
-            "queued",
-            "starting",
-            "interrupted",
-            "running",
-            "retrying"
-        ].includes(this.data.status);
+        return ["starting", "running"].includes(this.data.status);
     }
 
     /**

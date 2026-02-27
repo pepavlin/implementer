@@ -43,7 +43,6 @@ export class TaskManager {
             config
         );
     }
-
     /**
      * Initialize task manager: rediscover workspaces, load persisted tasks,
      * mark running tasks as interrupted, and resume them.
