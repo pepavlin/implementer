@@ -148,6 +148,12 @@ export class TaskManager {
             console.log(
                 `[task-manager] Task ${pt.taskId} re-enqueued (was retrying)`
             );
+        } else if (pt.status === "starting") {
+            pt.status = "queued";
+            this.store.save(pt);
+            console.log(
+                `[task-manager] Task ${pt.taskId} re-enqueued (was starting)`
+            );
         }
 
         // Populate in-memory map (no live executor for historical tasks)
@@ -283,6 +289,7 @@ export class TaskManager {
             .filter(
                 (entry) =>
                     entry.task.status === "queued" ||
+                    entry.task.status === "starting" ||
                     entry.task.status === "running" ||
                     entry.task.status === "retrying"
             )
@@ -497,7 +504,7 @@ export class TaskManager {
             parentTaskId,
             chainId,
             prompt: request.prompt,
-            status: "queued",
+            status: "starting",
             startedAt: new Date().toISOString(),
             completedAt: null,
             output: "",
@@ -536,6 +543,7 @@ export class TaskManager {
 
         if (
             task.status === "queued" ||
+            task.status === "starting" ||
             task.status === "running" ||
             task.status === "retrying"
         ) {
@@ -661,6 +669,7 @@ export class TaskManager {
 
         if (
             task.status !== "queued" &&
+            task.status !== "starting" &&
             task.status !== "running" &&
             task.status !== "retrying"
         ) {
@@ -669,7 +678,7 @@ export class TaskManager {
 
         const previousStatus = task.status;
 
-        if (previousStatus === "queued") {
+        if (previousStatus === "queued" || previousStatus === "starting") {
             // Remove from the project's queue
             const queue = this.queues.get(projectId);
             if (queue) {
@@ -677,7 +686,7 @@ export class TaskManager {
                 if (idx !== -1) queue.splice(idx, 1);
             }
             this.finishTask(entry, "cancelled");
-            console.log(`[${taskId}] Cancelled (was queued)`);
+            console.log(`[${taskId}] Cancelled (was ${previousStatus})`);
         } else if (previousStatus === "retrying") {
             // Clear the pending retry timer
             if (entry.retryTimeoutId !== undefined) {
@@ -714,9 +723,9 @@ export class TaskManager {
         const entry = this.requireEntry(projectId, taskId);
         const task = entry.task;
 
-        if (task.status !== "queued") {
+        if (task.status !== "queued" && task.status !== "starting") {
             throw new TaskEditError(
-                `Cannot edit task with status: ${task.status}. Only queued tasks can be edited.`
+                `Cannot edit task with status: ${task.status}. Only queued or starting tasks can be edited.`
             );
         }
 

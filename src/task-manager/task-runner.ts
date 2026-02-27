@@ -547,6 +547,8 @@ export async function prepareAndRunTask(
         task.chainId !== undefined &&
         tm.isChainActive(projectId, task.chainId)
     ) {
+        task.status = "queued";
+        tm.persistEntry(entry);
         tm.enqueue(projectId, taskId);
         const queueLen = tm.queues.get(projectId)?.length ?? 0;
         console.log(
@@ -557,6 +559,8 @@ export async function prepareAndRunTask(
 
     // Queue if at capacity — task will be picked up by tryDequeue when a slot frees
     if (tm.shouldQueue(projectId, state)) {
+        task.status = "queued";
+        tm.persistEntry(entry);
         tm.enqueue(projectId, taskId);
         const queueLen = tm.queues.get(projectId)?.length ?? 0;
         console.log(

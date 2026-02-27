@@ -4,6 +4,7 @@ export type ChainId = string & { readonly _brand: unique symbol };
 
 export type TaskStatus =
     | "queued"
+    | "starting"
     | "running"
     | "retrying"
     | "completed"

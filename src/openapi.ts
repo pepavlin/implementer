@@ -53,8 +53,8 @@ export const openApiSpec = {
                     },
                     status: {
                         type: "string",
-                        enum: ["queued"],
-                        example: "queued"
+                        enum: ["starting"],
+                        example: "starting"
                     },
                     parentTaskId: {
                         type: "string",
@@ -101,7 +101,7 @@ export const openApiSpec = {
                     },
                     status: {
                         type: "string",
-                        enum: ["queued", "running", "retrying", "completed", "failed", "interrupted", "cancelled"]
+                        enum: ["queued", "starting", "running", "retrying", "completed", "failed", "interrupted", "cancelled"]
                     },
                     startedAt: { type: "string", format: "date-time" },
                     completedAt: {
@@ -214,7 +214,7 @@ export const openApiSpec = {
                             type: "array",
                             items: {
                                 type: "string",
-                                enum: ["queued", "running", "retrying", "completed", "failed", "interrupted", "cancelled"]
+                                enum: ["queued", "starting", "running", "retrying", "completed", "failed", "interrupted", "cancelled"]
                             }
                         },
                         style: "form",

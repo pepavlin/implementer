@@ -478,7 +478,7 @@ describe("TaskManager", () => {
   });
 
   describe("startTask", () => {
-    it("returns immediately with queued status and null branch", async () => {
+    it("returns immediately with starting status and null branch", async () => {
       const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const { Executor } = await import("../src/executor.js");
       const config = makeConfig();
@@ -498,7 +498,7 @@ describe("TaskManager", () => {
 
       // Returned immediately before metadata generation completes
       expect(task.branch).toBeNull();
-      expect(task.status).toBe("queued");
+      expect(task.status).toBe("starting");
       expect(task.taskId).toBeDefined();
       expect(tm.getTask(PROJECT_ID, task.taskId)).toBeDefined();
 
@@ -836,7 +836,7 @@ describe("TaskManager", () => {
 
       const task = await tm.startTask(PROJECT_ID, { prompt: "Chain task", continueTaskId: "root-task" });
 
-      // Give background a moment
+      // Give background a moment — prepareAndRunTask detects chain active and transitions to queued
       await new Promise((r) => setTimeout(r, 80));
 
       // Despite free capacity, task should be queued because chain is active
@@ -1262,6 +1262,173 @@ describe("TaskManager", () => {
       const task = tm.getTask(PROJECT_ID, "null-branch-task");
       expect(task?.status).toBe("failed");
       expect(task?.error).toContain("API error");
+    });
+  });
+
+  describe("starting status", () => {
+    it("startTask returns status 'starting'", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const tm = new TaskManager(config);
+
+      // Metadata generation never resolves — keeps task in starting phase
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockReturnValue(new Promise(() => {}));
+
+      const task = await tm.startTask(PROJECT_ID, { prompt: "Add a button" });
+
+      expect(task.status).toBe("starting");
+      expect(task.branch).toBeNull();
+      expect(task.taskId).toBeDefined();
+    });
+
+    it("starting task transitions to running after metadata generation", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const tm = new TaskManager(config);
+
+      let resolveMetadata!: (v: { slug: string; title: string }) => void;
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockReturnValue(
+        new Promise<{ slug: string; title: string }>((r) => { resolveMetadata = r; })
+      );
+
+      // @ts-expect-error - private
+      const state = tm.projects.get(PROJECT_ID)!;
+      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(true);
+      // Acquire stays pending so executeTask never runs (avoids git errors)
+      vi.spyOn(state.pool, "acquire").mockReturnValue(new Promise(() => {}));
+
+      const task = await tm.startTask(PROJECT_ID, { prompt: "Add a button" });
+      expect(task.status).toBe("starting");
+
+      // Resolve metadata — task should transition to running
+      resolveMetadata({ slug: "add-button", title: "Add a Button" });
+      await new Promise((r) => setTimeout(r, 100));
+
+      expect(tm.getTask(PROJECT_ID, task.taskId)?.status).toBe("running");
+    });
+
+    it("starting task transitions to queued when at capacity", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const tm = new TaskManager(config);
+
+      let resolveMetadata!: (v: { slug: string; title: string }) => void;
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockReturnValue(
+        new Promise<{ slug: string; title: string }>((r) => { resolveMetadata = r; })
+      );
+
+      // @ts-expect-error - private
+      const state = tm.projects.get(PROJECT_ID)!;
+      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(false);
+
+      const task = await tm.startTask(PROJECT_ID, { prompt: "Add a button" });
+      expect(task.status).toBe("starting");
+
+      // Resolve metadata — task should transition to queued (no capacity)
+      resolveMetadata({ slug: "add-button", title: "Add a Button" });
+      await new Promise((r) => setTimeout(r, 100));
+
+      expect(tm.getTask(PROJECT_ID, task.taskId)?.status).toBe("queued");
+    });
+
+    it("starting task can be cancelled", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const tm = new TaskManager(config);
+
+      // Metadata generation never resolves — keeps task in starting phase
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockReturnValue(new Promise(() => {}));
+
+      const task = await tm.startTask(PROJECT_ID, { prompt: "Cancel me" });
+      expect(task.status).toBe("starting");
+
+      const result = tm.cancelTask(PROJECT_ID, task.taskId);
+      expect(result.status).toBe("cancelled");
+      expect(result.completedAt).toBeDefined();
+    });
+
+    it("starting task can be edited", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const tm = new TaskManager(config);
+
+      // Metadata generation never resolves — keeps task in starting phase
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockReturnValue(new Promise(() => {}));
+
+      const task = await tm.startTask(PROJECT_ID, { prompt: "Edit me" });
+      expect(task.status).toBe("starting");
+
+      const result = tm.editTask(PROJECT_ID, task.taskId, "New prompt");
+      expect(result.prompt).toBe("New prompt");
+      expect(result.title).toBeUndefined();
+    });
+
+    it("recoverTask re-enqueues starting tasks as queued", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      // Task was in "starting" state when server crashed
+      store.save(makePersistedTask({
+        taskId: "starting-task",
+        status: "starting" as any,
+        branch: null,
+        completedAt: null,
+        workspaceId: null,
+      }));
+
+      const tm = new TaskManager(config);
+
+      // @ts-expect-error - accessing private projects map for testing
+      const state = tm.projects.get(PROJECT_ID)!;
+      vi.spyOn(state.pool, "hasFreeSlot").mockReturnValue(false);
+
+      await tm.init();
+
+      const task = tm.getTask(PROJECT_ID, "starting-task");
+      expect(task?.status).toBe("queued");
+
+      const onDisk = JSON.parse(
+        readFileSync(join(TMP, "tasks", "starting-task.json"), "utf-8"),
+      );
+      expect(onDisk.status).toBe("queued");
+    });
+
+    it("retryTask rejects starting tasks with TaskActiveError", async () => {
+      const { TaskManager, TaskActiveError } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const tm = new TaskManager(config);
+
+      // Metadata generation never resolves — keeps task in starting phase
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockReturnValue(new Promise(() => {}));
+
+      const task = await tm.startTask(PROJECT_ID, { prompt: "Retry me" });
+      expect(task.status).toBe("starting");
+
+      await expect(tm.retryTask(PROJECT_ID, task.taskId)).rejects.toBeInstanceOf(TaskActiveError);
+    });
+
+    it("listAllActiveTasks includes starting tasks", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const tm = new TaskManager(config);
+
+      // Metadata generation never resolves — keeps task in starting phase
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockReturnValue(new Promise(() => {}));
+
+      const task = await tm.startTask(PROJECT_ID, { prompt: "Active task" });
+      expect(task.status).toBe("starting");
+
+      const active = tm.listAllActiveTasks();
+      expect(active).toHaveLength(1);
+      expect(active[0].status).toBe("starting");
     });
   });
 });

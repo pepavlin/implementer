@@ -64,6 +64,7 @@ export function buildDashboardData(
 
     const stats = {
         running: allTasks.filter((t) => t.status === "running").length,
+        starting: allTasks.filter((t) => t.status === "starting").length,
         queued: allTasks.filter((t) => t.status === "queued").length,
         retrying: allTasks.filter((t) => t.status === "retrying").length,
         completed: allTasks.filter((t) => t.status === "completed").length,
@@ -76,6 +77,7 @@ export function buildDashboardData(
     for (const projectId of Object.keys(config.projects)) {
         projects[projectId] = {
             running: 0,
+            starting: 0,
             queued: 0,
             retrying: 0,
             completed: 0,
@@ -180,7 +182,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       --border:#252a3a;--border2:#2a2f42;--hover-bg:#252a3a;--hover-border:#3b4256;--proj-sel:#1a2035;
       --text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--text4:#4a5568;--text5:#f1f5f9;--text-code:#cbd5e1;
       --overlay:rgba(0,0,0,.75);--shadow:0 20px 60px rgba(0,0,0,.5);--tag-bg:#252a3a;
-      --b-run-bg:#14532d;--b-run-fg:#22c55e;--b-q-bg:#451a03;--b-q-fg:#f59e0b;
+      --b-run-bg:#14532d;--b-run-fg:#22c55e;--b-start-bg:#0d3b4f;--b-start-fg:#22d3ee;--b-q-bg:#451a03;--b-q-fg:#f59e0b;
       --b-ret-bg:#1e3a5f;--b-ret-fg:#60a5fa;--b-done-bg:#1a2535;--b-done-fg:#64748b;
       --b-fail-bg:#3b0f0f;--b-fail-fg:#ef4444;--b-int-bg:#2a1f3a;--b-int-fg:#a78bfa;
       --b-can-bg:#1a2535;--b-can-fg:#64748b;
@@ -193,7 +195,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       --border:#e2e8f0;--border2:#cbd5e1;--hover-bg:#f1f5f9;--hover-border:#94a3b8;--proj-sel:#eff6ff;
       --text:#0f172a;--text2:#475569;--text3:#64748b;--text4:#94a3b8;--text5:#1e293b;--text-code:#374151;
       --overlay:rgba(0,0,0,.5);--shadow:0 20px 60px rgba(0,0,0,.15);--tag-bg:#f1f5f9;
-      --b-run-bg:#dcfce7;--b-run-fg:#16a34a;--b-q-bg:#fef3c7;--b-q-fg:#d97706;
+      --b-run-bg:#dcfce7;--b-run-fg:#16a34a;--b-start-bg:#cffafe;--b-start-fg:#0891b2;--b-q-bg:#fef3c7;--b-q-fg:#d97706;
       --b-ret-bg:#dbeafe;--b-ret-fg:#2563eb;--b-done-bg:#f8fafc;--b-done-fg:#64748b;
       --b-fail-bg:#fee2e2;--b-fail-fg:#dc2626;--b-int-bg:#ede9fe;--b-int-fg:#7c3aed;
       --b-can-bg:#f8fafc;--b-can-fg:#64748b;
@@ -222,6 +224,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     .proj-stats{display:flex;gap:8px;font-size:.72rem;flex-wrap:wrap}
     .ps{padding:1px 7px;border-radius:4px;font-weight:600}
     .ps-running{background:var(--b-run-bg);color:var(--b-run-fg)}
+    .ps-starting{background:var(--b-start-bg);color:var(--b-start-fg)}
     .ps-queued{background:var(--b-q-bg);color:var(--b-q-fg)}
     .ps-retrying{background:var(--b-ret-bg);color:var(--b-ret-fg)}
     .ps-completed{background:var(--b-done-bg);color:var(--b-done-fg)}
@@ -238,6 +241,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     tr.clickable:hover td{background:var(--hover-bg)}
     .badge{display:inline-flex;align-items:center;padding:2px 10px;border-radius:999px;font-size:.7rem;font-weight:600;white-space:nowrap}
     .b-running{background:var(--b-run-bg);color:var(--b-run-fg)}
+    .b-starting{background:var(--b-start-bg);color:var(--b-start-fg)}
     .b-queued{background:var(--b-q-bg);color:var(--b-q-fg)}
     .b-retrying{background:var(--b-ret-bg);color:var(--b-ret-fg)}
     .b-completed{background:var(--b-done-bg);color:var(--b-done-fg)}
@@ -324,6 +328,7 @@ export function dashboardHtml(hasPassword: boolean): string {
   <div class="filters" id="filters">
     <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">All</button>
     <button class="filter-btn" data-filter="running" onclick="setFilter('running')">Running</button>
+    <button class="filter-btn" data-filter="starting" onclick="setFilter('starting')">Starting</button>
     <button class="filter-btn" data-filter="queued" onclick="setFilter('queued')">Queued</button>
     <button class="filter-btn" data-filter="retrying" onclick="setFilter('retrying')">Retrying</button>
     <button class="filter-btn" data-filter="completed" onclick="setFilter('completed')">Completed</button>
@@ -411,7 +416,7 @@ export function dashboardHtml(hasPassword: boolean): string {
   <script>
     var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null;
     function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-    function badge(s){var m={running:['b-running','Running'],queued:['b-queued','Queued'],retrying:['b-retrying','Retrying'],completed:['b-completed','Completed'],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
+    function badge(s){var m={running:['b-running','Running'],starting:['b-starting','Starting'],queued:['b-queued','Queued'],retrying:['b-retrying','Retrying'],completed:['b-completed','Completed'],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
     function dur(s){if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
     function fmtDate(d){try{return new Date(d).toLocaleString();}catch(e){return String(d);}}
     function setFilter(f){
@@ -437,6 +442,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         var p=projects[id],sel=selectedProjects.has(id);
         var parts=[];
         if(p.running)parts.push('<span class="ps ps-running">'+p.running+' running</span>');
+        if(p.starting)parts.push('<span class="ps ps-starting">'+p.starting+' starting</span>');
         if(p.queued)parts.push('<span class="ps ps-queued">'+p.queued+' queued</span>');
         if(p.retrying)parts.push('<span class="ps ps-retrying">'+p.retrying+' retrying</span>');
         if(p.completed)parts.push('<span class="ps ps-completed">'+p.completed+' done</span>');
@@ -493,10 +499,10 @@ export function dashboardHtml(hasPassword: boolean): string {
         .then(function(t){
           currentTaskData=t;
           document.getElementById('task-badge').innerHTML=badge(t.status);
-          var active=['queued','running','retrying'];
+          var active=['queued','starting','running','retrying'];
           document.getElementById('task-retry').style.display=active.includes(t.status)?'none':'';
           document.getElementById('task-cancel').style.display=active.includes(t.status)?'':'none';
-          document.getElementById('task-edit').style.display=t.status==='queued'?'':'none';
+          document.getElementById('task-edit').style.display=(t.status==='queued'||t.status==='starting')?'':'none';
           var prsHtml='None';
           if(t.pullRequests&&t.pullRequests.length){
             prsHtml=t.pullRequests.map(function(pr){
@@ -805,6 +811,7 @@ export function registerDashboardRoutes(
             ),
             output:
                 task.status === "queued" ||
+                task.status === "starting" ||
                 task.status === "running" ||
                 task.status === "retrying" ||
                 task.status === "interrupted"

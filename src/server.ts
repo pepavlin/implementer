@@ -24,6 +24,7 @@ const TaskCreateSchema = z.object({
 
 const TASK_STATUSES = [
     "queued",
+    "starting",
     "running",
     "retrying",
     "completed",
@@ -171,6 +172,7 @@ export function createServer(
             durationSeconds: getDurationSeconds(task),
             output:
                 task.status === "queued" ||
+                task.status === "starting" ||
                 task.status === "running" ||
                 task.status === "retrying" ||
                 task.status === "interrupted"
