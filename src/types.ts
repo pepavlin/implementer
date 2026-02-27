@@ -1,3 +1,5 @@
+import { WorkspaceId } from "./workspace-pool";
+
 export type ProjectId = string & { readonly _brand: unique symbol };
 export type TaskId = string & { readonly _brand: unique symbol };
 export type ChainId = string & { readonly _brand: unique symbol };
@@ -24,10 +26,15 @@ export interface PullRequest {
     lastCheckedAt?: string;
 }
 
-export interface Task {
+export type Branch = {
+    name: string;
+    createdAt: string;
+};
+
+export interface TaskData {
     taskId: TaskId;
     projectId: ProjectId;
-    branch: string | null;
+    branch?: Branch;
     prompt: string;
     title?: string;
     status: TaskStatus;
@@ -48,8 +55,8 @@ export interface Task {
     estimatedDurationSeconds?: number;
 }
 
-export interface PersistedTask extends Task {
-    workspaceId: number | null;
+export interface PersistedTask extends TaskData {
+    workspaceId?: WorkspaceId;
 }
 
 export interface TaskCreateRequest {

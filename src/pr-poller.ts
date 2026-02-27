@@ -10,7 +10,11 @@
 
 import { execFile } from "node:child_process";
 import type { Config } from "./config/config.js";
-import type { ProjectId, PullRequest, PullRequestState, Task } from "./types.js";
+import type {
+    ProjectId,
+    PullRequest,
+    PullRequestState
+} from "./types.js";
 
 /** Default polling interval: 5 minutes. */
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
@@ -30,13 +34,21 @@ function ghQuery(url: string, token?: string): Promise<GhPrState> {
             { env, maxBuffer: 1024 * 1024 },
             (error, stdout) => {
                 if (error) {
-                    reject(new Error(`gh pr view failed for ${url}: ${error.message}`));
+                    reject(
+                        new Error(
+                            `gh pr view failed for ${url}: ${error.message}`
+                        )
+                    );
                     return;
                 }
                 try {
                     resolve(JSON.parse(stdout) as GhPrState);
                 } catch {
-                    reject(new Error(`Failed to parse gh output for ${url}: ${stdout}`));
+                    reject(
+                        new Error(
+                            `Failed to parse gh output for ${url}: ${stdout}`
+                        )
+                    );
                 }
             }
         );
@@ -55,8 +67,15 @@ export function normalizeGhState(raw: GhPrState): PullRequestState {
  * Kept as an interface so the poller can be unit-tested without a real
  * TaskManager.
  */
+/** Minimal view of a task needed by the poller. */
+export interface PollableTask {
+    taskId: string;
+    projectId: string;
+    pullRequests?: PullRequest[];
+}
+
 export interface TaskAccessor {
-    listAllTasks(): Task[];
+    listAllTasks(): PollableTask[];
     updatePrState(taskId: string, prUrl: string, state: PullRequestState): void;
 }
 
@@ -132,18 +151,16 @@ export class PrPoller {
 
         for (const task of tasks) {
             if (!task.pullRequests?.length) continue;
-            const projectConfig = this.config.projects[task.projectId as string];
-            const token = projectConfig?.auth?.githubToken;
+            const projectConfig =
+                this.config.projects[task.projectId as ProjectId];
+            const token = projectConfig?.data.auth?.githubToken;
 
             for (const pr of task.pullRequests) {
-                if (
-                    pr.state === "merged" ||
-                    pr.state === "closed"
-                ) {
+                if (pr.state === "merged" || pr.state === "closed") {
                     // Terminal — no need to re-check
                     continue;
                 }
-                toCheck.push({ taskId: task.taskId as string, pr, token });
+                toCheck.push({ taskId: task.taskId, pr, token });
             }
         }
 
@@ -151,14 +168,16 @@ export class PrPoller {
 
         console.log(
             `[pr-poller] Checking ${toCheck.length} open pull request(s) ` +
-            `(concurrency: ${this.concurrency})...`
+                `(concurrency: ${this.concurrency})...`
         );
 
         // Process PRs with limited concurrency to avoid spawning too many
         // gh subprocesses at once, which can overload the server.
         let errorCount = 0;
 
-        const processOne = async (item: typeof toCheck[number]): Promise<void> => {
+        const processOne = async (
+            item: (typeof toCheck)[number]
+        ): Promise<void> => {
             const { taskId, pr, token } = item;
             try {
                 const raw = await this.queryFn(pr.url, token);
@@ -187,17 +206,22 @@ export class PrPoller {
         } else {
             // Concurrency-limited pool: keep at most `this.concurrency` queries running
             const queue = [...toCheck];
-            const workers = Array.from({ length: this.concurrency }, async () => {
-                while (queue.length > 0) {
-                    const item = queue.shift();
-                    if (item) await processOne(item);
+            const workers = Array.from(
+                { length: this.concurrency },
+                async () => {
+                    while (queue.length > 0) {
+                        const item = queue.shift();
+                        if (item) await processOne(item);
+                    }
                 }
-            });
+            );
             await Promise.all(workers);
         }
 
         if (errorCount > 0) {
-            console.warn(`[pr-poller] ${errorCount} PR check(s) failed during this cycle.`);
+            console.warn(
+                `[pr-poller] ${errorCount} PR check(s) failed during this cycle.`
+            );
         }
     }
 }

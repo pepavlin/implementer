@@ -51,53 +51,60 @@ export function buildDashboardData(
     // Sort: queued/starting tasks first (newest startedAt at top), then all others (newest startedAt at top)
     const queuedStatuses = new Set(["queued", "starting"]);
     const sortedTasks = allTasks.slice().sort((a, b) => {
-        const aQueued = queuedStatuses.has(a.status);
-        const bQueued = queuedStatuses.has(b.status);
+        const aQueued = queuedStatuses.has(a.data.status);
+        const bQueued = queuedStatuses.has(b.data.status);
         if (aQueued !== bQueued) return aQueued ? -1 : 1;
-        return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
+        return (
+            new Date(b.data.startedAt).getTime() -
+            new Date(a.data.startedAt).getTime()
+        );
     });
     const tasks = sortedTasks.slice(0, 200).map((task) => ({
-        taskId: task.taskId,
-        projectId: task.projectId,
+        taskId: task.id,
+        projectId: task.data.projectId,
         title: task.title ?? null,
-        prompt: task.prompt,
-        status: task.status,
-        startedAt: task.startedAt,
-        completedAt: task.completedAt,
-        durationSeconds: task.status === "queued"
-            ? null
-            : Math.round(
-                ((task.completedAt
-                    ? new Date(task.completedAt).getTime()
-                    : Date.now()) -
-                    new Date(task.startedAt).getTime()) /
-                    1000
-            ),
-        estimatedDurationSeconds: task.estimatedDurationSeconds ?? null,
+        prompt: task.data.prompt,
+        status: task.data.status,
+        startedAt: task.data.startedAt,
+        completedAt: task.data.completedAt,
+        durationSeconds:
+            task.data.status === "queued"
+                ? null
+                : Math.round(
+                      ((task.data.completedAt
+                          ? new Date(task.data.completedAt).getTime()
+                          : Date.now()) -
+                          new Date(task.data.startedAt).getTime()) /
+                          1000
+                  ),
+        estimatedDurationSeconds: task.data.estimatedDurationSeconds ?? null,
         // Include minimal PR info for table-level indicators
-        pullRequests: task.pullRequests?.map((pr) => ({
-            repo: pr.repo,
-            url: pr.url,
-            state: pr.state ?? null
-        })) ?? null
+        pullRequests:
+            task.data.pullRequests?.map((pr) => ({
+                repo: pr.repo,
+                url: pr.url,
+                state: pr.state ?? null
+            })) ?? null
     }));
 
     // Count PRs that are open or draft (i.e. need attention)
     const openPrCount = allTasks.reduce((count, task) => {
-        const open = (task.pullRequests ?? []).filter(
+        const open = (task.data.pullRequests ?? []).filter(
             (pr) => pr.state === "open" || pr.state === "draft" || !pr.state
         ).length;
         return count + open;
     }, 0);
 
     const stats = {
-        running: allTasks.filter((t) => t.status === "running").length,
-        starting: allTasks.filter((t) => t.status === "starting").length,
-        queued: allTasks.filter((t) => t.status === "queued").length,
-        retrying: allTasks.filter((t) => t.status === "retrying").length,
-        completed: allTasks.filter((t) => t.status === "completed").length,
-        failed: allTasks.filter((t) => t.status === "failed").length,
-        interrupted: allTasks.filter((t) => t.status === "interrupted").length,
+        running: allTasks.filter((t) => t.data.status === "running").length,
+        starting: allTasks.filter((t) => t.data.status === "starting").length,
+        queued: allTasks.filter((t) => t.data.status === "queued").length,
+        retrying: allTasks.filter((t) => t.data.status === "retrying").length,
+        completed: allTasks.filter((t) => t.data.status === "completed").length,
+        failed: allTasks.filter((t) => t.data.status === "failed").length,
+        interrupted: allTasks.filter(
+            (t) => t.data.status === "interrupted"
+        ).length,
         total: allTasks.length,
         openPrs: openPrCount
     };
@@ -115,8 +122,9 @@ export function buildDashboardData(
         };
     }
     for (const task of allTasks) {
-        if (!projects[task.projectId]) {
-            projects[task.projectId] = {
+        const pid = task.data.projectId as string;
+        if (!projects[pid]) {
+            projects[pid] = {
                 running: 0,
                 queued: 0,
                 retrying: 0,
@@ -125,9 +133,9 @@ export function buildDashboardData(
                 interrupted: 0
             };
         }
-        const s = task.status as string;
-        if (s in projects[task.projectId]) {
-            projects[task.projectId][s]++;
+        const s = task.data.status as string;
+        if (s in projects[pid]) {
+            projects[pid][s]++;
         }
     }
 
@@ -1097,45 +1105,48 @@ export function registerDashboardRoutes(
         }
         const task = taskManager
             .listAllTasks()
-            .find((t) => t.taskId === req.params.taskId);
+            .find((t) => t.id === req.params.taskId);
         if (!task) {
             res.status(404).json({ error: "Task not found" });
             return;
         }
         res.json({
-            taskId: task.taskId,
-            projectId: task.projectId,
+            taskId: task.id,
+            projectId: task.data.projectId,
             branch: task.branch,
-            prompt: task.prompt,
+            prompt: task.data.prompt,
             title: task.title ?? null,
-            parentTaskId: task.parentTaskId ?? null,
-            chainId: task.chainId ?? null,
-            status: task.status,
-            attempt: task.attempt,
-            maxAttempts: config.projects[task.projectId]?.errorRetry?.maxAttempts ?? null,
-            nextRetryAt: task.nextRetryAt ?? null,
-            startedAt: task.startedAt,
-            completedAt: task.completedAt,
-            durationSeconds: task.status === "queued"
-                ? null
-                : Math.round(
-                    ((task.completedAt
-                        ? new Date(task.completedAt).getTime()
-                        : Date.now()) -
-                        new Date(task.startedAt).getTime()) /
-                        1000
-                ),
-            estimatedDurationSeconds: task.estimatedDurationSeconds ?? null,
-            output:
-                task.status === "queued" ||
-                task.status === "starting" ||
-                task.status === "running" ||
-                task.status === "retrying" ||
-                task.status === "interrupted"
+            parentTaskId: task.data.parentTaskId ?? null,
+            chainId: task.data.chainId ?? null,
+            status: task.data.status,
+            attempt: task.data.attempt,
+            maxAttempts:
+                task.project.data.errorRetry?.maxAttempts ?? null,
+            nextRetryAt: task.data.nextRetryAt ?? null,
+            startedAt: task.data.startedAt,
+            completedAt: task.data.completedAt,
+            durationSeconds:
+                task.data.status === "queued"
                     ? null
-                    : extractLastAssistantMessage(task.output) || null,
-            error: task.error ?? null,
-            pullRequests: task.pullRequests ?? null
+                    : Math.round(
+                          ((task.data.completedAt
+                              ? new Date(task.data.completedAt).getTime()
+                              : Date.now()) -
+                              new Date(task.data.startedAt).getTime()) /
+                              1000
+                      ),
+            estimatedDurationSeconds:
+                task.data.estimatedDurationSeconds ?? null,
+            output:
+                task.data.status === "queued" ||
+                task.data.status === "starting" ||
+                task.data.status === "running" ||
+                task.data.status === "retrying" ||
+                task.data.status === "interrupted"
+                    ? null
+                    : extractLastAssistantMessage(task.data.output) || null,
+            error: task.data.error ?? null,
+            pullRequests: task.data.pullRequests ?? null
         });
     });
 
@@ -1149,7 +1160,10 @@ export function registerDashboardRoutes(
             return;
         }
         const { projectId, prompt, continueTaskId } = req.body ?? {};
-        if (typeof projectId !== "string" || !config.projects[projectId]) {
+        if (
+            typeof projectId !== "string" ||
+            !config.projects[projectId as ProjectId]
+        ) {
             res.status(400).json({ error: "Invalid or missing project ID" });
             return;
         }
@@ -1162,7 +1176,7 @@ export function registerDashboardRoutes(
                 ? continueTaskId.trim()
                 : undefined;
         try {
-            const task = await taskManager.createNewTask(
+            const task = taskManager.createNewTask(
                 projectId as ProjectId,
                 {
                     prompt: prompt.trim(),
@@ -1170,9 +1184,9 @@ export function registerDashboardRoutes(
                 }
             );
             res.json({
-                taskId: task.taskId,
+                taskId: task.id,
                 branch: task.branch,
-                status: task.status
+                status: task.data.status
             });
         } catch (err) {
             res.status(500).json({
@@ -1182,7 +1196,7 @@ export function registerDashboardRoutes(
         }
     });
 
-    app.post("/dashboard/api/task/:taskId/cancel", (req, res) => {
+    app.post("/dashboard/api/task/:taskId/cancel", async (req, res) => {
         if (!adminPassword) {
             res.status(404).send("Not Found");
             return;
@@ -1193,20 +1207,20 @@ export function registerDashboardRoutes(
         }
         const task = taskManager
             .listAllTasks()
-            .find((t) => t.taskId === req.params.taskId);
+            .find((t) => t.id === req.params.taskId);
         if (!task) {
             res.status(404).json({ error: "Task not found" });
             return;
         }
         try {
-            const cancelled = taskManager.cancelTask(
-                task.projectId,
-                task.taskId
+            const cancelled = await taskManager.cancelTask(
+                task.data.projectId,
+                task.id
             );
             res.json({
-                taskId: cancelled.taskId,
+                taskId: cancelled.id,
                 branch: cancelled.branch,
-                status: cancelled.status
+                status: cancelled.data.status
             });
         } catch (err) {
             if (err instanceof TaskCancelError) {
@@ -1231,20 +1245,20 @@ export function registerDashboardRoutes(
         }
         const task = taskManager
             .listAllTasks()
-            .find((t) => t.taskId === req.params.taskId);
+            .find((t) => t.id === req.params.taskId);
         if (!task) {
             res.status(404).json({ error: "Task not found" });
             return;
         }
         try {
-            const retried = await taskManager.retryTask(
-                task.projectId,
-                task.taskId
+            const retried = taskManager.retryTask(
+                task.data.projectId,
+                task.id
             );
             res.json({
-                taskId: retried.taskId,
+                taskId: retried.id,
                 branch: retried.branch,
-                status: retried.status
+                status: retried.data.status
             });
         } catch (err) {
             if (err instanceof TaskActiveError) {
@@ -1269,20 +1283,20 @@ export function registerDashboardRoutes(
         }
         const task = taskManager
             .listAllTasks()
-            .find((t) => t.taskId === req.params.taskId);
+            .find((t) => t.id === req.params.taskId);
         if (!task) {
             res.status(404).json({ error: "Task not found" });
             return;
         }
         try {
-            const retried = await taskManager.retryTaskNow(
-                task.projectId,
-                task.taskId
+            const retried = taskManager.retryTask(
+                task.data.projectId,
+                task.id
             );
             res.json({
-                taskId: retried.taskId,
+                taskId: retried.id,
                 branch: retried.branch,
-                status: retried.status
+                status: retried.data.status
             });
         } catch (err) {
             if (err instanceof TaskActiveError) {
@@ -1307,9 +1321,13 @@ export function registerDashboardRoutes(
         }
         const failedTasks = taskManager
             .listAllTasks()
-            .filter((t) => t.status === "failed");
+            .filter((t) => t.data.status === "failed");
         const results = await Promise.allSettled(
-            failedTasks.map((t) => taskManager.retryTask(t.projectId, t.taskId))
+            failedTasks.map((t) =>
+                Promise.resolve(
+                    taskManager.retryTask(t.data.projectId, t.id)
+                )
+            )
         );
         const retried = results.filter((r) => r.status === "fulfilled").length;
         const errors = results

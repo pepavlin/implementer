@@ -1,7 +1,7 @@
 import type { WorkspacePool } from "../workspace-pool.js";
 import type { TokenManager } from "../auth.js";
 import type { ProjectConfig, ServerConfig } from "../config/config-types.js";
-import type { Task } from "../types.js";
+import type { TaskData } from "../types.js";
 import type { Executor } from "../executor.js";
 
 export interface ProjectState {
@@ -12,7 +12,7 @@ export interface ProjectState {
 }
 
 export interface TaskEntry {
-    task: Task;
+    task: TaskData;
     executor: Executor | null;
     workspaceId: number | null;
     /** Branch to check out when this task is dequeued (used for retried tasks). */

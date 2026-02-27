@@ -9,18 +9,29 @@ import {
 } from "./config-types";
 import { NotFoundError, UnauthorizedError } from "../errors";
 import { ProjectId } from "../types";
+import { Project } from "./project";
 
 export class Config {
-    server: ServerConfig;
-    projects: Record<string, ProjectConfig>;
+    server: ServerConfig & {
+        maxConcurrentTasks: number;
+    };
+    projects: Record<ProjectId, Project>;
     configPath: string;
 
     constructor(configPath?: string) {
         this.configPath = resolve(configPath ?? "config.yaml");
 
         const data = this.validateAndGetConfig();
-        this.server = data.server;
-        this.projects = data.projects;
+        this.server = {
+            maxConcurrentTasks: 3,
+            ...data.server
+        };
+        this.projects = Object.fromEntries(
+            Object.entries(data.projects).map(([key, value]) => [
+                key,
+                new Project(value, key as ProjectId, this)
+            ])
+        );
 
         const projectIds = Object.keys(data.projects);
         console.log(
@@ -60,7 +71,8 @@ export class Config {
         for (const project of Object.values(projects)) {
             // systemPrompt: concatenate global + project (newline-separated)
             if (defaults.systemPrompt) {
-                project.claudeCode.systemPrompt = project.claudeCode.systemPrompt
+                project.claudeCode.systemPrompt = project.claudeCode
+                    .systemPrompt
                     ? `${defaults.systemPrompt}\n${project.claudeCode.systemPrompt}`
                     : defaults.systemPrompt;
             }
@@ -78,17 +90,14 @@ export class Config {
     getProjectIdByToken(projectToken: string): ProjectId | null {
         // Check explicit API key match first
         for (const [projectId, project] of Object.entries(this.projects)) {
-            if (project.apiKey && project.apiKey === projectToken) {
+            if (project.data.apiKey && project.data.apiKey === projectToken) {
                 return projectId as ProjectId;
             }
         }
 
         // Dev mode: single project with no apiKey configured — allow any token
         const projectEntries = Object.entries(this.projects);
-        if (
-            projectEntries.length === 1 &&
-            !projectEntries[0][1].apiKey
-        ) {
+        if (projectEntries.length === 1 && !projectEntries[0][1].data.apiKey) {
             return projectEntries[0][0] as ProjectId;
         }
 
@@ -100,7 +109,10 @@ export class Config {
  * Validate a config file and return the parsed data.
  * Throws if the file cannot be read or the config is invalid.
  */
-export function validateConfigFile(configPath: string): { server: ServerConfig; projects: Record<string, ProjectConfig> } {
+export function validateConfigFile(configPath: string): {
+    server: ServerConfig;
+    projects: Record<string, ProjectConfig>;
+} {
     const resolvedPath = resolve(configPath);
     const raw = readFileSync(resolvedPath, "utf-8");
     const parsed = yaml.load(raw);

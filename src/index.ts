@@ -31,10 +31,10 @@ async function main() {
     const taskManager = new TaskManager(config);
     await taskManager.init();
 
-    // 5. Periodically try to dequeue available tasks (every 2 minutes)
+    // 5. Periodically dequeue available tasks and promote due retries (every 1 minute)
     setInterval(() => {
         taskManager.dequeueAvailableTasks();
-    }, 2 * 60 * 1000);
+    }, 60 * 1000);
 
     // 6. Start API server
     const app = createServer(taskManager, config);
@@ -42,8 +42,8 @@ async function main() {
     app.listen(port, () => {
         console.log(`Implementer service running on port ${port}`);
         for (const [projectId, project] of Object.entries(config.projects)) {
-            const repoNames = project.repositories
-                .map((r) => r.name)
+            const repoNames = project.data.repositories
+                .map((r: { name: string }) => r.name)
                 .join(", ");
             console.log(`Project "${projectId}": ${repoNames}`);
         }
