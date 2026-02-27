@@ -295,12 +295,9 @@ export function dashboardHtml(hasPassword: boolean): string {
     a.out:hover{color:var(--text2)}
     .btn-new{padding:6px 14px;background:#3b82f6;color:#fff;border:none;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer}
     .btn-new:hover{background:#2563eb}
-    .btn-ref{padding:6px 14px;background:transparent;color:var(--text2);border:1px solid var(--border2);border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
-    .btn-ref:hover:not(:disabled){background:var(--bg-card);color:var(--text)}
-    .btn-ref:disabled{opacity:.5;cursor:not-allowed}
-    .btn-rfa{padding:6px 14px;background:transparent;color:#ef4444;border:1px solid #ef4444;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
-    .btn-rfa:hover:not(:disabled){background:#3b0f0f}
-    .btn-rfa:disabled{opacity:.5;cursor:not-allowed}
+    .btn-ref-ico{background:none;border:none;color:var(--text2);font-size:.95rem;cursor:pointer;padding:0 0 0 4px;line-height:1;opacity:.7;transition:opacity .15s,color .15s}
+    .btn-ref-ico:hover:not(:disabled){opacity:1;color:var(--text)}
+    .btn-ref-ico:disabled{opacity:.35;cursor:not-allowed}
     .theme-btn{background:var(--bg-card);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:5px 10px;font-size:.85rem;cursor:pointer;transition:color .15s,background .15s;line-height:1}
     .theme-btn:hover{color:var(--text)}
     /* Modals */
@@ -345,10 +342,8 @@ export function dashboardHtml(hasPassword: boolean): string {
     <h1>Implementer Dashboard</h1>
     <div style="display:flex;align-items:center;gap:12px">
       <button class="btn-new" onclick="openNewTask()">+ New Task</button>
-      <button class="btn-rfa" id="retry-failed-btn" onclick="retryAllFailed()">Retry All Failed</button>
-      <button class="btn-ref" id="refresh-btn" onclick="refreshData()">\u21bb Refresh</button>
       <button class="theme-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">&#x2600;</button>
-      <div class="live"><span class="dot" id="dot"></span><span id="upd">Connecting\u2026</span></div>
+      <div class="live"><span class="dot" id="dot"></span><span id="upd">Connecting\u2026</span><button class="btn-ref-ico" id="refresh-btn" onclick="refreshData()" title="Refresh">\u21bb</button></div>
       ${signOutLink}
     </div>
   </header>
