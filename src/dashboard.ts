@@ -455,6 +455,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     <h1>Implementer Dashboard</h1>
     <div class="header-actions" style="display:flex;align-items:center;gap:12px">
       <button class="btn-new" onclick="openNewTask()">+ New Task</button>
+      <button class="theme-btn" id="fullscreen-btn" onclick="toggleFullscreen()" title="Enter fullscreen">&#x26F6;</button>
       <button class="theme-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">&#x2600;</button>
       <div class="live"><span class="dot" id="dot"></span><span id="upd">Connecting\u2026</span><button class="btn-ref-ico" id="refresh-btn" onclick="refreshData()" title="Refresh">\u21bb</button></div>
       ${signOutLink}
@@ -998,6 +999,20 @@ export function dashboardHtml(hasPassword: boolean): string {
       document.getElementById('dot').className='dot err';
       document.getElementById('upd').textContent='Connection lost';
     };
+    function toggleFullscreen(){
+      if(!document.fullscreenElement){
+        document.documentElement.requestFullscreen().catch(function(e){console.warn('Fullscreen error:',e);});
+      }else{
+        document.exitFullscreen();
+      }
+    }
+    function updateFullscreenBtn(){
+      var btn=document.getElementById('fullscreen-btn');
+      if(!btn)return;
+      btn.textContent=document.fullscreenElement?'\u2715':'\u26F6';
+      btn.title=document.fullscreenElement?'Exit fullscreen':'Enter fullscreen';
+    }
+    document.addEventListener('fullscreenchange',updateFullscreenBtn);
     ${THEME_TOGGLE_JS}
   </script>
 </body>
