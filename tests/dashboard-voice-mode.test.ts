@@ -106,6 +106,7 @@ describe("Voice Mode — Dashboard HTML", () => {
         expect(html).toContain('class="voice-panel"');
         expect(html).toContain('id="voice-status-text"');
         expect(html).toContain('id="voice-lang-btn"');
+        expect(html).toContain('id="voice-send-btn"');
         expect(html).toContain('id="voice-cancel-btn"');
         expect(html).toContain('id="voice-transcript-area"');
         expect(html).toContain('id="voice-transcript-text"');
@@ -130,6 +131,7 @@ describe("Voice Mode — Dashboard HTML", () => {
         expect(html).toContain(".voice-flash{");
         expect(html).toContain(".voice-warning{");
         expect(html).toContain(".voice-submitted{");
+        expect(html).toContain(".voice-send-btn{");
     });
 
     it("includes voice CSS variables in dark theme", async () => {
@@ -183,6 +185,7 @@ describe("Voice Mode — JS functions", () => {
             "clearSilenceTimer",
             "voiceAutoSubmit",
             "voiceCancel",
+            "voiceSendNow",
             "toggleVoiceLang",
             "updateVoicePanel",
             "renderVoiceSubmitted",
@@ -193,6 +196,24 @@ describe("Voice Mode — JS functions", () => {
         for (const fn of expectedFunctions) {
             expect(html).toContain(`function ${fn}(`);
         }
+    });
+
+    it("voiceSendNow calls clearSilenceTimer and voiceAutoSubmit", async () => {
+        html = await getDashboardHtml();
+        expect(html).toContain("function voiceSendNow(");
+        expect(html).toContain("clearSilenceTimer();");
+        expect(html).toContain("voiceAutoSubmit();");
+    });
+
+    it("send button calls voiceSendNow and is hidden by default", async () => {
+        html = await getDashboardHtml();
+        expect(html).toContain('onclick="voiceSendNow()"');
+        expect(html).toMatch(/id="voice-send-btn"[^>]*style="display:none"/);
+    });
+
+    it("updateVoicePanel controls send button visibility based on transcript", async () => {
+        html = await getDashboardHtml();
+        expect(html).toContain("sendBtn.style.display=voiceTranscript.trim()?");
     });
 
     it("includes voice mode global variables", async () => {

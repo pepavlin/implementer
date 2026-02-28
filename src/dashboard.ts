@@ -294,6 +294,11 @@ const VOICE_MODE_JS = `
       updateProjHint();
       if(lastData)renderProjects(lastData.projects);
     }
+    function voiceSendNow(){
+      if(!voiceTranscript.trim()){return;}
+      clearSilenceTimer();
+      voiceAutoSubmit();
+    }
     function toggleVoiceLang(){
       voiceLang=voiceLang==='cs-CZ'?'en-US':'cs-CZ';
       var btn=document.getElementById('voice-lang-btn');
@@ -306,16 +311,19 @@ const VOICE_MODE_JS = `
       var statusEl=document.getElementById('voice-status-text');
       var transcriptArea=document.getElementById('voice-transcript-area');
       var cancelBtn=document.getElementById('voice-cancel-btn');
+      var sendBtn=document.getElementById('voice-send-btn');
       var transcriptText=document.getElementById('voice-transcript-text');
       if(voiceTarget){
         statusEl.textContent='\\uD83C\\uDFA4 Listening \\u2014 '+voiceTarget;
         transcriptArea.style.display='';
         cancelBtn.style.display='';
         if(transcriptText)transcriptText.textContent=voiceTranscript||'Listening\\u2026';
+        if(sendBtn)sendBtn.style.display=voiceTranscript.trim()?'':'none';
       }else{
         statusEl.textContent='\\uD83C\\uDFA4 Voice Mode \\u2014 Select a project to begin';
         transcriptArea.style.display='none';
         cancelBtn.style.display='none';
+        if(sendBtn)sendBtn.style.display='none';
       }
       hideVoiceWarning();
     }
@@ -642,6 +650,8 @@ export function dashboardHtml(hasPassword: boolean): string {
     .voice-lang-btn:hover{background:var(--btn-sec-h)}
     .voice-cancel-btn{background:var(--btn-cancel-bg);color:var(--btn-cancel-fg);border:none;border-radius:6px;padding:4px 10px;font-size:.72rem;font-weight:600;cursor:pointer;transition:background .15s}
     .voice-cancel-btn:hover{background:var(--btn-cancel-h)}
+    .voice-send-btn{background:var(--voice-bg);color:var(--voice-fg);border:1px solid var(--voice-border);border-radius:6px;padding:4px 12px;font-size:.72rem;font-weight:700;cursor:pointer;transition:background .15s,box-shadow .15s}
+    .voice-send-btn:hover{box-shadow:0 0 0 2px var(--voice-border);background:var(--voice-border)}
     .voice-transcript{background:var(--bg-code);border-radius:6px;padding:10px 14px;margin-top:8px;font-size:.82rem;color:var(--text);min-height:40px;font-family:ui-monospace,'SF Mono',monospace;word-break:break-word;white-space:pre-wrap}
     .voice-silence-bar{height:4px;background:var(--border2);border-radius:2px;margin-top:6px;overflow:hidden}
     .voice-silence-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--voice-fg),#f59e0b);width:0%;transition:width .1s linear}
@@ -752,6 +762,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         <span id="voice-status-text">\uD83C\uDFA4 Voice Mode \u2014 Select a project to begin</span>
         <div class="voice-controls">
           <button id="voice-lang-btn" class="voice-lang-btn" onclick="toggleVoiceLang()">cs-CZ</button>
+          <button id="voice-send-btn" class="voice-send-btn" onclick="voiceSendNow()" style="display:none">\u2713 Send</button>
           <button id="voice-cancel-btn" class="voice-cancel-btn" onclick="voiceCancel()" style="display:none">\u2715 Cancel</button>
         </div>
       </div>
