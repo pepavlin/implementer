@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import type express from "express";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import express from "express";
 import {
     TaskManager,
     TaskActiveError
@@ -7,6 +10,11 @@ import {
 import { extractLastAssistantMessage } from "./executor.js";
 import type { Config } from "./config/config.js";
 import type { ProjectId, TaskId } from "./types.js";
+
+// Path to compiled React frontend (dist/frontend/ relative to this file's location)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const FRONTEND_DIST = join(__dirname, "frontend");
 
 // ── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -1426,12 +1434,18 @@ export function registerDashboardRoutes(
 ): void {
     const adminPassword = config.server.adminPassword;
 
-    // GET /dashboard — login form or live dashboard
+    // GET /dashboard — serve React SPA if built, otherwise fallback to server-rendered HTML
     app.get("/dashboard", (req, res) => {
         if (!adminPassword) {
             res.status(404).send("Not Found");
             return;
         }
+        const indexHtml = join(FRONTEND_DIST, "index.html");
+        if (existsSync(indexHtml)) {
+            res.sendFile(indexHtml);
+            return;
+        }
+        // Fallback: serve legacy server-rendered HTML
         if (!isDashboardAuthenticated(req, adminPassword)) {
             res.setHeader("Content-Type", "text/html; charset=utf-8");
             res.send(loginHtml());
@@ -1458,6 +1472,26 @@ export function registerDashboardRoutes(
         } else {
             res.setHeader("Content-Type", "text/html; charset=utf-8");
             res.send(loginHtml(true));
+        }
+    });
+
+    // POST /dashboard/api/login — JSON login for React SPA
+    app.post("/dashboard/api/login", (req, res) => {
+        if (!adminPassword) {
+            res.status(404).json({ error: "Not Found" });
+            return;
+        }
+        const password =
+            typeof req.body?.password === "string" ? req.body.password : "";
+        if (password === adminPassword) {
+            const token = dashboardToken(adminPassword);
+            res.setHeader(
+                "Set-Cookie",
+                `${DASH_COOKIE}=${token}; Path=/dashboard; HttpOnly; SameSite=Strict`
+            );
+            res.json({ success: true });
+        } else {
+            res.status(401).json({ error: "Invalid password" });
         }
     });
 
@@ -1804,4 +1838,8 @@ export function registerDashboardRoutes(
             );
         res.json({ succeeded, failed: errors.length, errors });
     });
+
+    // Serve built React frontend static files (assets, icons, etc.)
+    // This must be registered AFTER all API routes so they take precedence.
+    app.use("/dashboard", express.static(FRONTEND_DIST));
 }

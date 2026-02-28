@@ -5,7 +5,10 @@
     "type": "module",
     "scripts": {
         "dev": "tsx src/index.ts",
-        "build": "tsc",
+        "dev:frontend": "vite src/frontend",
+        "build": "tsc && vite build src/frontend",
+        "build:backend": "tsc",
+        "build:frontend": "vite build src/frontend",
         "start": "node dist/index.js",
         "check": "tsx src/check-config.ts",
         "typecheck": "tsc --noEmit",
@@ -16,6 +19,8 @@
         "express": "^4.21.0",
         "js-yaml": "^4.1.0",
         "nanoid": "^5.0.9",
+        "react": "^19.2.4",
+        "react-dom": "^19.2.4",
         "swagger-ui-express": "^5.0.1",
         "zod": "^3.24.0"
     },
@@ -23,11 +28,15 @@
         "@types/express": "^5.0.0",
         "@types/js-yaml": "^4.0.9",
         "@types/node": "^22.10.0",
+        "@types/react": "^19.2.14",
+        "@types/react-dom": "^19.2.3",
         "@types/supertest": "^6.0.3",
         "@types/swagger-ui-express": "^4.1.8",
+        "@vitejs/plugin-react": "^5.1.4",
         "supertest": "^7.2.2",
         "tsx": "^4.19.0",
         "typescript": "^5.7.0",
+        "vite": "^7.3.1",
         "vitest": "^4.0.18"
     }
 }

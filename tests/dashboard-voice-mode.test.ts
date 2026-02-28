@@ -6,6 +6,21 @@ import type { TaskId } from "../src/types.js";
 import type { Config } from "../src/config/config.js";
 import type { TaskManager } from "../src/task-manager/task-manager.js";
 
+// Prevent the dashboard from finding the built React frontend so that tests
+// continue to exercise the legacy server-rendered HTML fallback path.
+vi.mock("node:fs", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("node:fs")>();
+    return {
+        ...actual,
+        existsSync: (path: unknown) =>
+            typeof path === "string" && path.endsWith("index.html")
+                ? false
+                : actual.existsSync(
+                      path as Parameters<typeof actual.existsSync>[0]
+                  )
+    };
+});
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const ADMIN_PASSWORD = "test-password";

@@ -2,9 +2,55 @@
 
 The Implementer Dashboard is a built-in web UI served at `/dashboard`. It requires `adminPassword` to be set in the server configuration.
 
+## Architecture
+
+The dashboard is implemented as a **React SPA** (`src/frontend/`) built with Vite. During `npm run build`, Vite compiles the React components to `dist/frontend/`. The Express backend then serves `dist/frontend/index.html` for `GET /dashboard` and serves static assets from `dist/frontend/assets/`.
+
+If the React build has not been produced (e.g. running the backend only during development), the server falls back to a legacy server-rendered HTML template.
+
+### Directory Structure
+
+```
+src/frontend/
+├── index.html              # Vite entry point
+├── vite.config.ts          # Vite configuration (base: /dashboard/, outDir: dist/frontend)
+├── tsconfig.json           # Frontend TypeScript config
+└── src/
+    ├── main.tsx            # React entry point
+    ├── App.tsx             # Root component with auth state
+    ├── index.css           # Global CSS with dark/light theme variables
+    ├── types.ts            # Shared TypeScript types
+    ├── api/
+    │   └── client.ts       # API client for all /dashboard/api/* calls
+    ├── hooks/
+    │   └── useDashboard.ts # Polling hook, auth state, login/logout
+    └── components/
+        ├── LoginPage.tsx   # Login form
+        ├── DashboardPage.tsx # Main layout with header, filters, task list
+        ├── StatsCards.tsx  # Stats overview cards
+        ├── TaskCard.tsx    # Individual task row
+        ├── TaskModal.tsx   # Task detail modal
+        ├── VoiceMode.tsx   # Voice recording/submission panel
+        └── NewTaskForm.tsx # Quick task creation form
+```
+
+### Build Commands
+
+| Command | Description |
+|---|---|
+| `npm run build` | Build backend (tsc) AND frontend (vite) |
+| `npm run build:frontend` | Build only the React frontend |
+| `npm run build:backend` | Build only the TypeScript backend |
+| `npm run dev:frontend` | Run Vite dev server (proxies API to localhost:3000) |
+
 ## Authentication
 
 The dashboard uses a cookie-based session (`impl_dash`). On successful login, a SHA-256 hash of the admin password is stored as a cookie. The cookie is scoped to `/dashboard`, HttpOnly, and SameSite=Strict.
+
+### Auth API Endpoints
+
+- `POST /dashboard/api/login` — JSON body `{password}`, sets cookie and returns `{success: true}` or 401
+- `GET /dashboard/logout` — clears the cookie and redirects to `/dashboard`
 
 ## Features
 

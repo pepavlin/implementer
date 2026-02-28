@@ -5,6 +5,21 @@ import type { TaskManager } from "../src/task-manager/task-manager.js";
 import { TaskActiveError } from "../src/task-manager/task-manager.js";
 import type { Config } from "../src/config/config.js";
 
+// Prevent the dashboard from finding the built React frontend so that tests
+// continue to exercise the legacy server-rendered HTML fallback path.
+vi.mock("node:fs", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("node:fs")>();
+    return {
+        ...actual,
+        existsSync: (path: unknown) =>
+            typeof path === "string" && path.endsWith("index.html")
+                ? false
+                : actual.existsSync(
+                      path as Parameters<typeof actual.existsSync>[0]
+                  )
+    };
+});
+
 const PROJECT_ID = "test-project";
 
 function makeConfig(projectOverrides: Record<string, unknown> = {}): Config {
@@ -965,7 +980,7 @@ describe("server", () => {
             expect(res.body.prompt).toBe("Add a button");
             expect(res.body.status).toBe("completed");
             expect(res.body.projectId).toBe(PROJECT_ID);
-            expect(res.body.branch.name).toBe("impl/test-branch-abc123");
+            expect(res.body.branch).toBe("impl/test-branch-abc123");
             expect(res.body.durationSeconds).toBe(300);
             expect(res.body.pullRequests).toEqual([
                 { repo: "my-repo", url: "https://github.com/org/repo/pull/42" }
