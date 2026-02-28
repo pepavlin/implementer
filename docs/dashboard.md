@@ -55,3 +55,39 @@ Theming is implemented using CSS custom properties (variables):
 | `--b-ret-bg/fg` | dark blue | light blue | Retrying badge |
 | `--b-fail-bg/fg` | dark red | light red | Failed badge |
 | `--b-int-bg/fg` | dark purple | light purple | Interrupted badge |
+
+## Voice Mode
+
+Voice Mode allows submitting tasks to a project by dictating them with the browser's Web Speech API (Chrome/Chromium required).
+
+### Activation
+
+Click the 🎤 button in the header to toggle Voice Mode. A fixed bottom panel appears with status and controls.
+
+### Usage flow
+
+1. **Select project** — click any project card while in Voice Mode to start recording for that project.
+2. **Dictate** — speech is transcribed in real time in the transcript area.
+3. **Submit** — task is sent via one of two methods:
+   - **Send button** — click the green `✓ Send` button that appears as soon as speech is detected, for immediate submission.
+   - **Auto-submit** — after 4 seconds of silence the task is submitted automatically (progress shown by the silence countdown bar).
+4. **Cancel** — click `✕ Cancel` to discard the current transcript without submitting.
+
+### Controls
+
+| Control | Function |
+|---|---|
+| `cs-CZ / en-US` button | Toggle recognition language |
+| `✓ Send` button | Submit the current transcript immediately (visible only when transcript is non-empty) |
+| `✕ Cancel` button | Discard transcript and stop recording |
+
+### JavaScript API
+
+| Function | Description |
+|---|---|
+| `toggleVoiceMode()` | Show/hide voice panel |
+| `voiceSelectProject(id)` | Start recording for a project |
+| `voiceSendNow()` | Clear silence timer and submit transcript immediately |
+| `voiceAutoSubmit()` | POST transcript to `/dashboard/api/task` |
+| `voiceCancel()` | Discard transcript and stop recording |
+| `updateVoicePanel()` | Sync UI state (status text, send/cancel button visibility) |
