@@ -438,7 +438,8 @@ export function dashboardHtml(hasPassword: boolean): string {
       --link:#2563eb;
       --voice-bg:#dcfce7;--voice-border:#16a34a;--voice-fg:#16a34a;
       --voice-panel-bg:#f0fdf4;--voice-warn-bg:#fef3c7;--voice-warn-fg:#d97706}
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);padding:24px}
+    html{background:var(--bg)}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);padding:24px;min-height:100vh}
     header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
     h1{font-size:1.4rem;font-weight:600}
     .live{display:flex;align-items:center;gap:8px;font-size:.78rem;color:var(--text2)}

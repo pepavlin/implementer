@@ -298,3 +298,25 @@ describe("Voice Mode — Responsive CSS", () => {
         expect(html).toContain(".voice-status{flex-wrap:wrap;gap:6px}");
     });
 });
+
+describe("Voice Mode — Fullscreen CSS", () => {
+    it("includes html background for fullscreen support", async () => {
+        const app = createApp([makeTask()]);
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+        const html = res.text;
+        // html element must have background set so it fills the screen in fullscreen mode
+        expect(html).toContain("html{background:var(--bg)}");
+    });
+
+    it("includes body min-height:100vh so voice panel is not floating in fullscreen", async () => {
+        const app = createApp([makeTask()]);
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+        const html = res.text;
+        // body must fill the full viewport so the fixed voice panel appears at the bottom
+        expect(html).toMatch(/body\{[^}]*min-height:100vh[^}]*\}/);
+    });
+});
