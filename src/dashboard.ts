@@ -154,9 +154,19 @@ export function buildDashboardData(
 
 // ── HTML templates ────────────────────────────────────────────────────────────
 
+// Lucide-style SVG icon strings (inline, no external dependency)
+const ICO_MIC = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>`;
+const ICO_MAXIMIZE = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/></svg>`;
+const ICO_MINIMIZE = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="10" x2="3" y1="14" y2="21"/><line x1="21" x2="14" y1="3" y2="10"/></svg>`;
+const ICO_SUN = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>`;
+const ICO_MOON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>`;
+const ICO_REFRESH = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>`;
+const ICO_X = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
+
 const THEME_FOUC_SCRIPT = `<script>try{if(localStorage.getItem('impl-theme')==='light')document.documentElement.setAttribute('data-theme','light')}catch(e){}</script>`;
 
 const THEME_TOGGLE_JS = `
+    var _icoSun=${JSON.stringify(ICO_SUN)},_icoMoon=${JSON.stringify(ICO_MOON)};
     function toggleTheme(){
       var html=document.documentElement,isLight=html.getAttribute('data-theme')==='light';
       if(isLight){html.removeAttribute('data-theme');try{localStorage.removeItem('impl-theme')}catch(e){}}
@@ -165,7 +175,7 @@ const THEME_TOGGLE_JS = `
     }
     function updateThemeBtn(){
       var btn=document.getElementById('theme-toggle'),isLight=document.documentElement.getAttribute('data-theme')==='light';
-      if(btn)btn.textContent=isLight?'\u263E':'\u2600';
+      if(btn)btn.innerHTML=isLight?_icoMoon:_icoSun;
     }
     updateThemeBtn();`;
 
@@ -277,7 +287,7 @@ const VOICE_MODE_JS = `
           if(d.error){showVoiceWarning('Error: '+d.error);return;}
           voiceSubmittedLog.unshift({project:projectId,prompt:transcript,taskId:d.taskId,time:new Date().toLocaleTimeString()});
           renderVoiceSubmitted();
-          showVoiceFlash('\\u2713 Submitted to '+projectId);
+          showVoiceFlash('Submitted to '+projectId);
           voiceTranscript='';
           voiceTarget=null;
           updateVoicePanel();
@@ -308,12 +318,12 @@ const VOICE_MODE_JS = `
       var cancelBtn=document.getElementById('voice-cancel-btn');
       var transcriptText=document.getElementById('voice-transcript-text');
       if(voiceTarget){
-        statusEl.textContent='\\uD83C\\uDFA4 Listening \\u2014 '+voiceTarget;
+        statusEl.innerHTML=_icoMic+' Listening \u2014 '+esc(voiceTarget);
         transcriptArea.style.display='';
         cancelBtn.style.display='';
-        if(transcriptText)transcriptText.textContent=voiceTranscript||'Listening\\u2026';
+        if(transcriptText)transcriptText.textContent=voiceTranscript||'Listening\u2026';
       }else{
-        statusEl.textContent='\\uD83C\\uDFA4 Voice Mode \\u2014 Select a project to begin';
+        statusEl.innerHTML=_icoMic+' Voice Mode \u2014 Select a project to begin';
         transcriptArea.style.display='none';
         cancelBtn.style.display='none';
       }
@@ -323,7 +333,7 @@ const VOICE_MODE_JS = `
       var el=document.getElementById('voice-submitted');
       if(!el||!voiceSubmittedLog.length){if(el)el.innerHTML='';return;}
       el.innerHTML=voiceSubmittedLog.slice(0,5).map(function(item){
-        return '<div class="voice-submitted-item">\\u2713 '+esc(item.time)+' \\u2014 <strong>'+esc(item.project)+'</strong>: '+esc(item.prompt.length>60?item.prompt.slice(0,60)+'\\u2026':item.prompt)+'</div>';
+        return '<div class="voice-submitted-item"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;color:#34d399"><polyline points="20 6 9 17 4 12"/></svg> '+esc(item.time)+' \u2014 <strong>'+esc(item.project)+'</strong>: '+esc(item.prompt.length>60?item.prompt.slice(0,60)+'\u2026':item.prompt)+'</div>';
       }).join('');
     }
     function showVoiceFlash(msg){
@@ -369,7 +379,7 @@ export function loginHtml(error = false): string {
   </style>
 </head>
 <body>
-  <button class="theme-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">&#x2600;</button>
+  <button class="theme-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">${ICO_SUN}</button>
   <div class="card">
     <h2>Implementer Dashboard</h2>
     <form method="POST" action="/dashboard">
@@ -632,7 +642,6 @@ export function dashboardHtml(hasPassword: boolean): string {
     @keyframes voice-flash-out{0%{opacity:1}100%{opacity:0}}
     .voice-btn-active{background:var(--voice-bg)!important;border-color:var(--voice-border)!important;color:var(--voice-fg)!important;animation:voice-pulse 2s ease-in-out infinite}
     .proj-card.voice-target{border-color:var(--voice-border)!important;background:var(--voice-bg)!important;animation:voice-glow 2s ease-in-out infinite;position:relative}
-    .proj-card.voice-target .proj-name::before{content:'\uD83C\uDFA4 ';font-size:.9em}
     .voice-panel{position:fixed;bottom:0;left:0;right:0;background:var(--voice-panel-bg);border-top:2px solid var(--voice-border);padding:14px 24px;z-index:200;box-shadow:0 -4px 24px rgba(0,0,0,.35)}
     .voice-panel-inner{max-width:900px;margin:0 auto}
     .voice-status{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:.82rem;color:var(--voice-fg);font-weight:600}
@@ -690,10 +699,10 @@ export function dashboardHtml(hasPassword: boolean): string {
     <h1>Implementer Dashboard</h1>
     <div class="header-actions" style="display:flex;align-items:center;gap:12px">
       <button class="btn-new" onclick="openNewTask()">+ New Task</button>
-      <button class="theme-btn" id="voice-btn" onclick="toggleVoiceMode()" title="Voice Mode">&#x1F3A4;</button>
-      <button class="theme-btn" id="fullscreen-btn" onclick="toggleFullscreen()" title="Enter fullscreen">&#x26F6;</button>
-      <button class="theme-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">&#x2600;</button>
-      <div class="live"><span class="dot" id="dot"></span><span id="upd">Connecting\u2026</span><button class="btn-ref-ico" id="refresh-btn" onclick="refreshData()" title="Refresh">\u21bb</button></div>
+      <button class="theme-btn" id="voice-btn" onclick="toggleVoiceMode()" title="Voice Mode">${ICO_MIC}</button>
+      <button class="theme-btn" id="fullscreen-btn" onclick="toggleFullscreen()" title="Enter fullscreen">${ICO_MAXIMIZE}</button>
+      <button class="theme-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">${ICO_SUN}</button>
+      <div class="live"><span class="dot" id="dot"></span><span id="upd">Connecting\u2026</span><button class="btn-ref-ico" id="refresh-btn" onclick="refreshData()" title="Refresh">${ICO_REFRESH}</button></div>
       ${signOutLink}
     </div>
   </header>
@@ -748,10 +757,10 @@ export function dashboardHtml(hasPassword: boolean): string {
   <div id="voice-panel" class="voice-panel" style="display:none">
     <div class="voice-panel-inner">
       <div class="voice-status">
-        <span id="voice-status-text">\uD83C\uDFA4 Voice Mode \u2014 Select a project to begin</span>
+        <span id="voice-status-text">${ICO_MIC} Voice Mode \u2014 Select a project to begin</span>
         <div class="voice-controls">
           <button id="voice-lang-btn" class="voice-lang-btn" onclick="toggleVoiceLang()">cs-CZ</button>
-          <button id="voice-cancel-btn" class="voice-cancel-btn" onclick="voiceCancel()" style="display:none">\u2715 Cancel</button>
+          <button id="voice-cancel-btn" class="voice-cancel-btn" onclick="voiceCancel()" style="display:none">Cancel</button>
         </div>
       </div>
       <div id="voice-transcript-area" style="display:none">
@@ -773,7 +782,7 @@ export function dashboardHtml(hasPassword: boolean): string {
           <span class="modal-ttl" id="task-ttl">Task Details</span>
           <span id="task-badge"></span>
         </div>
-        <button class="modal-x" onclick="closeTask()">&#x2715;</button>
+        <button class="modal-x" onclick="closeTask()">${ICO_X}</button>
       </div>
       <div class="modal-bd" id="task-bd"><div class="muted" style="text-align:center;padding:32px">Loading\u2026</div></div>
       <div class="modal-ft">
@@ -792,7 +801,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     <div class="modal">
       <div class="modal-hd">
         <span class="modal-ttl">Edit Task</span>
-        <button class="modal-x" onclick="closeEditTask()">&#x2715;</button>
+        <button class="modal-x" onclick="closeEditTask()">${ICO_X}</button>
       </div>
       <div class="modal-bd">
         <div class="form-g">
@@ -813,7 +822,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     <div class="modal">
       <div class="modal-hd">
         <span class="modal-ttl">Continue Task</span>
-        <button class="modal-x" onclick="closeContinueTask()">&#x2715;</button>
+        <button class="modal-x" onclick="closeContinueTask()">${ICO_X}</button>
       </div>
       <div class="modal-bd">
         <div class="form-g">
@@ -838,7 +847,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     <div class="modal">
       <div class="modal-hd">
         <span class="modal-ttl">New Task</span>
-        <button class="modal-x" onclick="closeNewTask()">&#x2715;</button>
+        <button class="modal-x" onclick="closeNewTask()">${ICO_X}</button>
       </div>
       <div class="modal-bd">
         <div class="form-g">
@@ -863,11 +872,16 @@ export function dashboardHtml(hasPassword: boolean): string {
   </div>
 
   <script>
+    var _icoMic=${JSON.stringify(ICO_MIC)},_icoMaximize=${JSON.stringify(ICO_MAXIMIZE)},_icoMinimize=${JSON.stringify(ICO_MINIMIZE)},_icoX=${JSON.stringify(ICO_X)},_icoRefresh=${JSON.stringify(ICO_REFRESH)};
     var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null,retryCountdownInterval=null,selectedTaskIds=new Set(),selectionMode=false,lastSelectedIdx=-1,voiceMode=false,voiceTarget=null,voiceRecognition=null,voiceTranscript='',voiceSilenceTimer=null,voiceSilenceStart=0,voiceLang='cs-CZ',voiceSubmittedLog=[];
     function hasOpenPrs(t){return!!(t.pullRequests&&t.pullRequests.some(function(pr){return pr.state==='open'||pr.state==='draft'||!pr.state;}));}
     function hasDraftPrs(t){return!!(t.pullRequests&&t.pullRequests.some(function(pr){return pr.state==='draft';}));}
     function prStateBadge(state){
-      var map={open:['pr-open','\u25CF Open'],draft:['pr-draft','\u25CB Draft'],merged:['pr-merged','\u2A2F Merged'],closed:['pr-closed','\u2715 Closed']};
+      var _dot='<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle;border-radius:50%"><circle cx="12" cy="12" r="10"/></svg>';
+      var _dotO='<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle"><circle cx="12" cy="12" r="9"/></svg>';
+      var _merge='<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>';
+      var _xc='<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>';
+      var map={open:['pr-open',_dot+' Open'],draft:['pr-draft',_dotO+' Draft'],merged:['pr-merged',_merge+' Merged'],closed:['pr-closed',_xc+' Closed']};
       var s=state||'open';var r=map[s]||map['open'];
       return '<span class="pr-state '+r[0]+'">'+r[1]+'</span>';
     }
@@ -929,7 +943,8 @@ export function dashboardHtml(hasPassword: boolean): string {
         if(!parts.length)parts.push('<span class="muted" style="font-size:.72rem">No tasks</span>');
         var extraClass=hasActive?' proj-active':hasQueued?' proj-queued':'';
         var cardClass='proj-card'+(isVoiceTarget?' voice-target':(sel?' selected':''))+extraClass;
-        var namePrefix=isVoiceTarget?'':(sel?'\u2714 ':'');
+        var _icoCheck='<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:3px"><polyline points="20 6 9 17 4 12"/></svg>';
+        var namePrefix=isVoiceTarget?_icoMic+' ':(sel?_icoCheck:'');
         return '<div class="'+cardClass+'" data-proj="'+esc(id)+'">'
           +'<div class="proj-name" title="'+esc(id)+'">'+namePrefix+esc(id)+'</div>'
           +'<div class="proj-stats">'+parts.join('')+'</div>'
@@ -967,7 +982,9 @@ export function dashboardHtml(hasPassword: boolean): string {
             var num=pr.url?pr.url.split('/').pop():'PR';
             var isDraft=pr.state==='draft';
             var stateClass=isDraft?'pr-btn-draft':'pr-btn-open';
-            var label=isDraft?'\u25CB Draft':'\u25CF';
+            var _prDot='<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle"><circle cx="12" cy="12" r="10"/></svg>';
+            var _prDotO='<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle"><circle cx="12" cy="12" r="9"/></svg>';
+            var label=isDraft?_prDotO+' Draft':_prDot;
             return '<a class="pr-btn '+stateClass+'" href="'+esc(pr.url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="'+(isDraft?'Draft':'Open')+' PR #'+esc(num)+' \u2014 '+esc(pr.repo||'')+'">'+label+'&nbsp;#'+esc(num)+'</a>';
           }).join('');
         }
@@ -1366,7 +1383,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       var btn=document.getElementById('refresh-btn');
       if(btn.disabled)return;
       btn.disabled=true;
-      btn.textContent='Refreshing\u2026';
+      btn.innerHTML='<span style="animation:spin .7s linear infinite;display:inline-block;width:13px;height:13px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;vertical-align:middle"></span>';
       fetch('/dashboard/api/data')
         .then(function(r){return r.json();})
         .then(function(d){
@@ -1378,7 +1395,7 @@ export function dashboardHtml(hasPassword: boolean): string {
           document.getElementById('upd').textContent='Updated '+new Date().toLocaleTimeString();
         })
         .catch(function(){document.getElementById('dot').className='dot err';})
-        .finally(function(){btn.disabled=false;btn.textContent='\u21bb Refresh';});
+        .finally(function(){btn.disabled=false;btn.innerHTML=_icoRefresh;});
     }
     var es=new EventSource('/dashboard/events');
     es.onmessage=function(e){
@@ -1404,7 +1421,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     function updateFullscreenBtn(){
       var btn=document.getElementById('fullscreen-btn');
       if(!btn)return;
-      btn.textContent=document.fullscreenElement?'\u2715':'\u26F6';
+      btn.innerHTML=document.fullscreenElement?_icoMinimize:_icoMaximize;
       btn.title=document.fullscreenElement?'Exit fullscreen':'Enter fullscreen';
     }
     document.addEventListener('fullscreenchange',updateFullscreenBtn);
