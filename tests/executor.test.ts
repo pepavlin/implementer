@@ -222,6 +222,25 @@ describe("Executor", () => {
       const args = spawnMock.mock.calls[0][1] as string[];
       expect(args).not.toContain("--privileged");
     });
+
+    it("bypasses sandbox-entrypoint.sh with --user claude and --entrypoint claude", async () => {
+      const proc = makeFakeProc(0, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const promise = executor.generateBranchSlug("Add login page", "slug-entrypoint");
+
+      await new Promise((r) => setTimeout(r, 5));
+      proc.stdout!.emit("data", Buffer.from("add-login-page"));
+      proc.emit("close", 0);
+      await promise;
+
+      const args = spawnMock.mock.calls[0][1] as string[];
+      expect(args).toContain("--user");
+      expect(args).toContain("claude");
+      expect(args).toContain("--entrypoint");
+      expect(args.indexOf("--tools")).toBe(-1);
+    });
   });
 
   describe("generateTaskMetadata", () => {
@@ -274,6 +293,28 @@ describe("Executor", () => {
       const args = spawnMock.mock.calls[0][1] as string[];
       expect(args).not.toContain("--privileged");
       expect(args).toContain("haiku");
+    });
+
+    it("bypasses sandbox-entrypoint.sh with --user claude and --entrypoint claude", async () => {
+      const proc = makeFakeProc(0, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const promise = executor.generateTaskMetadata("Some task", "meta-entrypoint");
+
+      await new Promise((r) => setTimeout(r, 5));
+      proc.stdout!.emit("data", Buffer.from("some-task\nSome Task\n600"));
+      proc.emit("close", 0);
+      await promise;
+
+      const args = spawnMock.mock.calls[0][1] as string[];
+      // Must use --user claude and --entrypoint claude to bypass dockerd startup in sandbox-entrypoint.sh
+      expect(args).toContain("--user");
+      expect(args).toContain("claude");
+      expect(args).toContain("--entrypoint");
+      // --tools with empty string must NOT be present (it causes invalid CLI argument)
+      const toolsIdx = args.indexOf("--tools");
+      expect(toolsIdx).toBe(-1);
     });
 
     it("uses custom metaCpus from server config", async () => {
@@ -422,6 +463,25 @@ describe("Executor", () => {
       const args = spawnMock.mock.calls[0][1] as string[];
       expect(args).not.toContain("--privileged");
       expect(args).toContain("haiku");
+    });
+
+    it("bypasses sandbox-entrypoint.sh with --user claude and --entrypoint claude", async () => {
+      const proc = makeFakeProc(0, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const promise = executor.generateTitle("Some task", "title-entrypoint");
+
+      await new Promise((r) => setTimeout(r, 5));
+      proc.stdout!.emit("data", Buffer.from("Some Task"));
+      proc.emit("close", 0);
+      await promise;
+
+      const args = spawnMock.mock.calls[0][1] as string[];
+      expect(args).toContain("--user");
+      expect(args).toContain("claude");
+      expect(args).toContain("--entrypoint");
+      expect(args.indexOf("--tools")).toBe(-1);
     });
 
     it("returns empty string on non-zero exit code", async () => {
