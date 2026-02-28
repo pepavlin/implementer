@@ -231,6 +231,12 @@ describe("Voice Mode — JS functions", () => {
         html = await getDashboardHtml();
         expect(html).toContain("isVoiceTarget=voiceMode&&voiceTarget===id");
     });
+
+    it("startSilenceTimer uses 4-second silence timeout", async () => {
+        html = await getDashboardHtml();
+        expect(html).toContain("var duration=4000;");
+        expect(html).not.toContain("var duration=6000;");
+    });
 });
 
 describe("Voice Mode — API regression", () => {
