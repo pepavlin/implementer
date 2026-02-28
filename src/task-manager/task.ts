@@ -28,6 +28,7 @@ export class Task {
     constructor(data: PersistedTask, manager: TaskManager) {
         this.data = data;
         this.branch = data.branch;
+        this.title = data.title;
         this.id = data.taskId;
         this.manager = manager;
         this.project = manager.requireProject(data.projectId);

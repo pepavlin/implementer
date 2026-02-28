@@ -394,6 +394,41 @@ describe("TaskManager", () => {
       expect(task?.branch?.name).toBe("impl/test-resumed-flag-task");
       expect(task?.data.status).toBe("queued");
     });
+
+    it("preserves title on disk when task is re-enqueued after restart", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({
+        taskId: "titled-task",
+        status: "running",
+        completedAt: null,
+        workspaceId: 0,
+        branch: "impl/test-titled-task",
+        title: "Add dark mode toggle",
+      }));
+
+      mkdirSync(join(TMP, "projects", PROJECT_ID, "instances", "0"), { recursive: true });
+
+      const tm = new TaskManager(config);
+
+      const project = tm.config.projects[PROJECT_ID as any];
+      project.initialize();
+      vi.spyOn(project, 'initialize').mockImplementation(() => {});
+      vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+      await tm.init();
+
+      // Title should survive the re-enqueue tickUpdate call
+      const task = tm.tasks.get("titled-task" as any);
+      expect(task?.title).toBe("Add dark mode toggle");
+
+      const onDisk = JSON.parse(
+        readFileSync(join(TMP, "tasks", "titled-task.json"), "utf-8"),
+      );
+      expect(onDisk.title).toBe("Add dark mode toggle");
+    });
   });
 
   describe("restart resume", () => {
