@@ -166,6 +166,31 @@ describe("GET /dashboard/api/task/:taskId", () => {
 
         expect(res.status).toBe(401);
     });
+
+    it("returns branch name as a string, not an object", async () => {
+        const task = makeTask({ branch: "impl/my-feature" });
+        const app = createApp([task], makeConfig() as unknown as Config);
+
+        const res = await request(app)
+            .get("/dashboard/api/task/abc12345")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(typeof res.body.branch).toBe("string");
+        expect(res.body.branch).toBe("impl/my-feature");
+    });
+
+    it("returns null branch when task has no branch", async () => {
+        const task = makeTask({ branch: null });
+        const app = createApp([task], makeConfig() as unknown as Config);
+
+        const res = await request(app)
+            .get("/dashboard/api/task/abc12345")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.body.branch).toBeNull();
+    });
 });
 
 describe("buildDashboardData", () => {

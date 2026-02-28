@@ -1288,7 +1288,7 @@ export function registerDashboardRoutes(
         res.json({
             taskId: task.id,
             projectId: task.data.projectId,
-            branch: task.branch,
+            branch: task.branch?.name ?? null,
             prompt: task.data.prompt,
             title: task.title ?? null,
             parentTaskId: task.data.parentTaskId ?? null,
