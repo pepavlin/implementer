@@ -428,8 +428,17 @@ export function dashboardHtml(hasPassword: boolean): string {
     .progress-pct{font-size:.65rem;color:var(--text3);white-space:nowrap;min-width:28px;text-align:right}
     .progress-est{font-size:.65rem;color:var(--text4);white-space:nowrap}
     /* ── Bulk selection ─────────────────────────────────────────────────────── */
-    .th-cb,.td-cb{width:36px;padding-left:12px;padding-right:4px}
+    .th-cb,.td-cb{width:36px;padding-left:12px;padding-right:4px;display:none}
+    table.selection-mode .th-cb,table.selection-mode .td-cb{display:table-cell}
     .task-cb{width:15px;height:15px;cursor:pointer;accent-color:#3b82f6}
+    table.selection-mode tbody tr.clickable{cursor:default}
+    table.selection-mode tbody tr.clickable:hover{background:rgba(59,130,246,.06)}
+    tr.tr-sel{background:rgba(59,130,246,.12)!important}
+    tr.tr-sel:hover{background:rgba(59,130,246,.18)!important}
+    .btn-sel-mode{background:var(--btn-sec-bg);color:var(--btn-sec-fg);padding:4px 12px;border-radius:6px;border:1px solid var(--border2);font-size:.78rem;font-weight:600;cursor:pointer;line-height:1.6;transition:background .15s,color .15s,border-color .15s}
+    .btn-sel-mode:hover{background:var(--btn-sec-h)}
+    .btn-sel-mode.active{background:#3b82f6;color:#fff;border-color:#3b82f6}
+    .sel-hint{font-size:.72rem;color:var(--text3);margin-left:6px;opacity:.7}
     .bulk-bar{position:fixed;bottom:0;left:0;right:0;background:var(--bg-card);border-top:2px solid #3b82f6;padding:12px 24px;display:flex;align-items:center;gap:12px;z-index:200;box-shadow:0 -4px 24px rgba(0,0,0,.35)}
     .bulk-count{font-size:.82rem;font-weight:600;color:var(--text2);margin-right:4px}
     .btn-bulk-retry{background:var(--b-q-bg);color:var(--b-q-fg);padding:7px 16px;border-radius:6px;border:none;font-size:.78rem;font-weight:600;cursor:pointer}
@@ -495,8 +504,10 @@ export function dashboardHtml(hasPassword: boolean): string {
   <div class="section-title">Projects</div>
   <div class="projects" id="projects"><div class="muted" style="font-size:.82rem">Loading\u2026</div></div>
   <div class="proj-hint" id="proj-hint">Click a project card to filter tasks by project.</div>
-  <div class="tasks-header">
-    <div class="section-title">Tasks</div>
+  <div class="tasks-header" style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+    <div class="section-title" style="flex:1;margin-bottom:0">Tasks</div>
+    <span class="sel-hint" id="sel-hint" style="display:none">Shift+click for range</span>
+    <button id="btn-sel-mode" class="btn-sel-mode" onclick="toggleSelectionMode()" title="Enable multi-select mode (tip: hold Shift and click any row to select)">Select</button>
   </div>
   <div class="filters" id="filters">
     <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">All</button>
@@ -512,7 +523,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     <button class="filter-btn" data-filter="draft-prs" onclick="setFilter('draft-prs')">Draft PRs</button>
   </div>
   <div class="table-wrap">
-  <table>
+  <table id="task-table">
     <thead><tr>
       <th class="th-cb"><input type="checkbox" id="cb-all" title="Select all visible tasks" onchange="toggleSelectAll(this.checked)"></th><th>Status</th><th>Project</th><th class="th-taskid">Task ID</th><th>Title / Prompt</th><th class="th-dur">Duration</th><th class="th-started">Started</th><th class="th-pr">PR</th>
     </tr></thead>
@@ -626,7 +637,7 @@ export function dashboardHtml(hasPassword: boolean): string {
   </div>
 
   <script>
-    var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null,retryCountdownInterval=null,selectedTaskIds=new Set();
+    var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null,retryCountdownInterval=null,selectedTaskIds=new Set(),selectionMode=false,lastSelectedIdx=-1;
     function hasOpenPrs(t){return!!(t.pullRequests&&t.pullRequests.some(function(pr){return pr.state==='open'||pr.state==='draft'||!pr.state;}));}
     function hasDraftPrs(t){return!!(t.pullRequests&&t.pullRequests.some(function(pr){return pr.state==='draft';}));}
     function prStateBadge(state){
@@ -712,8 +723,9 @@ export function dashboardHtml(hasPassword: boolean): string {
         if(selectedProjects.size>0)msg+=' in selected project'+(selectedProjects.size>1?'s':'');
         tb.innerHTML='<tr><td colspan="8" class="empty">'+msg+'</td></tr>';return;
       }
-      tb.innerHTML=filtered.map(function(t){
-        var rowClass='clickable tr-'+esc(t.status);
+      tb.innerHTML=filtered.map(function(t,idx){
+        var isChecked=selectedTaskIds.has(t.taskId);
+        var rowClass='clickable tr-'+esc(t.status)+(selectionMode&&isChecked?' tr-sel':'');
         if(t.status==='completed'&&!isRecentCompleted(t.completedAt))rowClass+=' tr-completed-old';
         if(t.status==='completed'&&!viewedTasks.has(t.taskId))rowClass+=' tr-completed-new';
         var activePrs=t.pullRequests?t.pullRequests.filter(function(pr){return pr.state==='open'||pr.state==='draft';}):[];
@@ -736,8 +748,7 @@ export function dashboardHtml(hasPassword: boolean): string {
           var estLabel=dur(t.estimatedDurationSeconds);
           progressHtml='<div class="task-progress"><div class="progress-track"><div class="'+fillClass+'" style="width:'+pct+'%"></div></div><span class="progress-pct">'+pct+'%</span><span class="progress-est">/ '+estLabel+'</span></div>';
         }
-        var isChecked=selectedTaskIds.has(t.taskId);
-        return '<tr class="'+rowClass+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'">'
+        return '<tr class="'+rowClass+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'" data-idx="'+idx+'">'
           +'<td class="td-cb" onclick="event.stopPropagation()"><input type="checkbox" class="task-cb" data-id="'+esc(t.taskId)+'" '+(isChecked?'checked':'')+' onchange="toggleTaskSelection(this.dataset.id,this.checked)" onclick="event.stopPropagation()"></td>'
           +'<td>'+badge(t.status,t.completedAt,t.taskId)+'</td>'
           +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
@@ -749,7 +760,7 @@ export function dashboardHtml(hasPassword: boolean): string {
           +'</tr>';
       }).join('');
       tb.querySelectorAll('tr.clickable').forEach(function(row){
-        row.addEventListener('click',function(){openTask(this.dataset.id,this.dataset.proj);});
+        row.addEventListener('click',function(e){handleRowClick(e,this.dataset.id,parseInt(this.dataset.idx,10),this.dataset.proj);});
       });
       // Sync select-all checkbox
       var cbAll=document.getElementById('cb-all');
@@ -779,9 +790,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       document.getElementById('bulk-count').textContent=count+' task'+(count>1?'s':'')+' selected';
     }
     function clearSelection(){
-      selectedTaskIds.clear();
-      updateBulkBar();
-      if(lastData)renderTasks(lastData.tasks);
+      exitSelectionMode();
     }
     function bulkRetry(){
       var ids=Array.from(selectedTaskIds);
@@ -806,6 +815,60 @@ export function dashboardHtml(hasPassword: boolean): string {
           clearSelection();
         })
         .catch(function(){alert('Failed to cancel tasks');});
+    }
+    function enterSelectionMode(){
+      selectionMode=true;
+      var t=document.getElementById('task-table');if(t)t.classList.add('selection-mode');
+      var btn=document.getElementById('btn-sel-mode');if(btn){btn.classList.add('active');btn.textContent='Cancel';}
+      var hint=document.getElementById('sel-hint');if(hint)hint.style.display='';
+      if(lastData)renderTasks(lastData.tasks);
+    }
+    function exitSelectionMode(){
+      selectionMode=false;
+      selectedTaskIds.clear();
+      lastSelectedIdx=-1;
+      var t=document.getElementById('task-table');if(t)t.classList.remove('selection-mode');
+      var btn=document.getElementById('btn-sel-mode');if(btn){btn.classList.remove('active');btn.textContent='Select';}
+      var hint=document.getElementById('sel-hint');if(hint)hint.style.display='none';
+      updateBulkBar();
+      if(lastData)renderTasks(lastData.tasks);
+    }
+    function toggleSelectionMode(){if(selectionMode)exitSelectionMode();else enterSelectionMode();}
+    function rangeSelect(toIdx){
+      if(!lastData)return;
+      var filtered=lastData.tasks.filter(function(t){
+        var statusOk=currentFilter==='all'||t.status===currentFilter||(currentFilter==='open-prs'&&taskHasOpenPr(t))||(currentFilter==='draft-prs'&&taskHasDraftPr(t));
+        var projOk=selectedProjects.size===0||selectedProjects.has(t.projectId);
+        return statusOk&&projOk;
+      });
+      var from=Math.min(lastSelectedIdx,toIdx),to=Math.max(lastSelectedIdx,toIdx);
+      for(var i=from;i<=to&&i<filtered.length;i++)selectedTaskIds.add(filtered[i].taskId);
+      lastSelectedIdx=toIdx;
+      updateBulkBar();
+      renderTasks(lastData.tasks);
+    }
+    function handleRowClick(event,taskId,rowIdx,projId){
+      if(event.target.closest('a,button,.task-cb'))return;
+      if(!selectionMode){
+        if(event.shiftKey){
+          event.preventDefault();
+          enterSelectionMode();
+          toggleTaskSelection(taskId,true);
+          lastSelectedIdx=rowIdx;
+        }else{
+          openTask(taskId,projId||'');
+        }
+        return;
+      }
+      event.preventDefault();
+      if(event.shiftKey&&lastSelectedIdx!==-1){
+        rangeSelect(rowIdx);
+      }else{
+        var isChecked=selectedTaskIds.has(taskId);
+        toggleTaskSelection(taskId,!isChecked);
+        lastSelectedIdx=rowIdx;
+        if(lastData)renderTasks(lastData.tasks);
+      }
     }
     function openTask(taskId,projectId){
       currentTaskId=taskId;
@@ -1027,6 +1090,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         else if(document.getElementById('ct-overlay').style.display!=='none')closeContinueTask();
         else if(document.getElementById('task-overlay').style.display!=='none')closeTask();
         else if(document.getElementById('nt-overlay').style.display!=='none')closeNewTask();
+        else if(selectionMode)exitSelectionMode();
       }
     });
     function updateStats(stats){
