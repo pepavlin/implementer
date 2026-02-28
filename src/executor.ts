@@ -71,8 +71,6 @@ export class Executor {
       "text",
       "--model",
       "haiku",
-      "--tools",
-      "",
     ];
 
     const slugContainer = `${process.env.INSTANCE_NAME || "implementer"}-slug-${taskId ?? Date.now()}`;
@@ -84,6 +82,9 @@ export class Executor {
       "--name", slugContainer,
       `--cpus=${this.metaCpus}`,
       "-e", `${creds.envName}=${creds.value}`,
+      // Bypass sandbox-entrypoint.sh — meta containers don't need Docker-in-Docker.
+      "--user", "claude",
+      "--entrypoint", "claude",
       this.sandboxImage,
       ...claudeArgs,
     ];
@@ -134,8 +135,6 @@ Task: ${prompt}`,
       "text",
       "--model",
       "haiku",
-      "--tools",
-      "",
     ];
 
     const metaContainer = `${process.env.INSTANCE_NAME || "implementer"}-meta-${taskId ?? Date.now()}`;
@@ -147,6 +146,10 @@ Task: ${prompt}`,
       "--name", metaContainer,
       `--cpus=${this.metaCpus}`,
       "-e", `${creds.envName}=${creds.value}`,
+      // Bypass sandbox-entrypoint.sh (which starts dockerd requiring --privileged).
+      // Meta containers only need the claude CLI — no Docker-in-Docker.
+      "--user", "claude",
+      "--entrypoint", "claude",
       this.sandboxImage,
       ...claudeArgs,
     ];
@@ -199,8 +202,6 @@ Task: ${prompt}`,
       "text",
       "--model",
       "haiku",
-      "--tools",
-      "",
     ];
 
     const dockerArgs = [
@@ -209,6 +210,9 @@ Task: ${prompt}`,
       "--name", `${process.env.INSTANCE_NAME || "implementer"}-title-${taskId ?? Date.now()}`,
       `--cpus=${this.metaCpus}`,
       "-e", `${creds.envName}=${creds.value}`,
+      // Bypass sandbox-entrypoint.sh — meta containers don't need Docker-in-Docker.
+      "--user", "claude",
+      "--entrypoint", "claude",
       this.sandboxImage,
       ...claudeArgs,
     ];
