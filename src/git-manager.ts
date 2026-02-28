@@ -74,7 +74,11 @@ export class GitManager {
       await git(["reset", "--hard", "HEAD"], repoDir);
       await git(["checkout", repo.defaultBranch], repoDir);
       await git(["reset", "--hard", `origin/${repo.defaultBranch}`], repoDir);
-      await git(["checkout", "-b", branchName], repoDir);
+      try {
+        await git(["checkout", branchName], repoDir);
+      } catch {
+        await git(["checkout", "-b", branchName], repoDir);
+      }
     }
   }
 

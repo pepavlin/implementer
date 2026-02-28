@@ -82,6 +82,34 @@ describe("GitManager", () => {
       const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
       expect(branch).toBe("impl/new-task");
     });
+
+    it("checks out existing local branch instead of failing when it already exists", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+
+      // First task creates the branch and adds a commit
+      await gm.prepareNewBranchAll(workDir, repos, "impl/reused-branch");
+      await shell("echo work > work.txt && git add . && git commit -m 'work'", repoDir);
+
+      // Simulate workspace reuse: switch back to main
+      await shell("git checkout main", repoDir);
+
+      // A new task with the same branch name — should checkout existing branch, not throw
+      await gm.prepareNewBranchAll(workDir, repos, "impl/reused-branch");
+
+      const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
+      expect(branch).toBe("impl/reused-branch");
+
+      // Previous work should still be there (branch was checked out, not recreated)
+      const files = await shell("ls", repoDir);
+      expect(files).toContain("work.txt");
+    });
   });
 
   describe("resetToDefaultAll", () => {
@@ -130,6 +158,45 @@ describe("GitManager", () => {
 
       const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
       expect(branch).toBe("impl/pr-branch");
+    });
+
+    it("succeeds when local branch exists but checkout fails (stale local ref)", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Create the branch locally and push it
+      await shell("git checkout -b impl/continue-branch", repoDir);
+      await shell("echo v1 > feature.txt && git add . && git commit -m 'v1'", repoDir);
+      await shell("git push origin impl/continue-branch", repoDir);
+
+      // Simulate workspace reuse: switch to main, then advance origin/impl/continue-branch
+      // by pushing from a different clone (simulates parent task completing in another workspace)
+      await shell("git checkout main", repoDir);
+
+      const tmpClone = join(TMP, "tmp-clone2");
+      mkdirSync(tmpClone, { recursive: true });
+      await shell(`git clone ${bareDir} .`, tmpClone);
+      await shell('git config user.email "test@test.com"', tmpClone);
+      await shell('git config user.name "Test"', tmpClone);
+      await shell("git checkout impl/continue-branch", tmpClone);
+      await shell("echo v2 > feature.txt && git add . && git commit -m 'v2'", tmpClone);
+      await shell("git push origin impl/continue-branch", tmpClone);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+
+      // checkoutBranchAll should succeed and have the latest remote content
+      await gm.checkoutBranchAll(workDir, repos, "impl/continue-branch");
+
+      const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
+      expect(branch).toBe("impl/continue-branch");
+
+      // Should have the latest content from remote
+      const content = await shell("cat feature.txt", repoDir);
+      expect(content).toBe("v2");
     });
   });
 
