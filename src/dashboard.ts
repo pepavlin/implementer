@@ -244,7 +244,7 @@ const VOICE_MODE_JS = `
     function startSilenceTimer(){
       clearSilenceTimer();
       voiceSilenceStart=Date.now();
-      var duration=6000;
+      var duration=4000;
       var fill=document.getElementById('voice-silence-fill');
       voiceSilenceTimer=setInterval(function(){
         var elapsed=Date.now()-voiceSilenceStart;
