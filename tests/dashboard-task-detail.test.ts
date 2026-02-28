@@ -724,3 +724,309 @@ describe("dashboard HTML - unviewed completed task highlight", () => {
         expect(res.text).toContain("badge-new-glow");
     });
 });
+
+describe("buildDashboardData - PR stats separated into openPrs and draftPrs", () => {
+    it("counts only truly open PRs in openPrs", () => {
+        const tasks = [
+            makeTask({
+                pullRequests: [
+                    { repo: "org/repo", url: "https://github.com/org/repo/pull/1", state: "open" },
+                    { repo: "org/repo", url: "https://github.com/org/repo/pull/2", state: "draft" },
+                    { repo: "org/repo", url: "https://github.com/org/repo/pull/3", state: "merged" },
+                    { repo: "org/repo", url: "https://github.com/org/repo/pull/4", state: "closed" },
+                ]
+            })
+        ];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        expect(data.stats.openPrs).toBe(1);
+        expect(data.stats.draftPrs).toBe(1);
+    });
+
+    it("counts draft PRs only in draftPrs, not in openPrs", () => {
+        const tasks = [
+            makeTask({
+                pullRequests: [
+                    { repo: "org/repo", url: "https://github.com/org/repo/pull/1", state: "draft" },
+                ]
+            }),
+            makeTask({
+                taskId: "bbb22222",
+                pullRequests: [
+                    { repo: "org/repo", url: "https://github.com/org/repo/pull/2", state: "draft" },
+                ]
+            })
+        ];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        expect(data.stats.openPrs).toBe(0);
+        expect(data.stats.draftPrs).toBe(2);
+    });
+
+    it("returns zero for both when no PRs exist", () => {
+        const tasks = [makeTask({ pullRequests: [] })];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        expect(data.stats.openPrs).toBe(0);
+        expect(data.stats.draftPrs).toBe(0);
+    });
+
+    it("does not count merged or closed PRs in either stat", () => {
+        const tasks = [
+            makeTask({
+                pullRequests: [
+                    { repo: "org/repo", url: "https://github.com/org/repo/pull/1", state: "merged" },
+                    { repo: "org/repo", url: "https://github.com/org/repo/pull/2", state: "closed" },
+                ]
+            })
+        ];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        expect(data.stats.openPrs).toBe(0);
+        expect(data.stats.draftPrs).toBe(0);
+    });
+});
+
+describe("dashboard HTML - PR stat cards", () => {
+    it("includes Open PRs stat card in stats bar", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("stat-open-prs");
+        expect(res.text).toContain("Open PRs");
+        expect(res.text).toContain('id="spr"');
+    });
+
+    it("includes Draft PRs stat card in stats bar", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("stat-draft-prs");
+        expect(res.text).toContain("Draft PRs");
+        expect(res.text).toContain('id="sdpr"');
+    });
+
+    it("includes draft-prs filter button", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain('data-filter="draft-prs"');
+        expect(res.text).toContain("Draft PRs");
+    });
+});
+
+describe("dashboard HTML - bulk selection UI", () => {
+    it("includes checkbox column in table header", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain('id="cb-all"');
+        expect(res.text).toContain("th-cb");
+    });
+
+    it("includes bulk action bar HTML", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain('id="bulk-bar"');
+        expect(res.text).toContain("bulk-bar");
+        expect(res.text).toContain("Retry Selected");
+        expect(res.text).toContain("Cancel Selected");
+    });
+
+    it("includes bulk selection JavaScript functions", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("toggleTaskSelection");
+        expect(res.text).toContain("toggleSelectAll");
+        expect(res.text).toContain("bulkRetry");
+        expect(res.text).toContain("bulkCancel");
+        expect(res.text).toContain("clearSelection");
+        expect(res.text).toContain("selectedTaskIds");
+    });
+
+    it("includes CSS for bulk bar and checkboxes", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain(".bulk-bar{");
+        expect(res.text).toContain(".task-cb{");
+        expect(res.text).toContain(".th-cb");
+    });
+});
+
+describe("POST /dashboard/api/tasks/bulk-cancel", () => {
+    it("returns 401 without authentication", async () => {
+        const app = createApp([]);
+
+        const res = await request(app)
+            .post("/dashboard/api/tasks/bulk-cancel")
+            .send({ taskIds: ["abc12345"] });
+
+        expect(res.status).toBe(401);
+    });
+
+    it("returns 400 when taskIds is missing", async () => {
+        const app = createApp([]);
+
+        const res = await request(app)
+            .post("/dashboard/api/tasks/bulk-cancel")
+            .set("Cookie", AUTH_COOKIE)
+            .send({});
+
+        expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when taskIds is empty array", async () => {
+        const app = createApp([]);
+
+        const res = await request(app)
+            .post("/dashboard/api/tasks/bulk-cancel")
+            .set("Cookie", AUTH_COOKIE)
+            .send({ taskIds: [] });
+
+        expect(res.status).toBe(400);
+    });
+
+    it("cancels multiple tasks and returns succeeded count", async () => {
+        const task1 = makeTask({ taskId: "abc12345", status: "running" });
+        const task2 = makeTask({ taskId: "bbb22222", status: "queued" });
+        const cancelTask = vi.fn().mockImplementation((projectId, taskId) => {
+            const t = [task1, task2].find((t) => t.id === taskId);
+            return { ...t, data: { ...t?.data, status: "cancelled" } };
+        });
+        const app = createApp([task1, task2], makeConfig(), { cancelTask } as any);
+
+        const res = await request(app)
+            .post("/dashboard/api/tasks/bulk-cancel")
+            .set("Cookie", AUTH_COOKIE)
+            .send({ taskIds: ["abc12345", "bbb22222"] });
+
+        expect(res.status).toBe(200);
+        expect(res.body.succeeded).toBe(2);
+        expect(res.body.failed).toBe(0);
+        expect(cancelTask).toHaveBeenCalledTimes(2);
+    });
+
+    it("returns partial success when some tasks are not found", async () => {
+        const task1 = makeTask({ taskId: "abc12345", status: "running" });
+        const cancelTask = vi.fn().mockResolvedValue(task1);
+        const app = createApp([task1], makeConfig(), { cancelTask } as any);
+
+        const res = await request(app)
+            .post("/dashboard/api/tasks/bulk-cancel")
+            .set("Cookie", AUTH_COOKIE)
+            .send({ taskIds: ["abc12345", "nonexistent"] });
+
+        expect(res.status).toBe(200);
+        expect(res.body.succeeded).toBe(1);
+        expect(res.body.failed).toBe(1);
+        expect(res.body.errors).toHaveLength(1);
+    });
+});
+
+describe("POST /dashboard/api/tasks/bulk-retry", () => {
+    it("returns 401 without authentication", async () => {
+        const app = createApp([]);
+
+        const res = await request(app)
+            .post("/dashboard/api/tasks/bulk-retry")
+            .send({ taskIds: ["abc12345"] });
+
+        expect(res.status).toBe(401);
+    });
+
+    it("returns 400 when taskIds is missing", async () => {
+        const app = createApp([]);
+
+        const res = await request(app)
+            .post("/dashboard/api/tasks/bulk-retry")
+            .set("Cookie", AUTH_COOKIE)
+            .send({});
+
+        expect(res.status).toBe(400);
+    });
+
+    it("retries multiple tasks and returns succeeded count", async () => {
+        const task1 = makeTask({ taskId: "abc12345", status: "failed" });
+        const task2 = makeTask({ taskId: "bbb22222", status: "failed" });
+        const retriedTask = makeTask({ taskId: "abc12345", status: "queued" });
+        const retryTask = vi.fn().mockReturnValue(retriedTask);
+        const app = createApp([task1, task2], makeConfig(), { retryTask } as any);
+
+        const res = await request(app)
+            .post("/dashboard/api/tasks/bulk-retry")
+            .set("Cookie", AUTH_COOKIE)
+            .send({ taskIds: ["abc12345", "bbb22222"] });
+
+        expect(res.status).toBe(200);
+        expect(res.body.succeeded).toBe(2);
+        expect(res.body.failed).toBe(0);
+        expect(retryTask).toHaveBeenCalledTimes(2);
+    });
+
+    it("returns partial success when some tasks not found", async () => {
+        const task1 = makeTask({ taskId: "abc12345", status: "failed" });
+        const retriedTask = makeTask({ taskId: "abc12345", status: "queued" });
+        const retryTask = vi.fn().mockReturnValue(retriedTask);
+        const app = createApp([task1], makeConfig(), { retryTask } as any);
+
+        const res = await request(app)
+            .post("/dashboard/api/tasks/bulk-retry")
+            .set("Cookie", AUTH_COOKIE)
+            .send({ taskIds: ["abc12345", "nonexistent"] });
+
+        expect(res.status).toBe(200);
+        expect(res.body.succeeded).toBe(1);
+        expect(res.body.failed).toBe(1);
+        expect(res.body.errors).toHaveLength(1);
+    });
+});
