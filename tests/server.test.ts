@@ -1652,6 +1652,21 @@ describe("server", () => {
             expect(res.text).toContain("toggleTheme");
         });
 
+        it("dashboard includes fullscreen button in header", async () => {
+            const app = createServer(
+                makeMockTaskManager(),
+                makeConfigWithAdmin()
+            );
+            const cookie = await getAdminCookie(app);
+            const res = await request(app)
+                .get("/dashboard")
+                .set("Cookie", cookie)
+                .expect(200);
+            expect(res.text).toContain("fullscreen-btn");
+            expect(res.text).toContain("toggleFullscreen");
+            expect(res.text).toContain("fullscreenchange");
+        });
+
         it("dashboard includes FOUC prevention script", async () => {
             const app = createServer(
                 makeMockTaskManager(),
