@@ -169,6 +169,180 @@ const THEME_TOGGLE_JS = `
     }
     updateThemeBtn();`;
 
+const VOICE_MODE_JS = `
+    function toggleVoiceMode(){
+      voiceMode=!voiceMode;
+      var btn=document.getElementById('voice-btn');
+      var panel=document.getElementById('voice-panel');
+      if(voiceMode){
+        if(selectionMode)exitSelectionMode();
+        btn.classList.add('voice-btn-active');
+        panel.style.display='';
+        updateVoicePanel();
+      }else{
+        stopVoiceRecognition();
+        voiceTarget=null;
+        voiceTranscript='';
+        voiceSubmittedLog=[];
+        btn.classList.remove('voice-btn-active');
+        panel.style.display='none';
+      }
+      updateProjHint();
+      if(lastData)renderProjects(lastData.projects);
+    }
+    function voiceSelectProject(id){
+      if(voiceTarget===id){
+        stopVoiceRecognition();
+        voiceTarget=null;
+        voiceTranscript='';
+        updateVoicePanel();
+        updateProjHint();
+        if(lastData)renderProjects(lastData.projects);
+        return;
+      }
+      voiceTarget=id;
+      voiceTranscript='';
+      updateVoicePanel();
+      updateProjHint();
+      if(lastData)renderProjects(lastData.projects);
+      startVoiceRecognition();
+    }
+    function startVoiceRecognition(){
+      stopVoiceRecognition();
+      var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+      if(!SR){alert('Speech recognition is not supported in this browser. Please use Chrome.');return;}
+      voiceRecognition=new SR();
+      voiceRecognition.continuous=true;
+      voiceRecognition.interimResults=true;
+      voiceRecognition.lang=voiceLang;
+      voiceRecognition.onresult=function(event){
+        var transcript='';
+        for(var i=0;i<event.results.length;i++){
+          transcript+=event.results[i][0].transcript;
+        }
+        voiceTranscript=transcript;
+        var el=document.getElementById('voice-transcript-text');
+        if(el)el.textContent=transcript;
+        updateVoicePanel();
+        if(transcript.trim())resetSilenceTimer();
+      };
+      voiceRecognition.onerror=function(event){
+        if(event.error==='no-speech'||event.error==='aborted')return;
+        console.warn('Speech recognition error:',event.error);
+      };
+      voiceRecognition.onend=function(){
+        if(voiceMode&&voiceTarget){
+          try{voiceRecognition.start();}catch(e){}
+        }
+      };
+      try{voiceRecognition.start();}catch(e){console.warn('Failed to start speech recognition:',e);}
+    }
+    function stopVoiceRecognition(){
+      clearSilenceTimer();
+      if(voiceRecognition){try{voiceRecognition.abort();}catch(e){}voiceRecognition=null;}
+    }
+    function startSilenceTimer(){
+      clearSilenceTimer();
+      voiceSilenceStart=Date.now();
+      var duration=6000;
+      var fill=document.getElementById('voice-silence-fill');
+      voiceSilenceTimer=setInterval(function(){
+        var elapsed=Date.now()-voiceSilenceStart;
+        var pct=Math.min(100,Math.round((elapsed/duration)*100));
+        if(fill)fill.style.width=pct+'%';
+        if(elapsed>=duration){
+          clearSilenceTimer();
+          voiceAutoSubmit();
+        }
+      },100);
+    }
+    function resetSilenceTimer(){
+      if(voiceTranscript.trim())startSilenceTimer();
+    }
+    function clearSilenceTimer(){
+      if(voiceSilenceTimer){clearInterval(voiceSilenceTimer);voiceSilenceTimer=null;}
+      var fill=document.getElementById('voice-silence-fill');
+      if(fill)fill.style.width='0%';
+    }
+    function voiceAutoSubmit(){
+      var transcript=voiceTranscript.trim();
+      if(!transcript){return;}
+      if(!voiceTarget){showVoiceWarning('Select a project first');return;}
+      stopVoiceRecognition();
+      var projectId=voiceTarget;
+      var body={projectId:projectId,prompt:transcript};
+      fetch('/dashboard/api/task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          if(d.error){showVoiceWarning('Error: '+d.error);return;}
+          voiceSubmittedLog.unshift({project:projectId,prompt:transcript,taskId:d.taskId,time:new Date().toLocaleTimeString()});
+          renderVoiceSubmitted();
+          showVoiceFlash('\\u2713 Submitted to '+projectId);
+          voiceTranscript='';
+          voiceTarget=null;
+          updateVoicePanel();
+          updateProjHint();
+          if(lastData)renderProjects(lastData.projects);
+        })
+        .catch(function(e){showVoiceWarning('Failed to submit task: '+e.message);});
+    }
+    function voiceCancel(){
+      stopVoiceRecognition();
+      voiceTranscript='';
+      voiceTarget=null;
+      updateVoicePanel();
+      updateProjHint();
+      if(lastData)renderProjects(lastData.projects);
+    }
+    function toggleVoiceLang(){
+      voiceLang=voiceLang==='cs-CZ'?'en-US':'cs-CZ';
+      var btn=document.getElementById('voice-lang-btn');
+      if(btn)btn.textContent=voiceLang;
+      if(voiceRecognition&&voiceTarget){
+        startVoiceRecognition();
+      }
+    }
+    function updateVoicePanel(){
+      var statusEl=document.getElementById('voice-status-text');
+      var transcriptArea=document.getElementById('voice-transcript-area');
+      var cancelBtn=document.getElementById('voice-cancel-btn');
+      var transcriptText=document.getElementById('voice-transcript-text');
+      if(voiceTarget){
+        statusEl.textContent='\\uD83C\\uDFA4 Listening \\u2014 '+voiceTarget;
+        transcriptArea.style.display='';
+        cancelBtn.style.display='';
+        if(transcriptText)transcriptText.textContent=voiceTranscript||'Listening\\u2026';
+      }else{
+        statusEl.textContent='\\uD83C\\uDFA4 Voice Mode \\u2014 Select a project to begin';
+        transcriptArea.style.display='none';
+        cancelBtn.style.display='none';
+      }
+      hideVoiceWarning();
+    }
+    function renderVoiceSubmitted(){
+      var el=document.getElementById('voice-submitted');
+      if(!el||!voiceSubmittedLog.length){if(el)el.innerHTML='';return;}
+      el.innerHTML=voiceSubmittedLog.slice(0,5).map(function(item){
+        return '<div class="voice-submitted-item">\\u2713 '+esc(item.time)+' \\u2014 <strong>'+esc(item.project)+'</strong>: '+esc(item.prompt.length>60?item.prompt.slice(0,60)+'\\u2026':item.prompt)+'</div>';
+      }).join('');
+    }
+    function showVoiceFlash(msg){
+      var el=document.createElement('div');
+      el.className='voice-flash';
+      el.textContent=msg;
+      document.body.appendChild(el);
+      setTimeout(function(){el.classList.add('fade');},1200);
+      setTimeout(function(){if(el.parentNode)el.parentNode.removeChild(el);},1600);
+    }
+    function showVoiceWarning(msg){
+      var el=document.getElementById('voice-warning');
+      if(el){el.textContent=msg;el.style.display='block';}
+    }
+    function hideVoiceWarning(){
+      var el=document.getElementById('voice-warning');
+      if(el)el.style.display='none';
+    }`;
+
 export function loginHtml(error = false): string {
     return `<!DOCTYPE html>
 <html lang="en">
@@ -241,7 +415,9 @@ export function dashboardHtml(hasPassword: boolean): string {
       --btn-cancel-bg:#3b0f0f;--btn-cancel-fg:#ef4444;--btn-cancel-h:#7f1d1d;
       --btn-edit-bg:#1e3a5f;--btn-edit-fg:#60a5fa;--btn-edit-h:#1e40af;
       --btn-cont-bg:#064e3b;--btn-cont-fg:#34d399;--btn-cont-h:#065f46;
-      --link:#60a5fa}
+      --link:#60a5fa;
+      --voice-bg:#0d2818;--voice-border:#22c55e;--voice-fg:#22c55e;
+      --voice-panel-bg:#111a14;--voice-warn-bg:#451a03;--voice-warn-fg:#f59e0b}
     [data-theme=light]{
       --bg:#f8fafc;--bg-card:#ffffff;--bg-head:#f1f5f9;--bg-code:#f1f5f9;--bg-inp:#ffffff;
       --border:#e2e8f0;--border2:#cbd5e1;--hover-bg:#f1f5f9;--hover-border:#94a3b8;--proj-sel:#eff6ff;
@@ -259,7 +435,9 @@ export function dashboardHtml(hasPassword: boolean): string {
       --btn-cancel-bg:#fee2e2;--btn-cancel-fg:#dc2626;--btn-cancel-h:#fca5a5;
       --btn-edit-bg:#dbeafe;--btn-edit-fg:#2563eb;--btn-edit-h:#93c5fd;
       --btn-cont-bg:#d1fae5;--btn-cont-fg:#059669;--btn-cont-h:#a7f3d0;
-      --link:#2563eb}
+      --link:#2563eb;
+      --voice-bg:#dcfce7;--voice-border:#16a34a;--voice-fg:#16a34a;
+      --voice-panel-bg:#f0fdf4;--voice-warn-bg:#fef3c7;--voice-warn-fg:#d97706}
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);padding:24px}
     header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
     h1{font-size:1.4rem;font-weight:600}
@@ -447,6 +625,30 @@ export function dashboardHtml(hasPassword: boolean): string {
     .btn-bulk-cancel:hover{background:var(--btn-cancel-h)}
     .btn-bulk-clear{background:var(--btn-sec-bg);color:var(--btn-sec-fg);padding:7px 16px;border-radius:6px;border:none;font-size:.78rem;font-weight:600;cursor:pointer}
     .btn-bulk-clear:hover{background:var(--btn-sec-h)}
+    /* ── Voice mode ────────────────────────────────────────────────────────── */
+    @keyframes voice-pulse{0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}50%{box-shadow:0 0 0 6px rgba(34,197,94,0)}}
+    @keyframes voice-glow{0%,100%{box-shadow:0 0 8px rgba(34,197,94,.3),0 0 0 1px rgba(34,197,94,.5)}50%{box-shadow:0 0 16px rgba(34,197,94,.5),0 0 0 2px rgba(34,197,94,.7)}}
+    @keyframes voice-flash-in{0%{opacity:0;transform:translate(-50%,-50%) scale(.9)}100%{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+    @keyframes voice-flash-out{0%{opacity:1}100%{opacity:0}}
+    .voice-btn-active{background:var(--voice-bg)!important;border-color:var(--voice-border)!important;color:var(--voice-fg)!important;animation:voice-pulse 2s ease-in-out infinite}
+    .proj-card.voice-target{border-color:var(--voice-border)!important;background:var(--voice-bg)!important;animation:voice-glow 2s ease-in-out infinite;position:relative}
+    .proj-card.voice-target .proj-name::before{content:'\uD83C\uDFA4 ';font-size:.9em}
+    .voice-panel{position:fixed;bottom:0;left:0;right:0;background:var(--voice-panel-bg);border-top:2px solid var(--voice-border);padding:14px 24px;z-index:200;box-shadow:0 -4px 24px rgba(0,0,0,.35)}
+    .voice-panel-inner{max-width:900px;margin:0 auto}
+    .voice-status{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:.82rem;color:var(--voice-fg);font-weight:600}
+    .voice-controls{display:flex;align-items:center;gap:6px}
+    .voice-lang-btn{background:var(--btn-sec-bg);color:var(--btn-sec-fg);border:1px solid var(--border2);border-radius:6px;padding:4px 10px;font-size:.72rem;font-weight:600;cursor:pointer;transition:background .15s}
+    .voice-lang-btn:hover{background:var(--btn-sec-h)}
+    .voice-cancel-btn{background:var(--btn-cancel-bg);color:var(--btn-cancel-fg);border:none;border-radius:6px;padding:4px 10px;font-size:.72rem;font-weight:600;cursor:pointer;transition:background .15s}
+    .voice-cancel-btn:hover{background:var(--btn-cancel-h)}
+    .voice-transcript{background:var(--bg-code);border-radius:6px;padding:10px 14px;margin-top:8px;font-size:.82rem;color:var(--text);min-height:40px;font-family:ui-monospace,'SF Mono',monospace;word-break:break-word;white-space:pre-wrap}
+    .voice-silence-bar{height:4px;background:var(--border2);border-radius:2px;margin-top:6px;overflow:hidden}
+    .voice-silence-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--voice-fg),#f59e0b);width:0%;transition:width .1s linear}
+    .voice-warning{background:var(--voice-warn-bg);color:var(--voice-warn-fg);padding:8px 14px;border-radius:6px;font-size:.78rem;margin-top:8px;display:none}
+    .voice-submitted{margin-top:8px}
+    .voice-submitted-item{font-size:.75rem;color:var(--text2);padding:2px 0}
+    .voice-flash{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--voice-bg);border:2px solid var(--voice-border);color:var(--voice-fg);padding:16px 28px;border-radius:12px;font-size:1rem;font-weight:700;z-index:9999;pointer-events:none;animation:voice-flash-in .2s ease-out}
+    .voice-flash.fade{animation:voice-flash-out .4s ease-in forwards}
     /* ── Responsive ────────────────────────────────────────────────────────── */
     .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
     @media(max-width:767px){
@@ -478,6 +680,8 @@ export function dashboardHtml(hasPassword: boolean): string {
       .filters{gap:5px}
       .filter-btn{padding:4px 10px;font-size:.72rem}
       .section-title{font-size:.75rem}
+      .voice-panel{padding:10px 14px}
+      .voice-status{flex-wrap:wrap;gap:6px}
     }
   </style>
 </head>
@@ -486,6 +690,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     <h1>Implementer Dashboard</h1>
     <div class="header-actions" style="display:flex;align-items:center;gap:12px">
       <button class="btn-new" onclick="openNewTask()">+ New Task</button>
+      <button class="theme-btn" id="voice-btn" onclick="toggleVoiceMode()" title="Voice Mode">&#x1F3A4;</button>
       <button class="theme-btn" id="fullscreen-btn" onclick="toggleFullscreen()" title="Enter fullscreen">&#x26F6;</button>
       <button class="theme-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">&#x2600;</button>
       <div class="live"><span class="dot" id="dot"></span><span id="upd">Connecting\u2026</span><button class="btn-ref-ico" id="refresh-btn" onclick="refreshData()" title="Refresh">\u21bb</button></div>
@@ -537,6 +742,27 @@ export function dashboardHtml(hasPassword: boolean): string {
     <button class="btn-bulk-retry" onclick="bulkRetry()">Retry Selected</button>
     <button class="btn-bulk-cancel" onclick="bulkCancel()">Cancel Selected</button>
     <button class="btn-bulk-clear" onclick="clearSelection()">Clear</button>
+  </div>
+
+  <!-- Voice Mode Panel -->
+  <div id="voice-panel" class="voice-panel" style="display:none">
+    <div class="voice-panel-inner">
+      <div class="voice-status">
+        <span id="voice-status-text">\uD83C\uDFA4 Voice Mode \u2014 Select a project to begin</span>
+        <div class="voice-controls">
+          <button id="voice-lang-btn" class="voice-lang-btn" onclick="toggleVoiceLang()">cs-CZ</button>
+          <button id="voice-cancel-btn" class="voice-cancel-btn" onclick="voiceCancel()" style="display:none">\u2715 Cancel</button>
+        </div>
+      </div>
+      <div id="voice-transcript-area" style="display:none">
+        <div class="voice-transcript">
+          <div id="voice-transcript-text" class="voice-transcript-text"></div>
+        </div>
+        <div class="voice-silence-bar"><div class="voice-silence-fill" id="voice-silence-fill"></div></div>
+      </div>
+      <div id="voice-warning" class="voice-warning"></div>
+      <div id="voice-submitted" class="voice-submitted"></div>
+    </div>
   </div>
 
   <!-- Task Detail Modal -->
@@ -637,7 +863,7 @@ export function dashboardHtml(hasPassword: boolean): string {
   </div>
 
   <script>
-    var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null,retryCountdownInterval=null,selectedTaskIds=new Set(),selectionMode=false,lastSelectedIdx=-1;
+    var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null,retryCountdownInterval=null,selectedTaskIds=new Set(),selectionMode=false,lastSelectedIdx=-1,voiceMode=false,voiceTarget=null,voiceRecognition=null,voiceTranscript='',voiceSilenceTimer=null,voiceSilenceStart=0,voiceLang='cs-CZ',voiceSubmittedLog=[];
     function hasOpenPrs(t){return!!(t.pullRequests&&t.pullRequests.some(function(pr){return pr.state==='open'||pr.state==='draft'||!pr.state;}));}
     function hasDraftPrs(t){return!!(t.pullRequests&&t.pullRequests.some(function(pr){return pr.state==='draft';}));}
     function prStateBadge(state){
@@ -673,12 +899,14 @@ export function dashboardHtml(hasPassword: boolean): string {
     function taskHasOpenPr(t){return hasOpenPrs(t);}
     function taskHasDraftPr(t){return hasDraftPrs(t);}
     function toggleProject(id){
+      if(voiceMode){voiceSelectProject(id);return;}
       if(selectedProjects.has(id)){selectedProjects.delete(id);}else{selectedProjects.add(id);}
       updateProjHint();
       if(lastData){renderProjects(lastData.projects);renderTasks(lastData.tasks);}
     }
     function updateProjHint(){
       var el=document.getElementById('proj-hint');
+      if(voiceMode){el.textContent=voiceTarget?'Voice target: '+voiceTarget+'. Speak now, or click another project.':'Voice mode active. Click a project card to start dictating.';return;}
       if(selectedProjects.size===0){el.textContent='Click a project card to filter tasks by project.';}
       else{var names=Array.from(selectedProjects).join(', ');el.textContent='Filtering by: '+names+'. Click again to deselect.';}
     }
@@ -688,6 +916,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       if(!ids.length){el.innerHTML='<div class="muted" style="font-size:.82rem">No projects</div>';return;}
       el.innerHTML=ids.map(function(id){
         var p=projects[id],sel=selectedProjects.has(id);
+        var isVoiceTarget=voiceMode&&voiceTarget===id;
         var hasActive=(p.running||0)+(p.starting||0)+(p.retrying||0)>0;
         var hasQueued=(p.queued||0)>0;
         var parts=[];
@@ -699,8 +928,10 @@ export function dashboardHtml(hasPassword: boolean): string {
         if(p.failed)parts.push('<span class="ps ps-failed">'+p.failed+' failed</span>');
         if(!parts.length)parts.push('<span class="muted" style="font-size:.72rem">No tasks</span>');
         var extraClass=hasActive?' proj-active':hasQueued?' proj-queued':'';
-        return '<div class="proj-card'+(sel?' selected':'')+extraClass+'" data-proj="'+esc(id)+'">'
-          +'<div class="proj-name" title="'+esc(id)+'">'+(sel?'\u2714 ':'')+esc(id)+'</div>'
+        var cardClass='proj-card'+(isVoiceTarget?' voice-target':(sel?' selected':''))+extraClass;
+        var namePrefix=isVoiceTarget?'':(sel?'\u2714 ':'');
+        return '<div class="'+cardClass+'" data-proj="'+esc(id)+'">'
+          +'<div class="proj-name" title="'+esc(id)+'">'+namePrefix+esc(id)+'</div>'
           +'<div class="proj-stats">'+parts.join('')+'</div>'
           +'</div>';
       }).join('');
@@ -817,6 +1048,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         .catch(function(){alert('Failed to cancel tasks');});
     }
     function enterSelectionMode(){
+      if(voiceMode)toggleVoiceMode();
       selectionMode=true;
       var t=document.getElementById('task-table');if(t)t.classList.add('selection-mode');
       var btn=document.getElementById('btn-sel-mode');if(btn){btn.classList.add('active');btn.textContent='Cancel';}
@@ -1086,6 +1318,8 @@ export function dashboardHtml(hasPassword: boolean): string {
     }
     document.addEventListener('keydown',function(e){
       if(e.key==='Escape'){
+        if(voiceMode&&voiceTarget){voiceCancel();return;}
+        if(voiceMode){toggleVoiceMode();return;}
         if(document.getElementById('et-overlay').style.display!=='none')closeEditTask();
         else if(document.getElementById('ct-overlay').style.display!=='none')closeContinueTask();
         else if(document.getElementById('task-overlay').style.display!=='none')closeTask();
@@ -1174,6 +1408,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       btn.title=document.fullscreenElement?'Exit fullscreen':'Enter fullscreen';
     }
     document.addEventListener('fullscreenchange',updateFullscreenBtn);
+    ${VOICE_MODE_JS}
     ${THEME_TOGGLE_JS}
   </script>
 </body>
