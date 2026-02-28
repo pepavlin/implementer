@@ -973,6 +973,148 @@ describe("POST /dashboard/api/tasks/bulk-cancel", () => {
     });
 });
 
+describe("dashboard HTML - selection mode UX", () => {
+    it("hides checkbox column by default with display:none", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        // Checkbox columns must be hidden by default
+        expect(res.text).toContain(".th-cb,.td-cb{width:36px;padding-left:12px;padding-right:4px;display:none}");
+    });
+
+    it("includes CSS to show checkbox column only in selection-mode", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("table.selection-mode .th-cb,table.selection-mode .td-cb{display:table-cell}");
+    });
+
+    it("includes Select button in tasks header", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain('id="btn-sel-mode"');
+        expect(res.text).toContain("toggleSelectionMode()");
+        expect(res.text).toContain("btn-sel-mode");
+    });
+
+    it("includes enterSelectionMode and exitSelectionMode JS functions", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("function enterSelectionMode");
+        expect(res.text).toContain("function exitSelectionMode");
+        expect(res.text).toContain("function toggleSelectionMode");
+    });
+
+    it("includes handleRowClick function for row-level selection", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("function handleRowClick");
+    });
+
+    it("includes rangeSelect function for shift+click range selection", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("function rangeSelect");
+    });
+
+    it("initializes selectionMode and lastSelectedIdx state variables", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("selectionMode=false");
+        expect(res.text).toContain("lastSelectedIdx=-1");
+    });
+
+    it("includes CSS for selected row highlight (tr-sel)", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("tr.tr-sel{");
+    });
+
+    it("includes CSS for Select button (btn-sel-mode)", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain(".btn-sel-mode{");
+        expect(res.text).toContain(".btn-sel-mode.active{");
+    });
+
+    it("Escape key handler exits selection mode", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        // Escape handler should call exitSelectionMode when in selection mode
+        expect(res.text).toContain("else if(selectionMode)exitSelectionMode()");
+    });
+
+    it("includes task-table id on the table element", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain('id="task-table"');
+    });
+});
+
 describe("POST /dashboard/api/tasks/bulk-retry", () => {
     it("returns 401 without authentication", async () => {
         const app = createApp([]);
