@@ -278,6 +278,17 @@ export class TaskManager {
     }
 
     /**
+     * Mark a task as read by a dashboard user. Idempotent.
+     * Persists readAt to disk so the status is shared across devices.
+     */
+    markTaskRead(taskId: TaskId): Task {
+        const task = this.tasks.get(taskId);
+        if (!task) throw new Error(`Task not found: ${taskId}`);
+        task.markRead();
+        return task;
+    }
+
+    /**
      * Check if any OTHER task in the given chain is currently active.
      * Excludes the calling task (by excludeTaskId) so a queued task
      * doesn't block itself from starting.

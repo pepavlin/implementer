@@ -694,7 +694,7 @@ describe("dashboard HTML - unviewed completed task highlight", () => {
         expect(res.text).toContain(".badge-new-dot{");
     });
 
-    it("includes viewedTasks Set initialized from localStorage", async () => {
+    it("does not use localStorage for read/unread tracking (uses backend readAt instead)", async () => {
         const task = makeTask({ status: "completed" });
         const app = createApp([task]);
 
@@ -703,11 +703,12 @@ describe("dashboard HTML - unviewed completed task highlight", () => {
             .set("Cookie", AUTH_COOKIE);
 
         expect(res.status).toBe(200);
-        expect(res.text).toContain("viewedTasks");
-        expect(res.text).toContain("seenCompletedTasks");
+        // Should NOT use localStorage for seenCompletedTasks (moved to backend)
+        expect(res.text).not.toContain("seenCompletedTasks");
+        expect(res.text).not.toContain("viewedTasks");
     });
 
-    it("openTask marks task as viewed in localStorage", async () => {
+    it("openTask calls /read API endpoint instead of localStorage", async () => {
         const task = makeTask({ status: "completed" });
         const app = createApp([task]);
 
@@ -716,12 +717,13 @@ describe("dashboard HTML - unviewed completed task highlight", () => {
             .set("Cookie", AUTH_COOKIE);
 
         expect(res.status).toBe(200);
-        // openTask should add to viewedTasks and persist to localStorage
-        expect(res.text).toContain("viewedTasks.add(taskId)");
-        expect(res.text).toContain("localStorage.setItem('seenCompletedTasks'");
+        // openTask should call the backend /read API
+        expect(res.text).toContain("/read");
+        // Should NOT set localStorage for viewed tasks
+        expect(res.text).not.toContain("localStorage.setItem('seenCompletedTasks'");
     });
 
-    it("badge function accepts taskId parameter for unviewed detection", async () => {
+    it("badge function uses isUnread boolean parameter for unviewed detection", async () => {
         const task = makeTask({ status: "completed" });
         const app = createApp([task]);
 
@@ -730,8 +732,8 @@ describe("dashboard HTML - unviewed completed task highlight", () => {
             .set("Cookie", AUTH_COOKIE);
 
         expect(res.status).toBe(200);
-        // badge function signature includes taskId
-        expect(res.text).toContain("function badge(s,completedAt,taskId)");
+        // badge function signature uses isUnread boolean (not taskId)
+        expect(res.text).toContain("function badge(s,completedAt,isUnread)");
         // uses isNew logic
         expect(res.text).toContain("isNew");
         expect(res.text).toContain("b-completed-new");
@@ -1195,5 +1197,107 @@ describe("POST /dashboard/api/tasks/bulk-retry", () => {
         expect(res.body.succeeded).toBe(1);
         expect(res.body.failed).toBe(1);
         expect(res.body.errors).toHaveLength(1);
+    });
+});
+
+describe("POST /dashboard/api/task/:taskId/read", () => {
+    it("returns 401 without authentication", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .post("/dashboard/api/task/abc12345/read");
+
+        expect(res.status).toBe(401);
+    });
+
+    it("returns 404 when task not found", async () => {
+        const markTaskRead = vi.fn().mockImplementation(() => {
+            throw new Error("Task not found: nonexistent");
+        });
+        const app = createApp([], makeConfig(), { markTaskRead } as any);
+
+        const res = await request(app)
+            .post("/dashboard/api/task/nonexistent/read")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(404);
+        expect(res.body.error).toBe("Task not found");
+    });
+
+    it("marks task as read and returns taskId and readAt", async () => {
+        const readAt = new Date().toISOString();
+        const task = makeTask({ status: "completed" });
+        task.data.readAt = readAt;
+        const markTaskRead = vi.fn().mockReturnValue(task);
+        const app = createApp([task], makeConfig(), { markTaskRead } as any);
+
+        const res = await request(app)
+            .post("/dashboard/api/task/abc12345/read")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.body.taskId).toBe("abc12345");
+        expect(res.body.readAt).toBe(readAt);
+        expect(markTaskRead).toHaveBeenCalledWith("abc12345");
+    });
+
+    it("is idempotent - calling twice still returns 200", async () => {
+        const readAt = new Date().toISOString();
+        const task = makeTask({ status: "completed" });
+        task.data.readAt = readAt;
+        const markTaskRead = vi.fn().mockReturnValue(task);
+        const app = createApp([task], makeConfig(), { markTaskRead } as any);
+
+        const res1 = await request(app)
+            .post("/dashboard/api/task/abc12345/read")
+            .set("Cookie", AUTH_COOKIE);
+        const res2 = await request(app)
+            .post("/dashboard/api/task/abc12345/read")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res1.status).toBe(200);
+        expect(res2.status).toBe(200);
+        expect(markTaskRead).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("buildDashboardData - readAt field", () => {
+    it("includes readAt in task data when task has been read", () => {
+        const readAt = new Date("2024-01-01T10:10:00Z").toISOString();
+        const task = makeTask({ status: "completed" });
+        task.data.readAt = readAt;
+        const tm = makeTaskManager([task]) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        expect(data.tasks).toHaveLength(1);
+        expect((data.tasks[0] as Record<string, unknown>).readAt).toBe(readAt);
+    });
+
+    it("includes null readAt for tasks that have not been read", () => {
+        const task = makeTask({ status: "completed" });
+        const tm = makeTaskManager([task]) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        expect((data.tasks[0] as Record<string, unknown>).readAt).toBeNull();
+    });
+
+    it("dashboard JS uses t.readAt to determine unread status (not localStorage)", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        // renderTasks should use t.readAt to check unread status
+        expect(res.text).toContain("!t.readAt");
+        // badge call should pass !t.readAt as isUnread
+        expect(res.text).toContain("badge(t.status,t.completedAt,!t.readAt)");
     });
 });
