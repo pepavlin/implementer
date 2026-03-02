@@ -83,7 +83,8 @@ export function buildDashboardData(
                 repo: pr.repo,
                 url: pr.url,
                 state: pr.state ?? null
-            })) ?? null
+            })) ?? null,
+        readAt: task.data.readAt ?? null
     }));
 
     // Count PRs separately by state
@@ -883,7 +884,6 @@ export function dashboardHtml(hasPassword: boolean): string {
       var s=state||'open';var r=map[s]||map['open'];
       return '<span class="pr-state '+r[0]+'">'+r[1]+'</span>';
     }
-    var viewedTasks=new Set(JSON.parse(localStorage.getItem('seenCompletedTasks')||'[]'));
     function fmtCountdown(ms){if(ms<=0)return 'now';var s=Math.ceil(ms/1000);if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;return m+'m '+r+'s';}
     function startRetryCountdown(nextRetryAt){
       if(retryCountdownInterval)clearInterval(retryCountdownInterval);
@@ -900,7 +900,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     var _dots='<span class="badge-dots"><span></span><span></span><span></span></span>';
     var _clock='<svg class="badge-clock-ico" viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5" xmlns="http://www.w3.org/2000/svg"><circle cx="6" cy="6" r="5"/><path stroke-linecap="round" d="M6 3v3l2 1"/></svg>';
     function isRecentCompleted(ca){return!!ca&&(Date.now()-new Date(ca).getTime())<1200000;}
-    function badge(s,completedAt,taskId){var isNew=s==='completed'&&!!taskId&&!viewedTasks.has(taskId);var cc=isNew?'b-completed-new':(isRecentCompleted(completedAt)?'b-completed':'b-completed-old');var newDot=isNew?'<span class="badge-new-dot"></span>':'';var m={running:['b-running',_spin+'Running'],starting:['b-starting',_spin+'Starting'],queued:['b-queued','Queued'+_dots],retrying:['b-retrying',_clock+'Scheduled Retry'],completed:[cc,'&#10003; Completed'+newDot],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','&#215; Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
+    function badge(s,completedAt,isUnread){var isNew=s==='completed'&&!!isUnread;var cc=isNew?'b-completed-new':(isRecentCompleted(completedAt)?'b-completed':'b-completed-old');var newDot=isNew?'<span class="badge-new-dot"></span>':'';var m={running:['b-running',_spin+'Running'],starting:['b-starting',_spin+'Starting'],queued:['b-queued','Queued'+_dots],retrying:['b-retrying',_clock+'Scheduled Retry'],completed:[cc,'&#10003; Completed'+newDot],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','&#215; Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
     function dur(s){if(s==null)return '—';if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
     function fmtDate(d){try{return new Date(d).toLocaleString();}catch(e){return String(d);}}
     function setFilter(f){
@@ -970,7 +970,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         var isChecked=selectedTaskIds.has(t.taskId);
         var rowClass='clickable tr-'+esc(t.status)+(selectionMode&&isChecked?' tr-sel':'');
         if(t.status==='completed'&&!isRecentCompleted(t.completedAt))rowClass+=' tr-completed-old';
-        if(t.status==='completed'&&!viewedTasks.has(t.taskId))rowClass+=' tr-completed-new';
+        if(t.status==='completed'&&!t.readAt)rowClass+=' tr-completed-new';
         var activePrs=t.pullRequests?t.pullRequests.filter(function(pr){return pr.state==='open'||pr.state==='draft';}):[];
         if(activePrs.length>0)rowClass+=' open-pr-row';
         var prBtns='';
@@ -993,7 +993,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         }
         return '<tr class="'+rowClass+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'" data-idx="'+idx+'">'
           +'<td class="td-cb" onclick="event.stopPropagation()"><input type="checkbox" class="task-cb" data-id="'+esc(t.taskId)+'" '+(isChecked?'checked':'')+' onchange="toggleTaskSelection(this.dataset.id,this.checked)" onclick="event.stopPropagation()"></td>'
-          +'<td>'+badge(t.status,t.completedAt,t.taskId)+'</td>'
+          +'<td>'+badge(t.status,t.completedAt,!t.readAt)+'</td>'
           +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
           +'<td class="td-taskid"><span class="mono">'+esc(t.taskId)+'</span></td>'
           +'<td>'+(t.title?'<div class="ttitle">'+esc(t.title)+'</div>':'')+'<div class="tprompt">'+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+'</div>'+progressHtml+'</td>'
@@ -1117,7 +1117,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     function openTask(taskId,projectId){
       currentTaskId=taskId;
       currentTaskData=null;
-      viewedTasks.add(taskId);try{localStorage.setItem('seenCompletedTasks',JSON.stringify(Array.from(viewedTasks)));}catch(e){}
+      fetch('/dashboard/api/task/'+encodeURIComponent(taskId)+'/read',{method:'POST'}).catch(function(){});
       document.getElementById('task-ttl').textContent='Task '+taskId;
       document.getElementById('task-badge').innerHTML='';
       document.getElementById('task-bd').innerHTML='<div class="muted" style="text-align:center;padding:32px">Loading\u2026</div>';
@@ -1718,6 +1718,25 @@ export function registerDashboardRoutes(
                 error:
                     err instanceof Error ? err.message : "Internal server error"
             });
+        }
+    });
+
+    app.post("/dashboard/api/task/:taskId/read", (req, res) => {
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        try {
+            const task = taskManager.markTaskRead(
+                req.params.taskId as TaskId
+            );
+            res.json({ taskId: task.id, readAt: task.data.readAt });
+        } catch {
+            res.status(404).json({ error: "Task not found" });
         }
     });
 

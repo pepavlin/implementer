@@ -1627,3 +1627,91 @@ describe("TaskManager", () => {
     });
   });
 });
+
+describe("TaskManager - markTaskRead", () => {
+  beforeEach(() => {
+    rmSync(TMP, { recursive: true, force: true });
+    mkdirSync(TMP, { recursive: true });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it("sets readAt on a completed task and persists to disk", async () => {
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
+    const store = new TaskStore(makeConfig().server.workspaceDir);
+    store.save(makePersistedTask({
+      taskId: "read-task-1",
+      status: "completed",
+      completedAt: new Date().toISOString(),
+    }));
+
+    const tm = new TaskManager(makeConfig());
+    await tm.init();
+
+    const task = tm.markTaskRead("read-task-1" as any);
+
+    expect(task.data.readAt).toBeDefined();
+    expect(typeof task.data.readAt).toBe("string");
+
+    // Verify it was persisted to disk
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const raw = readFileSync(join(TMP, "tasks", "read-task-1.json"), "utf-8");
+    const persisted = JSON.parse(raw);
+    expect(persisted.readAt).toBe(task.data.readAt);
+  });
+
+  it("is idempotent - calling markTaskRead twice preserves first readAt", async () => {
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
+    const store = new TaskStore(makeConfig().server.workspaceDir);
+    store.save(makePersistedTask({
+      taskId: "read-task-2",
+      status: "completed",
+      completedAt: new Date().toISOString(),
+    }));
+
+    const tm = new TaskManager(makeConfig());
+    await tm.init();
+
+    const task = tm.markTaskRead("read-task-2" as any);
+    const firstReadAt = task.data.readAt;
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    tm.markTaskRead("read-task-2" as any);
+    expect(task.data.readAt).toBe(firstReadAt);
+  });
+
+  it("throws when task is not found", async () => {
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
+    const tm = new TaskManager(makeConfig());
+    await tm.init();
+
+    expect(() => tm.markTaskRead("nonexistent" as any)).toThrow("Task not found: nonexistent");
+  });
+
+  it("survives reload - readAt persisted to disk and re-loaded", async () => {
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
+    const store = new TaskStore(makeConfig().server.workspaceDir);
+    store.save(makePersistedTask({
+      taskId: "read-task-3",
+      status: "completed",
+      completedAt: new Date().toISOString(),
+    }));
+
+    const tm1 = new TaskManager(makeConfig());
+    await tm1.init();
+    const task = tm1.markTaskRead("read-task-3" as any);
+    const savedReadAt = task.data.readAt;
+
+    // Create a new task manager to simulate restart
+    const tm2 = new TaskManager(makeConfig());
+    await tm2.init();
+
+    const reloadedTask = tm2.getTask("read-task-3" as any);
+    expect(reloadedTask?.data.readAt).toBe(savedReadAt);
+  });
+});

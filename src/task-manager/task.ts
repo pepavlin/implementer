@@ -122,6 +122,16 @@ export class Task {
         this.unshift();
     }
 
+    /**
+     * Mark the task as read by a dashboard user. Sets readAt once and persists.
+     * Idempotent — calling again when already read has no effect.
+     */
+    markRead(): void {
+        if (this.data.readAt) return; // already marked
+        this.data.readAt = new Date().toISOString();
+        this.tickUpdate();
+    }
+
     /** Mark the task as completed. Sets completedAt and persists. */
     complete(): void {
         this.data.status = "completed";

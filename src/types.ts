@@ -52,6 +52,8 @@ export interface TaskData {
     attempt: number;
     /** AI-estimated duration of this task in seconds, generated before execution starts. */
     estimatedDurationSeconds?: number;
+    /** ISO timestamp of when a dashboard user first opened/viewed this completed task. Shared across devices. */
+    readAt?: string;
 }
 
 export interface PersistedTask extends TaskData {

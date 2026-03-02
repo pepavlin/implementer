@@ -20,6 +20,7 @@ The dashboard uses a cookie-based session (`impl_dash`). On successful login, a 
 - **Open PRs counter** — a dedicated stat card shows the count of open/draft PRs; clicking it filters to tasks with open PRs
 - **Open PR row highlighting** — tasks with open or draft pull requests have a distinct left-border highlight in the task table
 - **Task duration progress bar** — running tasks with an AI-estimated duration show a linear progress bar in the task list row, indicating what percentage of the estimated time has elapsed. The bar turns amber when the task exceeds the estimate.
+- **Cross-device read/unread tracking** — completed tasks show a pulsing "new" indicator until they are opened. This read status is persisted on the server (as `readAt` on the task) and shared across all browsers and devices, not stored in localStorage.
 
 ## Light/Dark Mode
 
@@ -91,3 +92,25 @@ Click the 🎤 button in the header to toggle Voice Mode. A fixed bottom panel a
 | `voiceAutoSubmit()` | POST transcript to `/dashboard/api/task` |
 | `voiceCancel()` | Discard transcript and stop recording |
 | `updateVoicePanel()` | Sync UI state (status text, send/cancel button visibility) |
+
+## Read/Unread Task Tracking
+
+Completed tasks display a pulsing indicator badge ("✓ Completed" with a green dot) until they are opened. Once a user opens the task detail modal, the task is marked as read.
+
+### How it works
+
+- Opening a task detail modal triggers a `POST /dashboard/api/task/:taskId/read` request.
+- The server stores an ISO timestamp `readAt` directly on the `TaskData` object and persists it to disk.
+- All subsequent dashboard API responses (`/dashboard/api/data`, SSE events) include `readAt` for each task.
+- The frontend uses `t.readAt` from the server response to determine unread status — no localStorage is involved.
+
+### Benefits
+
+- **Cross-device**: Opening a task on one device marks it as read on all other devices automatically (next SSE refresh).
+- **Persistent**: Read status survives browser clear, incognito mode, and new browsers.
+
+### API
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/dashboard/api/task/:taskId/read` | `POST` | Mark task as read. Idempotent. Returns `{ taskId, readAt }`. |
