@@ -97,7 +97,10 @@ h1{font-size:1.4rem;font-weight:600}
 
 /* ── Stats ──────────────────────────────────────────────────────────────────── */
 .stats{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
-.stat{background:var(--bg-card);border-radius:8px;padding:14px 20px;min-width:110px;transition:box-shadow .3s}
+.stat{background:var(--bg-card);border-radius:8px;padding:14px 20px;min-width:110px;transition:box-shadow .3s,border-color .2s}
+.stat.stat-filter{cursor:pointer;user-select:none;border:1px solid transparent}
+.stat.stat-filter:hover{border-color:rgba(59,130,246,.35);box-shadow:0 0 0 1px rgba(59,130,246,.2),0 0 8px rgba(59,130,246,.08)}
+.stat.stat-selected{border-color:#3b82f6!important;box-shadow:0 0 0 1px #3b82f6,0 0 12px rgba(59,130,246,.25)!important}
 .stat.stat-has-running{box-shadow:0 0 0 1px rgba(34,197,94,.3),0 0 12px rgba(34,197,94,.1)}
 .stat.stat-has-queued{box-shadow:0 0 0 1px rgba(245,158,11,.3),0 0 12px rgba(245,158,11,.08)}
 .stat-label{font-size:.68rem;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;display:flex;align-items:center;gap:5px}
@@ -131,10 +134,6 @@ h1{font-size:1.4rem;font-weight:600}
 /* ── Voice target project card ─────────────────────────────────────────────── */
 .proj-card.voice-target{border-color:var(--voice-border)!important;background:var(--voice-bg)!important;animation:voice-glow 2s ease-in-out infinite;position:relative}
 
-/* ── Filters ────────────────────────────────────────────────────────────────── */
-.filters{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
-.filter-btn{padding:4px 12px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--text2);font-size:.75rem;cursor:pointer}
-.filter-btn.active{background:#3b82f6;border-color:#3b82f6;color:#fff}
 
 /* ── Task table ─────────────────────────────────────────────────────────────── */
 table{width:100%;border-collapse:collapse;background:var(--bg-card);border-radius:12px;overflow:hidden}

@@ -855,7 +855,7 @@ describe("dashboard HTML - PR stat cards", () => {
         expect(res.text).toContain('id="sdpr"');
     });
 
-    it("includes draft-prs filter button", async () => {
+    it("includes draft-prs clickable stat card with data-filter attribute", async () => {
         const task = makeTask({ status: "completed" });
         const app = createApp([task]);
 
@@ -866,6 +866,7 @@ describe("dashboard HTML - PR stat cards", () => {
         expect(res.status).toBe(200);
         expect(res.text).toContain('data-filter="draft-prs"');
         expect(res.text).toContain("Draft PRs");
+        expect(res.text).toContain("toggleFilter('draft-prs')");
     });
 });
 
@@ -1299,5 +1300,110 @@ describe("buildDashboardData - readAt field", () => {
         expect(res.text).toContain("!t.readAt");
         // badge call should pass !t.readAt as isUnread
         expect(res.text).toContain("badge(t.status,t.completedAt,!t.readAt)");
+    });
+});
+
+describe("dashboard HTML - multi-select stat card filters", () => {
+    it("does not include the filter buttons row", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).not.toContain('class="filters"');
+        expect(res.text).not.toContain("class=\"filter-btn\"");
+    });
+
+    it("stat cards have stat-filter class and toggleFilter onclick", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("stat-filter");
+        expect(res.text).toContain("toggleFilter('running')");
+        expect(res.text).toContain("toggleFilter('queued')");
+        expect(res.text).toContain("toggleFilter('retrying')");
+        expect(res.text).toContain("toggleFilter('completed')");
+        expect(res.text).toContain("toggleFilter('failed')");
+        expect(res.text).toContain("toggleFilter('open-prs')");
+        expect(res.text).toContain("toggleFilter('draft-prs')");
+    });
+
+    it("stat cards have data-filter attributes for all status types", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain('data-filter="running"');
+        expect(res.text).toContain('data-filter="queued"');
+        expect(res.text).toContain('data-filter="retrying"');
+        expect(res.text).toContain('data-filter="completed"');
+        expect(res.text).toContain('data-filter="failed"');
+        expect(res.text).toContain('data-filter="open-prs"');
+        expect(res.text).toContain('data-filter="draft-prs"');
+    });
+
+    it("uses activeFilters Set instead of currentFilter string", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("activeFilters=new Set()");
+        expect(res.text).not.toContain("currentFilter=");
+    });
+
+    it("includes toggleFilter function that adds/removes from activeFilters Set", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("function toggleFilter");
+        expect(res.text).toContain("activeFilters.has(f)");
+        expect(res.text).toContain("activeFilters.delete(f)");
+        expect(res.text).toContain("activeFilters.add(f)");
+    });
+
+    it("renderTasks uses activeFilters.size===0 for show-all logic", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("activeFilters.size===0");
+    });
+
+    it("includes stat-filter and stat-selected CSS classes", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain(".stat.stat-filter{");
+        expect(res.text).toContain(".stat.stat-selected{");
     });
 });
