@@ -258,7 +258,8 @@ describe("Executor", () => {
       const { slug, title, estimatedDurationSeconds } = await promise;
       expect(slug).toBe("add-dark-mode-toggle");
       expect(title).toBe("Add Dark Mode Toggle");
-      expect(estimatedDurationSeconds).toBe(300);
+      // 300 raw * 1.5 buffer multiplier = 450
+      expect(estimatedDurationSeconds).toBe(450);
     });
 
     it("sanitises slug to lowercase hyphens", async () => {
@@ -348,7 +349,8 @@ describe("Executor", () => {
       const { slug, title, estimatedDurationSeconds } = await promise;
       expect(slug).toBe("task");
       expect(title).toBe("");
-      expect(estimatedDurationSeconds).toBe(600);
+      // Fallback (no AI response) uses 600 base * 1.5 multiplier = 900
+      expect(estimatedDurationSeconds).toBe(900);
     });
 
     it("returns fallback on spawn error", async () => {
@@ -363,7 +365,8 @@ describe("Executor", () => {
       const { slug, title, estimatedDurationSeconds } = await executor.generateTaskMetadata("Some task", "meta-5");
       expect(slug).toBe("task");
       expect(title).toBe("");
-      expect(estimatedDurationSeconds).toBe(600);
+      // Fallback (spawn error) uses 600 base * 1.5 multiplier = 900
+      expect(estimatedDurationSeconds).toBe(900);
     });
 
     it("truncates slug to 40 chars and title to 60 chars", async () => {
@@ -380,7 +383,8 @@ describe("Executor", () => {
       const { slug, title, estimatedDurationSeconds } = await promise;
       expect(slug.length).toBeLessThanOrEqual(40);
       expect(title).toHaveLength(60);
-      expect(estimatedDurationSeconds).toBe(1800);
+      // 1800 raw * 1.5 buffer multiplier = 2700
+      expect(estimatedDurationSeconds).toBe(2700);
     });
 
     it("falls back to 600s when estimated seconds line is missing", async () => {
@@ -396,10 +400,11 @@ describe("Executor", () => {
       proc.emit("close", 0);
 
       const { estimatedDurationSeconds } = await promise;
-      expect(estimatedDurationSeconds).toBe(600);
+      // Fallback base 600 * 1.5 multiplier = 900
+      expect(estimatedDurationSeconds).toBe(900);
     });
 
-    it("falls back to 600s when estimated seconds line is not a valid number", async () => {
+    it("falls back to 900s when estimated seconds line is not a valid number", async () => {
       const proc = makeFakeProc(0, false);
       spawnMock.mockReturnValue(proc);
 
@@ -411,10 +416,11 @@ describe("Executor", () => {
       proc.emit("close", 0);
 
       const { estimatedDurationSeconds } = await promise;
-      expect(estimatedDurationSeconds).toBe(600);
+      // Fallback base 600 * 1.5 multiplier = 900
+      expect(estimatedDurationSeconds).toBe(900);
     });
 
-    it("falls back to 600s when estimated seconds is zero or negative", async () => {
+    it("falls back to 900s when estimated seconds is zero or negative", async () => {
       const proc = makeFakeProc(0, false);
       spawnMock.mockReturnValue(proc);
 
@@ -426,7 +432,24 @@ describe("Executor", () => {
       proc.emit("close", 0);
 
       const { estimatedDurationSeconds } = await promise;
-      expect(estimatedDurationSeconds).toBe(600);
+      // Fallback base 600 * 1.5 multiplier = 900
+      expect(estimatedDurationSeconds).toBe(900);
+    });
+
+    it("applies 1.5x buffer multiplier to AI-provided estimate", async () => {
+      const proc = makeFakeProc(0, false);
+      spawnMock.mockReturnValue(proc);
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      const promise = executor.generateTaskMetadata("Some task", "meta-10");
+
+      await new Promise((r) => setTimeout(r, 5));
+      // AI returns 1200 seconds, multiplier should give 1800
+      proc.stdout!.emit("data", Buffer.from("some-task\nSome Task\n1200"));
+      proc.emit("close", 0);
+
+      const { estimatedDurationSeconds } = await promise;
+      expect(estimatedDurationSeconds).toBe(1800); // 1200 * 1.5
     });
   });
 

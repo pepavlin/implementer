@@ -128,7 +128,7 @@ export class Executor {
       `Reply with EXACTLY three lines and nothing else:
 Line 1: a git branch slug (lowercase, hyphens only, max 40 chars)
 Line 2: a short human-readable title (max 60 chars)
-Line 3: estimated seconds for an AI coding assistant to complete this task (integer only, consider: trivial=60, simple=180, medium=600, complex=1800, very complex=3600)
+Line 3: estimated seconds for an AI coding assistant to complete this task (integer only, be conservative — real tasks involve debugging, tool iterations, and unexpected issues; consider: trivial=60, simple=180, medium=600, complex=1800, very complex=3600; round up generously)
 
 Task: ${prompt}`,
       "--output-format",
@@ -165,12 +165,12 @@ Task: ${prompt}`,
 
       proc.on("error", (err) => {
         console.error(`[meta] Docker spawn error: ${err.message}`);
-        resolve({ slug: "task", title: "", estimatedDurationSeconds: 600 });
+        resolve({ slug: "task", title: "", estimatedDurationSeconds: 900 });
       });
       proc.on("close", (code) => {
         if (code !== 0) {
           console.error(`[meta] Docker exited with code ${code}. Output:\n${output}`);
-          resolve({ slug: "task", title: "", estimatedDurationSeconds: 600 });
+          resolve({ slug: "task", title: "", estimatedDurationSeconds: 900 });
           return;
         }
         const lines = output.trim().split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
@@ -182,7 +182,11 @@ Task: ${prompt}`,
           .slice(0, 40) || "task";
         const title = (lines[1] ?? "").trim().slice(0, 60);
         const rawSeconds = parseInt((lines[2] ?? "").trim(), 10);
-        const estimatedDurationSeconds = Number.isFinite(rawSeconds) && rawSeconds > 0 ? rawSeconds : 600;
+        // Apply a buffer multiplier so estimates account for real-world overhead
+        // (debugging, tool retries, unexpected complexity). The AI tends to underestimate.
+        const ESTIMATION_BUFFER_MULTIPLIER = 1.5;
+        const baseSeconds = Number.isFinite(rawSeconds) && rawSeconds > 0 ? rawSeconds : 600;
+        const estimatedDurationSeconds = Math.round(baseSeconds * ESTIMATION_BUFFER_MULTIPLIER);
         resolve({ slug, title, estimatedDurationSeconds });
       });
     });
