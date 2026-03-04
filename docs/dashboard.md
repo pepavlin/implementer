@@ -21,6 +21,8 @@ The dashboard uses a cookie-based session (`impl_dash`). On successful login, a 
 - **Open PR row highlighting** — tasks with open or draft pull requests have a distinct left-border highlight in the task table
 - **Task duration progress bar** — running tasks with an AI-estimated duration show a linear progress bar in the task list row, indicating what percentage of the estimated time has elapsed. The bar turns amber when the task exceeds the estimate.
 - **Cross-device read/unread tracking** — completed tasks show a pulsing "new" indicator until they are opened. This read status is persisted on the server (as `readAt` on the task) and shared across all browsers and devices, not stored in localStorage.
+- **Task priority** — tasks can be assigned a priority level (`low`, `normal`, `high`, `critical`). Higher-priority tasks are dequeued before lower-priority ones. Within the same priority level, FIFO order is preserved. Priority is set when creating a task (via the New Task modal or API) and can be changed at any time from the task detail modal.
+- **Global queue pause/resume** — a "Pause" button in the header stops new tasks from being started. Tasks already running continue to completion. A prominent yellow banner is shown when the queue is paused. Clicking "Resume" (or the banner button) re-enables dequeuing and immediately starts any eligible queued tasks.
 
 ## Light/Dark Mode
 

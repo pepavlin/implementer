@@ -43,8 +43,9 @@ export function buildDashboardData(
     config: Config
 ): {
     tasks: object[];
-    stats: Record<string, number>;
+    stats: Record<string, number | boolean>;
     projects: Record<string, Record<string, number>>;
+    paused: boolean;
 } {
     const allTasks = taskManager.listAllTasks();
     // Sort: queued/starting tasks first (newest startedAt at top), then all others (newest startedAt at top)
@@ -84,7 +85,8 @@ export function buildDashboardData(
                 url: pr.url,
                 state: pr.state ?? null
             })) ?? null,
-        readAt: task.data.readAt ?? null
+        readAt: task.data.readAt ?? null,
+        priority: task.data.priority ?? "normal"
     }));
 
     // Count PRs separately by state
@@ -150,7 +152,7 @@ export function buildDashboardData(
         }
     }
 
-    return { tasks, stats, projects };
+    return { tasks, stats, projects, paused: taskManager.isPaused() };
 }
 
 // ── HTML templates ────────────────────────────────────────────────────────────
@@ -601,6 +603,21 @@ export function dashboardHtml(hasPassword: boolean): string {
     .btn-cont:hover:not(:disabled){background:var(--btn-cont-h)}
     .btn-pri{background:#3b82f6;color:#fff}
     .btn-pri:hover:not(:disabled){background:#2563eb}
+    /* ── Pause button ─────────────────────────────────────────────────────── */
+    .btn-pause{padding:6px 14px;background:var(--b-q-bg);color:var(--b-q-fg);border:1px solid rgba(245,158,11,.3);border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;transition:background .15s,color .15s,border-color .15s}
+    .btn-pause:hover{background:var(--btn-ret-h);color:#fff}
+    .btn-pause.paused{background:#14532d;color:#22c55e;border-color:rgba(34,197,94,.3)}
+    .btn-pause.paused:hover{background:#166534}
+    .paused-banner{background:var(--b-q-bg);border:1px solid rgba(245,158,11,.35);color:var(--b-q-fg);padding:8px 16px;border-radius:8px;font-size:.8rem;font-weight:600;margin-bottom:16px;display:none;align-items:center;gap:8px}
+    .paused-banner.visible{display:flex}
+    /* ── Priority badges ─────────────────────────────────────────────────── */
+    .prio{display:inline-block;padding:1px 6px;border-radius:4px;font-size:.62rem;font-weight:700;letter-spacing:.03em;white-space:nowrap;vertical-align:middle;margin-left:4px}
+    .prio-low{background:var(--tag-bg);color:var(--text4)}
+    .prio-normal{display:none}
+    .prio-high{background:#1e3a5f;color:#60a5fa}
+    .prio-critical{background:#450a0a;color:#f87171}
+    [data-theme=light] .prio-high{background:#dbeafe;color:#1d4ed8}
+    [data-theme=light] .prio-critical{background:#fee2e2;color:#b91c1c}
     .form-g{margin-bottom:16px}
     .form-lbl{display:block;font-size:.78rem;color:var(--text2);margin-bottom:6px}
     .form-inp{width:100%;background:var(--bg-inp);border:1px solid var(--border2);border-radius:6px;padding:10px 14px;color:var(--text);font-size:.875rem;outline:none;font-family:inherit}
@@ -702,6 +719,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     <h1>Implementer Dashboard</h1>
     <div class="header-actions" style="display:flex;align-items:center;gap:12px">
       <button class="btn-new" onclick="openNewTask()">+ New Task</button>
+      <button class="btn-pause" id="pause-btn" onclick="togglePause()" title="Pause/resume queue processing">&#x23F8; Pause</button>
       <button class="theme-btn" id="voice-btn" onclick="toggleVoiceMode()" title="Voice Mode">&#x1F3A4;</button>
       <button class="theme-btn" id="fullscreen-btn" onclick="toggleFullscreen()" title="Enter fullscreen">&#x26F6;</button>
       <button class="theme-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">&#x2600;</button>
@@ -718,6 +736,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     <div class="stat" id="stat-open-prs" style="cursor:pointer" onclick="setFilter('open-prs')" title="Click to filter tasks with open PRs"><div class="stat-label" style="color:var(--b-pr-open-fg)" id="spr-lbl">Open PRs</div><div class="stat-val" style="color:var(--b-pr-open-fg)" id="spr">\u2014</div></div>
     <div class="stat" id="stat-draft-prs" style="cursor:pointer" onclick="setFilter('draft-prs')" title="Click to filter tasks with draft PRs"><div class="stat-label" style="color:var(--b-pr-draft-fg)" id="sdpr-lbl">Draft PRs</div><div class="stat-val" style="color:var(--b-pr-draft-fg)" id="sdpr">\u2014</div></div>
   </div>
+  <div id="paused-banner" class="paused-banner">&#x23F8; Queue is paused &mdash; running tasks will finish but no new tasks will start. <button class="btn" style="background:#22c55e;color:#fff;padding:4px 12px;font-size:.75rem;margin-left:auto" onclick="togglePause()">Resume Queue</button></div>
   <div class="section-title">Projects</div>
   <div class="projects" id="projects"><div class="muted" style="font-size:.82rem">Loading\u2026</div></div>
   <div class="proj-hint" id="proj-hint">Click a project card to filter tasks by project.</div>
@@ -863,6 +882,15 @@ export function dashboardHtml(hasPassword: boolean): string {
           <textarea id="nt-prompt" class="form-inp" rows="8" placeholder="Describe what to implement\u2026"></textarea>
         </div>
         <div class="form-g">
+          <label class="form-lbl" for="nt-priority">Priority</label>
+          <select id="nt-priority" class="form-inp">
+            <option value="low">Low</option>
+            <option value="normal" selected>Normal</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
+          </select>
+        </div>
+        <div class="form-g">
           <label class="form-lbl" for="nt-continue">Continue Task ID <span class="muted" style="font-weight:400">(optional)</span></label>
           <input type="text" id="nt-continue" class="form-inp" placeholder="TVchAThD">
         </div>
@@ -876,7 +904,7 @@ export function dashboardHtml(hasPassword: boolean): string {
   </div>
 
   <script>
-    var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null,retryCountdownInterval=null,selectedTaskIds=new Set(),selectionMode=false,lastSelectedIdx=-1,voiceMode=false,voiceTarget=null,voiceRecognition=null,voiceTranscript='',voiceSilenceTimer=null,voiceSilenceStart=0,voiceLang='cs-CZ',voiceSubmittedLog=[];
+    var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null,retryCountdownInterval=null,selectedTaskIds=new Set(),selectionMode=false,lastSelectedIdx=-1,voiceMode=false,voiceTarget=null,voiceRecognition=null,voiceTranscript='',voiceSilenceTimer=null,voiceSilenceStart=0,voiceLang='cs-CZ',voiceSubmittedLog=[],queuePaused=false;
     function hasOpenPrs(t){return!!(t.pullRequests&&t.pullRequests.some(function(pr){return pr.state==='open'||pr.state==='draft'||!pr.state;}));}
     function hasDraftPrs(t){return!!(t.pullRequests&&t.pullRequests.some(function(pr){return pr.state==='draft';}));}
     function prStateBadge(state){
@@ -896,6 +924,21 @@ export function dashboardHtml(hasPassword: boolean): string {
     }
     function stopRetryCountdown(){if(retryCountdownInterval){clearInterval(retryCountdownInterval);retryCountdownInterval=null;}}
     function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+    function priorityBadge(p){var labels={low:'Low',high:'High',critical:'Critical'};if(!p||p==='normal')return '';return '<span class="prio prio-'+esc(p)+'">'+esc(labels[p]||p)+'</span>';}
+    function updatePauseUI(paused){
+      queuePaused=paused;
+      var btn=document.getElementById('pause-btn');
+      var banner=document.getElementById('paused-banner');
+      if(btn){btn.textContent=paused?'\u25B6\uFE0F Resume':'\u23F8 Pause';btn.className=paused?'btn-pause paused':'btn-pause';btn.title=paused?'Resume queue processing':'Pause queue processing';}
+      if(banner){banner.className=paused?'paused-banner visible':'paused-banner';}
+    }
+    function togglePause(){
+      var endpoint=queuePaused?'/dashboard/api/resume':'/dashboard/api/pause';
+      fetch(endpoint,{method:'POST'})
+        .then(function(r){return r.json();})
+        .then(function(d){updatePauseUI(d.paused);})
+        .catch(function(){alert('Failed to '+(queuePaused?'resume':'pause')+' queue');});
+    }
     var _spin='<span class="badge-spin"></span>';
     var _dots='<span class="badge-dots"><span></span><span></span><span></span></span>';
     var _clock='<svg class="badge-clock-ico" viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5" xmlns="http://www.w3.org/2000/svg"><circle cx="6" cy="6" r="5"/><path stroke-linecap="round" d="M6 3v3l2 1"/></svg>';
@@ -991,12 +1034,13 @@ export function dashboardHtml(hasPassword: boolean): string {
           var estLabel=dur(t.estimatedDurationSeconds);
           progressHtml='<div class="task-progress"><div class="progress-track"><div class="'+fillClass+'" style="width:'+pct+'%"></div></div><span class="progress-pct">'+pct+'%</span><span class="progress-est">/ '+estLabel+'</span></div>';
         }
+        var prioBadge=priorityBadge(t.priority);
         return '<tr class="'+rowClass+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'" data-idx="'+idx+'">'
           +'<td class="td-cb" onclick="event.stopPropagation()"><input type="checkbox" class="task-cb" data-id="'+esc(t.taskId)+'" '+(isChecked?'checked':'')+' onchange="toggleTaskSelection(this.dataset.id,this.checked)" onclick="event.stopPropagation()"></td>'
           +'<td>'+badge(t.status,t.completedAt,!t.readAt)+'</td>'
           +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
           +'<td class="td-taskid"><span class="mono">'+esc(t.taskId)+'</span></td>'
-          +'<td>'+(t.title?'<div class="ttitle">'+esc(t.title)+'</div>':'')+'<div class="tprompt">'+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+'</div>'+progressHtml+'</td>'
+          +'<td>'+(t.title?'<div class="ttitle">'+esc(t.title)+prioBadge+'</div>':'')+'<div class="tprompt">'+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+(t.title?'':prioBadge)+'</div>'+progressHtml+'</td>'
           +'<td class="td-dur mono">'+dur(t.durationSeconds)+'</td>'
           +'<td class="td-started mono">'+fmtDate(t.startedAt)+'</td>'
           +'<td class="td-pr">'+(prBtns||'')+'</td>'
@@ -1155,6 +1199,14 @@ export function dashboardHtml(hasPassword: boolean): string {
           var html='';
           html+='<div class="det-row"><div class="det-lbl">Prompt</div><div class="det-pre">'+esc(t.prompt)+'</div></div>';
           if(t.title)html+='<div class="det-row"><div class="det-lbl">Title</div><div class="det-val">'+esc(t.title)+'</div></div>';
+          html+='<div class="det-row"><div class="det-lbl">Priority</div><div class="det-val" style="display:flex;align-items:center;gap:8px">'
+            +priorityBadge(t.priority||'normal')
+            +'<select id="task-priority-sel" class="form-inp" style="max-width:160px;padding:4px 8px;font-size:.8rem" onchange="changeTaskPriority(this.value)">'
+            +'<option value="low"'+(t.priority==='low'?' selected':'')+'>Low</option>'
+            +'<option value="normal"'+(!t.priority||t.priority==='normal'?' selected':'')+'>Normal</option>'
+            +'<option value="high"'+(t.priority==='high'?' selected':'')+'>High</option>'
+            +'<option value="critical"'+(t.priority==='critical'?' selected':'')+'>Critical</option>'
+            +'</select></div></div>';
           html+='<div class="det-row"><div class="det-lbl">Project</div><div class="det-val">'+esc(t.projectId)+'</div></div>';
           if(t.branch)html+='<div class="det-row"><div class="det-lbl">Branch</div><div class="det-val mono">'+esc(t.branch)+'</div></div>';
           if(t.chainId)html+='<div class="det-row"><div class="det-lbl">Chain</div><div class="det-val mono">'+esc(t.chainId)+'</div></div>';
@@ -1241,6 +1293,13 @@ export function dashboardHtml(hasPassword: boolean): string {
         })
         .catch(function(){btn.disabled=false;alert('Failed to retry task');});
     }
+    function changeTaskPriority(priority){
+      if(!currentTaskId)return;
+      fetch('/dashboard/api/task/'+encodeURIComponent(currentTaskId)+'/priority',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({priority:priority})})
+        .then(function(r){return r.json();})
+        .then(function(d){if(d.error)alert('Error: '+d.error);})
+        .catch(function(){alert('Failed to update priority');});
+    }
     function retryNow(){
       if(!currentTaskId)return;
       var btn=document.getElementById('task-retry-now');
@@ -1312,10 +1371,11 @@ export function dashboardHtml(hasPassword: boolean): string {
       var projectId=document.getElementById('nt-proj').value;
       var prompt=document.getElementById('nt-prompt').value.trim();
       var contId=document.getElementById('nt-continue').value.trim();
+      var priority=document.getElementById('nt-priority').value||'normal';
       var errEl=document.getElementById('nt-err');
       errEl.style.display='none';
       if(!projectId||!prompt){errEl.textContent='Project and prompt are required.';errEl.style.display='block';return;}
-      var body={projectId:projectId,prompt:prompt};
+      var body={projectId:projectId,prompt:prompt,priority:priority};
       if(contId)body.continueTaskId=contId;
       var btn=document.getElementById('nt-submit');
       btn.disabled=true;
@@ -1384,6 +1444,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         .then(function(d){
           lastData=d;
           updateStats(d.stats);
+          updatePauseUI(!!d.paused);
           renderProjects(d.projects);
           renderTasks(d.tasks);
           document.getElementById('dot').className='dot';
@@ -1397,6 +1458,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       var d=JSON.parse(e.data);
       lastData=d;
       updateStats(d.stats);
+      updatePauseUI(!!d.paused);
       renderProjects(d.projects);
       renderTasks(d.tasks);
       document.getElementById('dot').className='dot';
@@ -1541,6 +1603,7 @@ export function registerDashboardRoutes(
             parentTaskId: task.data.parentTaskId ?? null,
             chainId: task.data.chainId ?? null,
             status: task.data.status,
+            priority: task.data.priority ?? "normal",
             attempt: task.data.attempt,
             maxAttempts:
                 task.project.data.errorRetry?.maxAttempts ?? null,
@@ -1800,6 +1863,92 @@ export function registerDashboardRoutes(
                 r.reason instanceof Error ? r.reason.message : "Unknown error"
             );
         res.json({ succeeded, failed: errors.length, errors });
+    });
+
+    // PATCH /dashboard/api/task/:taskId — edit a queued task's prompt
+    app.patch("/dashboard/api/task/:taskId", (req, res) => {
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        const task = taskManager
+            .listAllTasks()
+            .find((t) => t.id === req.params.taskId);
+        if (!task) {
+            res.status(404).json({ error: "Task not found" });
+            return;
+        }
+        const { prompt } = req.body ?? {};
+        if (typeof prompt !== "string" || !prompt.trim()) {
+            res.status(400).json({ error: "Prompt is required" });
+            return;
+        }
+        if (task.data.status !== "queued" && task.data.status !== "starting") {
+            res.status(409).json({ error: "Only queued or starting tasks can be edited" });
+            return;
+        }
+        task.data.prompt = prompt.trim();
+        task.tickUpdate();
+        res.json({ taskId: task.id, prompt: task.data.prompt });
+    });
+
+    // POST /dashboard/api/task/:taskId/priority — update task priority
+    app.post("/dashboard/api/task/:taskId/priority", (req, res) => {
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        const { priority } = req.body ?? {};
+        const validPriorities = ["low", "normal", "high", "critical"];
+        if (typeof priority !== "string" || !validPriorities.includes(priority)) {
+            res.status(400).json({ error: "priority must be one of: low, normal, high, critical" });
+            return;
+        }
+        try {
+            const task = taskManager.setTaskPriority(
+                req.params.taskId as TaskId,
+                priority as import("./types.js").TaskPriority
+            );
+            res.json({ taskId: task.id, priority: task.data.priority });
+        } catch {
+            res.status(404).json({ error: "Task not found" });
+        }
+    });
+
+    // POST /dashboard/api/pause — pause queue processing
+    app.post("/dashboard/api/pause", (req, res) => {
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        taskManager.pause();
+        res.json({ paused: true });
+    });
+
+    // POST /dashboard/api/resume — resume queue processing
+    app.post("/dashboard/api/resume", (req, res) => {
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        taskManager.resume();
+        res.json({ paused: false });
     });
 
     app.post("/dashboard/api/tasks/bulk-retry", async (req, res) => {

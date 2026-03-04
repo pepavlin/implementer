@@ -4,6 +4,16 @@ export type ProjectId = string & { readonly _brand: unique symbol };
 export type TaskId = string & { readonly _brand: unique symbol };
 export type ChainId = string & { readonly _brand: unique symbol };
 
+export type TaskPriority = "low" | "normal" | "high" | "critical";
+
+/** Numeric weights for priority levels — higher = more important. */
+export const PRIORITY_WEIGHT: Record<TaskPriority, number> = {
+    low: 0,
+    normal: 1,
+    high: 2,
+    critical: 3
+};
+
 export type TaskStatus =
     | "queued"
     | "starting"
@@ -54,6 +64,8 @@ export interface TaskData {
     estimatedDurationSeconds?: number;
     /** ISO timestamp of when a dashboard user first opened/viewed this completed task. Shared across devices. */
     readAt?: string;
+    /** Priority level for queue ordering. Higher priority tasks are dequeued first. Defaults to "normal". */
+    priority: TaskPriority;
 }
 
 export interface PersistedTask extends TaskData {
@@ -65,4 +77,6 @@ export interface TaskCreateRequest {
     /** Task ID to continue from (inherits branch and chain). */
     continueTaskId?: TaskId;
     callbackUrl?: string;
+    /** Priority for queue ordering. Defaults to "normal" if omitted. */
+    priority?: TaskPriority;
 }

@@ -87,6 +87,11 @@ function makeMockTaskManager(overrides: Partial<TaskManager> = {}) {
         getOutput: vi.fn().mockReturnValue(""),
         retryTask: vi.fn(),
         cancelTask: vi.fn(),
+        isPaused: vi.fn().mockReturnValue(false),
+        pause: vi.fn(),
+        resume: vi.fn(),
+        setTaskPriority: vi.fn(),
+        markTaskRead: vi.fn(),
         ...overrides
     } as unknown as TaskManager;
 }
@@ -965,7 +970,8 @@ describe("server", () => {
             expect(res.body.prompt).toBe("Add a button");
             expect(res.body.status).toBe("completed");
             expect(res.body.projectId).toBe(PROJECT_ID);
-            expect(res.body.branch.name).toBe("impl/test-branch-abc123");
+            // dashboard API returns branch name as a string (not the full Branch object)
+            expect(res.body.branch).toBe("impl/test-branch-abc123");
             expect(res.body.durationSeconds).toBe(300);
             expect(res.body.pullRequests).toEqual([
                 { repo: "my-repo", url: "https://github.com/org/repo/pull/42" }

@@ -111,6 +111,11 @@ export class Task {
      * Increments attempt counter and pushes to front of queue.
      */
     retry(): void {
+        // Queued tasks are already scheduled to run — retrying them makes no sense
+        // and can cause them to run twice or in unexpected order.
+        if (this.data.status === "queued") {
+            throw new TaskActiveError(this.data.status);
+        }
         // Allow manual retry of "retrying" tasks (skips the delay)
         if (this.isActive() && this.data.status !== "retrying") {
             throw new TaskActiveError(this.data.status);
