@@ -48,12 +48,20 @@ export function buildDashboardData(
     paused: boolean;
 } {
     const allTasks = taskManager.listAllTasks();
-    // Sort: queued/starting tasks first (newest startedAt at top), then all others (newest startedAt at top)
-    const queuedStatuses = new Set(["queued", "starting"]);
+    // Sort: active tasks first by status priority, then by newest startedAt within each group
+    // Status priority: running (0) > starting (1) > queued (2) > retrying (3) > rest (4)
+    const statusPriority: Record<string, number> = {
+        running: 0,
+        starting: 1,
+        queued: 2,
+        retrying: 3
+    };
+    const getStatusPriority = (status: string): number =>
+        statusPriority[status] ?? 4;
     const sortedTasks = allTasks.slice().sort((a, b) => {
-        const aQueued = queuedStatuses.has(a.data.status);
-        const bQueued = queuedStatuses.has(b.data.status);
-        if (aQueued !== bQueued) return aQueued ? -1 : 1;
+        const aPriority = getStatusPriority(a.data.status);
+        const bPriority = getStatusPriority(b.data.status);
+        if (aPriority !== bPriority) return aPriority - bPriority;
         return (
             new Date(b.data.startedAt).getTime() -
             new Date(a.data.startedAt).getTime()
