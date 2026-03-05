@@ -1306,3 +1306,112 @@ describe("buildDashboardData - readAt field", () => {
         expect(res.text).toContain("badge(t.status,t.completedAt,!t.readAt)");
     });
 });
+
+describe("dashboard - Prioritize button", () => {
+    it("renders task-prioritize button in modal footer", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain('id="task-prioritize"');
+        expect(res.text).toContain("toggleTaskPriority()");
+    });
+
+    it("includes toggleTaskPriority JS function", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("function toggleTaskPriority");
+    });
+
+    it("does not include changeTaskPriority function (replaced by toggle)", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).not.toContain("function changeTaskPriority");
+    });
+
+    it("does not include priority select dropdown (task-priority-sel)", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).not.toContain("task-priority-sel");
+    });
+
+    it("includes tr-prioritized CSS class and prio-star styles", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("tr-prioritized");
+        expect(res.text).toContain("prio-star");
+    });
+
+    it("renders prio-star in task row for high priority task", async () => {
+        const task = makeTask({ status: "queued" });
+        task.data.priority = "high";
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("tr-prioritized");
+    });
+
+    it("POST /dashboard/api/task/:taskId/priority with high sets priority", async () => {
+        const task = makeTask({ status: "queued" });
+        task.data.priority = "normal";
+        const setTaskPriority = vi.fn().mockReturnValue({ id: "abc12345", data: { priority: "high" } });
+        const app = createApp([task], undefined, { setTaskPriority });
+
+        const res = await request(app)
+            .post("/dashboard/api/task/abc12345/priority")
+            .set("Cookie", AUTH_COOKIE)
+            .send({ priority: "high" });
+
+        expect(res.status).toBe(200);
+        expect(res.body.priority).toBe("high");
+        expect(setTaskPriority).toHaveBeenCalledWith("abc12345", "high");
+    });
+
+    it("POST /dashboard/api/task/:taskId/priority with normal resets priority", async () => {
+        const task = makeTask({ status: "queued" });
+        task.data.priority = "high";
+        const setTaskPriority = vi.fn().mockReturnValue({ id: "abc12345", data: { priority: "normal" } });
+        const app = createApp([task], undefined, { setTaskPriority });
+
+        const res = await request(app)
+            .post("/dashboard/api/task/abc12345/priority")
+            .set("Cookie", AUTH_COOKIE)
+            .send({ priority: "normal" });
+
+        expect(res.status).toBe(200);
+        expect(res.body.priority).toBe("normal");
+        expect(setTaskPriority).toHaveBeenCalledWith("abc12345", "normal");
+    });
+});
