@@ -117,6 +117,7 @@ export function buildDashboardData(
         interrupted: allTasks.filter(
             (t) => t.data.status === "interrupted"
         ).length,
+        cancelled: allTasks.filter((t) => t.data.status === "cancelled").length,
         total: allTasks.length,
         openPrs: openPrCount,
         draftPrs: draftPrCount
@@ -494,9 +495,14 @@ export function dashboardHtml(hasPassword: boolean): string {
     .tr-cancelled td:first-child{border-left:3px solid #47556940}
     .ps .badge-clock-ico{width:8px;height:8px;margin-right:2px}
     .stats{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
-    .stat{background:var(--bg-card);border-radius:8px;padding:14px 20px;min-width:110px;transition:box-shadow .3s}
+    .stat{background:var(--bg-card);border-radius:8px;padding:14px 20px;min-width:110px;transition:box-shadow .3s,border-color .2s,background .2s;border:2px solid transparent}
+    .stat-filter{cursor:pointer;user-select:none}
+    .stat-filter:hover{border-color:var(--border2)}
+    .stat-filter.stat-selected{border-color:#3b82f6!important;background:var(--proj-sel)!important;box-shadow:0 0 0 1px rgba(59,130,246,.15),0 0 12px rgba(59,130,246,.1)!important}
     .stat.stat-has-running{box-shadow:0 0 0 1px rgba(34,197,94,.3),0 0 12px rgba(34,197,94,.1)}
     .stat.stat-has-queued{box-shadow:0 0 0 1px rgba(245,158,11,.3),0 0 12px rgba(245,158,11,.08)}
+    .stat.stat-has-open-prs{box-shadow:0 0 0 1px rgba(74,222,128,.3),0 0 12px rgba(74,222,128,.1)}
+    .stat.stat-has-draft-prs{box-shadow:0 0 0 1px rgba(148,163,184,.3),0 0 10px rgba(148,163,184,.07)}
     .stat-label{font-size:.68rem;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;display:flex;align-items:center;gap:5px}
     .stat-active-dot{width:6px;height:6px;border-radius:50%;background:currentColor;animation:pulse 1.5s ease-in-out infinite;flex-shrink:0}
     .stat-val{font-size:1.8rem;font-weight:700;margin-top:2px}
@@ -522,9 +528,8 @@ export function dashboardHtml(hasPassword: boolean): string {
     .ps-failed{background:var(--b-fail-bg);color:var(--b-fail-fg)}
     .proj-hint{font-size:.72rem;color:var(--text4);margin-bottom:18px;min-height:16px}
     .muted{color:var(--text4)}
-    .filters{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
-    .filter-btn{padding:4px 12px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--text2);font-size:.75rem;cursor:pointer}
-    .filter-btn.active{background:#3b82f6;border-color:#3b82f6;color:#fff}
+    .btn-clear-filters{padding:4px 10px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--text3);font-size:.72rem;cursor:pointer;transition:background .15s,color .15s}
+    .btn-clear-filters:hover{background:rgba(239,68,68,.1);color:#ef4444;border-color:#ef444480}
     table{width:100%;border-collapse:collapse;background:var(--bg-card);border-radius:12px;overflow:hidden}
     th{background:var(--bg-head);color:var(--text3);font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;padding:10px 16px;text-align:left;font-weight:600}
     td{padding:12px 16px;border-top:1px solid var(--border);font-size:.85rem;vertical-align:middle}
@@ -733,14 +738,17 @@ export function dashboardHtml(hasPassword: boolean): string {
       ${signOutLink}
     </div>
   </header>
-  <div class="stats">
-    <div class="stat" id="stat-running"><div class="stat-label cr" id="sr-lbl">Running</div><div class="stat-val cr" id="sr">\u2014</div></div>
-    <div class="stat" id="stat-queued"><div class="stat-label cq" id="sq-lbl">Queued</div><div class="stat-val cq" id="sq">\u2014</div></div>
-    <div class="stat"><div class="stat-label">Retrying</div><div class="stat-val ct" id="st">\u2014</div></div>
-    <div class="stat"><div class="stat-label">Completed</div><div class="stat-val cc" id="sc">\u2014</div></div>
-    <div class="stat"><div class="stat-label">Failed</div><div class="stat-val cf" id="sf">\u2014</div></div>
-    <div class="stat" id="stat-open-prs" style="cursor:pointer" onclick="setFilter('open-prs')" title="Click to filter tasks with open PRs"><div class="stat-label" style="color:var(--b-pr-open-fg)" id="spr-lbl">Open PRs</div><div class="stat-val" style="color:var(--b-pr-open-fg)" id="spr">\u2014</div></div>
-    <div class="stat" id="stat-draft-prs" style="cursor:pointer" onclick="setFilter('draft-prs')" title="Click to filter tasks with draft PRs"><div class="stat-label" style="color:var(--b-pr-draft-fg)" id="sdpr-lbl">Draft PRs</div><div class="stat-val" style="color:var(--b-pr-draft-fg)" id="sdpr">\u2014</div></div>
+  <div class="stats" id="stat-bar">
+    <div class="stat stat-filter" id="stat-running" data-filter="running" onclick="toggleStatus('running')" title="Click to filter by Running tasks"><div class="stat-label cr" id="sr-lbl">Running</div><div class="stat-val cr" id="sr">\u2014</div></div>
+    <div class="stat stat-filter" id="stat-starting" data-filter="starting" onclick="toggleStatus('starting')" title="Click to filter by Starting tasks"><div class="stat-label" style="color:var(--b-start-fg)" id="sst-lbl">Starting</div><div class="stat-val" style="color:var(--b-start-fg)" id="sst">\u2014</div></div>
+    <div class="stat stat-filter" id="stat-queued" data-filter="queued" onclick="toggleStatus('queued')" title="Click to filter by Queued tasks"><div class="stat-label cq" id="sq-lbl">Queued</div><div class="stat-val cq" id="sq">\u2014</div></div>
+    <div class="stat stat-filter" id="stat-retrying" data-filter="retrying" onclick="toggleStatus('retrying')" title="Click to filter by Retrying tasks"><div class="stat-label ct">Retrying</div><div class="stat-val ct" id="st">\u2014</div></div>
+    <div class="stat stat-filter" id="stat-completed" data-filter="completed" onclick="toggleStatus('completed')" title="Click to filter by Completed tasks"><div class="stat-label">Completed</div><div class="stat-val cc" id="sc">\u2014</div></div>
+    <div class="stat stat-filter" id="stat-failed" data-filter="failed" onclick="toggleStatus('failed')" title="Click to filter by Failed tasks"><div class="stat-label">Failed</div><div class="stat-val cf" id="sf">\u2014</div></div>
+    <div class="stat stat-filter" id="stat-interrupted" data-filter="interrupted" onclick="toggleStatus('interrupted')" title="Click to filter by Interrupted tasks"><div class="stat-label" style="color:var(--b-fail-fg)">Interrupted</div><div class="stat-val" style="color:var(--b-fail-fg)" id="sint">\u2014</div></div>
+    <div class="stat stat-filter" id="stat-cancelled" data-filter="cancelled" onclick="toggleStatus('cancelled')" title="Click to filter by Cancelled tasks"><div class="stat-label" style="color:var(--text3)">Cancelled</div><div class="stat-val" style="color:var(--text3)" id="scan">\u2014</div></div>
+    <div class="stat stat-filter" id="stat-open-prs" data-filter="open-prs" onclick="toggleStatus('open-prs')" title="Click to filter tasks with open PRs"><div class="stat-label" style="color:var(--b-pr-open-fg)" id="spr-lbl">Open PRs</div><div class="stat-val" style="color:var(--b-pr-open-fg)" id="spr">\u2014</div></div>
+    <div class="stat stat-filter" id="stat-draft-prs" data-filter="draft-prs" onclick="toggleStatus('draft-prs')" title="Click to filter tasks with draft PRs"><div class="stat-label" style="color:var(--b-pr-draft-fg)" id="sdpr-lbl">Draft PRs</div><div class="stat-val" style="color:var(--b-pr-draft-fg)" id="sdpr">\u2014</div></div>
   </div>
   <div id="paused-banner" class="paused-banner">&#x23F8; Queue is paused &mdash; running tasks will finish but no new tasks will start. <button class="btn" style="background:#22c55e;color:#fff;padding:4px 12px;font-size:.75rem;margin-left:auto" onclick="togglePause()">Resume Queue</button></div>
   <div class="section-title">Projects</div>
@@ -748,21 +756,9 @@ export function dashboardHtml(hasPassword: boolean): string {
   <div class="proj-hint" id="proj-hint">Click a project card to filter tasks by project.</div>
   <div class="tasks-header" style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
     <div class="section-title" style="flex:1;margin-bottom:0">Tasks</div>
+    <button id="btn-clear-filters" class="btn-clear-filters" onclick="clearStatusFilters()" style="display:none" title="Clear all status filters">&#x2715; Clear filters</button>
     <span class="sel-hint" id="sel-hint" style="display:none">Shift+click for range</span>
     <button id="btn-sel-mode" class="btn-sel-mode" onclick="toggleSelectionMode()" title="Enable multi-select mode (tip: hold Shift and click any row to select)">Select</button>
-  </div>
-  <div class="filters" id="filters">
-    <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">All</button>
-    <button class="filter-btn" data-filter="running" onclick="setFilter('running')">Running</button>
-    <button class="filter-btn" data-filter="starting" onclick="setFilter('starting')">Starting</button>
-    <button class="filter-btn" data-filter="queued" onclick="setFilter('queued')">Queued</button>
-    <button class="filter-btn" data-filter="retrying" onclick="setFilter('retrying')">Retrying</button>
-    <button class="filter-btn" data-filter="completed" onclick="setFilter('completed')">Completed</button>
-    <button class="filter-btn" data-filter="failed" onclick="setFilter('failed')">Failed</button>
-    <button class="filter-btn" data-filter="interrupted" onclick="setFilter('interrupted')">Interrupted</button>
-    <button class="filter-btn" data-filter="cancelled" onclick="setFilter('cancelled')">Cancelled</button>
-    <button class="filter-btn" data-filter="open-prs" onclick="setFilter('open-prs')">Open PRs</button>
-    <button class="filter-btn" data-filter="draft-prs" onclick="setFilter('draft-prs')">Draft PRs</button>
   </div>
   <div class="table-wrap">
   <table id="task-table">
@@ -911,7 +907,7 @@ export function dashboardHtml(hasPassword: boolean): string {
   </div>
 
   <script>
-    var currentFilter='all',selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null,retryCountdownInterval=null,selectedTaskIds=new Set(),selectionMode=false,lastSelectedIdx=-1,voiceMode=false,voiceTarget=null,voiceRecognition=null,voiceTranscript='',voiceSilenceTimer=null,voiceSilenceStart=0,voiceLang='cs-CZ',voiceSubmittedLog=[],queuePaused=false;
+    var selectedStatuses=new Set(),selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null,retryCountdownInterval=null,selectedTaskIds=new Set(),selectionMode=false,lastSelectedIdx=-1,voiceMode=false,voiceTarget=null,voiceRecognition=null,voiceTranscript='',voiceSilenceTimer=null,voiceSilenceStart=0,voiceLang='cs-CZ',voiceSubmittedLog=[],queuePaused=false;
     function hasOpenPrs(t){return!!(t.pullRequests&&t.pullRequests.some(function(pr){return pr.state==='open'||pr.state==='draft'||!pr.state;}));}
     function hasDraftPrs(t){return!!(t.pullRequests&&t.pullRequests.some(function(pr){return pr.state==='draft';}));}
     function prStateBadge(state){
@@ -953,9 +949,23 @@ export function dashboardHtml(hasPassword: boolean): string {
     function badge(s,completedAt,isUnread){var isNew=s==='completed'&&!!isUnread;var cc=isNew?'b-completed-new':(isRecentCompleted(completedAt)?'b-completed':'b-completed-old');var newDot=isNew?'<span class="badge-new-dot"></span>':'';var m={running:['b-running',_spin+'Running'],starting:['b-starting',_spin+'Starting'],queued:['b-queued','Queued'+_dots],retrying:['b-retrying',_clock+'Scheduled Retry'],completed:[cc,'&#10003; Completed'+newDot],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','&#215; Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
     function dur(s){if(s==null)return '—';if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
     function fmtDate(d){try{return new Date(d).toLocaleString();}catch(e){return String(d);}}
-    function setFilter(f){
-      currentFilter=f;
-      document.querySelectorAll('.filter-btn').forEach(function(b){b.classList.toggle('active',b.dataset.filter===f);});
+    function taskMatchesFilters(t){
+      var statusOk=selectedStatuses.size===0||selectedStatuses.has(t.status)||(selectedStatuses.has('open-prs')&&taskHasOpenPr(t))||(selectedStatuses.has('draft-prs')&&taskHasDraftPr(t));
+      var projOk=selectedProjects.size===0||selectedProjects.has(t.projectId);
+      return statusOk&&projOk;
+    }
+    function toggleStatus(status){
+      if(selectedStatuses.has(status)){selectedStatuses.delete(status);}else{selectedStatuses.add(status);}
+      document.querySelectorAll('.stat-filter').forEach(function(card){card.classList.toggle('stat-selected',selectedStatuses.has(card.dataset.filter));});
+      var clearBtn=document.getElementById('btn-clear-filters');
+      if(clearBtn)clearBtn.style.display=selectedStatuses.size>0?'':'none';
+      if(lastData)renderTasks(lastData.tasks);
+    }
+    function clearStatusFilters(){
+      selectedStatuses.clear();
+      document.querySelectorAll('.stat-filter').forEach(function(card){card.classList.remove('stat-selected');});
+      var clearBtn=document.getElementById('btn-clear-filters');
+      if(clearBtn)clearBtn.style.display='none';
       if(lastData)renderTasks(lastData.tasks);
     }
     function taskHasOpenPr(t){return hasOpenPrs(t);}
@@ -1002,17 +1012,13 @@ export function dashboardHtml(hasPassword: boolean): string {
       });
     }
     function renderTasks(tasks){
-      var filtered=tasks.filter(function(t){
-        var statusOk=currentFilter==='all'||t.status===currentFilter||(currentFilter==='open-prs'&&taskHasOpenPr(t))||(currentFilter==='draft-prs'&&taskHasDraftPr(t));
-        var projOk=selectedProjects.size===0||selectedProjects.has(t.projectId);
-        return statusOk&&projOk;
-      });
+      var filtered=tasks.filter(taskMatchesFilters);
       var tb=document.getElementById('tb');
       if(!filtered.length){
         var msg='No tasks';
-        if(currentFilter==='open-prs')msg='No tasks with open pull requests';
-        else if(currentFilter==='draft-prs')msg='No tasks with draft pull requests';
-        else if(currentFilter!=='all')msg+=' with status \u201c'+currentFilter+'\u201d';
+        if(selectedStatuses.size===1&&selectedStatuses.has('open-prs'))msg='No tasks with open pull requests';
+        else if(selectedStatuses.size===1&&selectedStatuses.has('draft-prs'))msg='No tasks with draft pull requests';
+        else if(selectedStatuses.size>0)msg+=' matching selected status filter'+(selectedStatuses.size>1?'s':'');
         if(selectedProjects.size>0)msg+=' in selected project'+(selectedProjects.size>1?'s':'');
         tb.innerHTML='<tr><td colspan="8" class="empty">'+msg+'</td></tr>';return;
       }
@@ -1133,11 +1139,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     function toggleSelectionMode(){if(selectionMode)exitSelectionMode();else enterSelectionMode();}
     function rangeSelect(toIdx){
       if(!lastData)return;
-      var filtered=lastData.tasks.filter(function(t){
-        var statusOk=currentFilter==='all'||t.status===currentFilter||(currentFilter==='open-prs'&&taskHasOpenPr(t))||(currentFilter==='draft-prs'&&taskHasDraftPr(t));
-        var projOk=selectedProjects.size===0||selectedProjects.has(t.projectId);
-        return statusOk&&projOk;
-      });
+      var filtered=lastData.tasks.filter(taskMatchesFilters);
       var from=Math.min(lastSelectedIdx,toIdx),to=Math.max(lastSelectedIdx,toIdx);
       for(var i=from;i<=to&&i<filtered.length;i++)selectedTaskIds.add(filtered[i].taskId);
       lastSelectedIdx=toIdx;
@@ -1423,38 +1425,30 @@ export function dashboardHtml(hasPassword: boolean): string {
     });
     function updateStats(stats){
       document.getElementById('sr').textContent=stats.running;
+      document.getElementById('sst').textContent=stats.starting||0;
       document.getElementById('sq').textContent=stats.queued;
       document.getElementById('st').textContent=stats.retrying;
       document.getElementById('sc').textContent=stats.completed;
       document.getElementById('sf').textContent=stats.failed;
+      document.getElementById('sint').textContent=stats.interrupted||0;
+      document.getElementById('scan').textContent=stats.cancelled||0;
       var openPrs=stats.openPrs||0;
       var draftPrs=stats.draftPrs||0;
       document.getElementById('spr').textContent=openPrs;
       document.getElementById('sdpr').textContent=draftPrs;
-      // Highlight Open PRs card when there are open PRs
+      // Highlight Open PRs card when there are open PRs (using classList to preserve stat-selected)
       var sprCard=document.getElementById('stat-open-prs');
-      if(sprCard)sprCard.style.boxShadow=openPrs>0?'0 0 0 1px rgba(74,222,128,.3),0 0 12px rgba(74,222,128,.1)':'';
-      // Highlight Draft PRs card when there are draft PRs
+      if(sprCard)sprCard.classList.toggle('stat-has-open-prs',openPrs>0);
       var sdprCard=document.getElementById('stat-draft-prs');
-      if(sdprCard)sdprCard.style.boxShadow=draftPrs>0?'0 0 0 1px rgba(148,163,184,.3),0 0 10px rgba(148,163,184,.07)':'';
+      if(sdprCard)sdprCard.classList.toggle('stat-has-draft-prs',draftPrs>0);
       var srCard=document.getElementById('stat-running');
       var sqCard=document.getElementById('stat-queued');
       var srLbl=document.getElementById('sr-lbl');
       var sqLbl=document.getElementById('sq-lbl');
-      if(stats.running>0){
-        srCard.className='stat stat-has-running';
-        srLbl.innerHTML='<span class="stat-active-dot cr"></span>Running';
-      }else{
-        srCard.className='stat';
-        srLbl.innerHTML='Running';
-      }
-      if(stats.queued>0){
-        sqCard.className='stat stat-has-queued';
-        sqLbl.innerHTML='<span class="stat-active-dot cq"></span>Queued';
-      }else{
-        sqCard.className='stat';
-        sqLbl.innerHTML='Queued';
-      }
+      if(srCard){srCard.classList.toggle('stat-has-running',stats.running>0);}
+      if(srLbl){srLbl.innerHTML=stats.running>0?'<span class="stat-active-dot cr"></span>Running':'Running';}
+      if(sqCard){sqCard.classList.toggle('stat-has-queued',stats.queued>0);}
+      if(sqLbl){sqLbl.innerHTML=stats.queued>0?'<span class="stat-active-dot cq"></span>Queued':'Queued';}
     }
     function refreshData(){
       var btn=document.getElementById('refresh-btn');
