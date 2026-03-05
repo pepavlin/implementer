@@ -601,8 +601,10 @@ export function dashboardHtml(hasPassword: boolean): string {
     .btn-edit:hover:not(:disabled){background:var(--btn-edit-h)}
     .btn-cont{background:var(--btn-cont-bg);color:var(--btn-cont-fg)}
     .btn-cont:hover:not(:disabled){background:var(--btn-cont-h)}
-    .btn-pri{background:#3b82f6;color:#fff}
-    .btn-pri:hover:not(:disabled){background:#2563eb}
+    .btn-pri{background:#f59e0b;color:#000;border:none}
+    .btn-pri:hover:not(:disabled){background:#d97706}
+    .btn-depri{background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.4)}
+    .btn-depri:hover:not(:disabled){background:rgba(245,158,11,.25)}
     /* ── Pause button ─────────────────────────────────────────────────────── */
     .btn-pause{padding:6px 14px;background:var(--b-q-bg);color:var(--b-q-fg);border:1px solid rgba(245,158,11,.3);border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;transition:background .15s,color .15s,border-color .15s}
     .btn-pause:hover{background:var(--btn-ret-h);color:#fff}
@@ -618,6 +620,10 @@ export function dashboardHtml(hasPassword: boolean): string {
     .prio-critical{background:#450a0a;color:#f87171}
     [data-theme=light] .prio-high{background:#dbeafe;color:#1d4ed8}
     [data-theme=light] .prio-critical{background:#fee2e2;color:#b91c1c}
+    /* ── Prioritized task row highlight ─────────────────────────────────── */
+    tr.tr-prioritized{box-shadow:inset 3px 0 0 #f59e0b}
+    tr.tr-prioritized td:first-child{border-left:3px solid #f59e0b}
+    .prio-star{display:inline-block;color:#f59e0b;font-size:.8rem;margin-right:2px;vertical-align:middle;line-height:1}
     .form-g{margin-bottom:16px}
     .form-lbl{display:block;font-size:.78rem;color:var(--text2);margin-bottom:6px}
     .form-inp{width:100%;background:var(--bg-inp);border:1px solid var(--border2);border-radius:6px;padding:10px 14px;color:var(--text);font-size:.875rem;outline:none;font-family:inherit}
@@ -810,6 +816,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       <div class="modal-bd" id="task-bd"><div class="muted" style="text-align:center;padding:32px">Loading\u2026</div></div>
       <div class="modal-ft">
         <button class="btn btn-sec" onclick="closeTask()">Close</button>
+        <button class="btn btn-pri" id="task-prioritize" onclick="toggleTaskPriority()" style="display:none">&#x2605; Prioritize</button>
         <button class="btn btn-edit" id="task-edit" onclick="openEditTask()" style="display:none">Edit Task</button>
         <button class="btn btn-cancel" id="task-cancel" onclick="cancelTask()" style="display:none">Cancel Task</button>
         <button class="btn btn-ret" id="task-retry" onclick="retryTask()" style="display:none">Retry Task</button>
@@ -1016,6 +1023,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         if(t.status==='completed'&&!t.readAt)rowClass+=' tr-completed-new';
         var activePrs=t.pullRequests?t.pullRequests.filter(function(pr){return pr.state==='open'||pr.state==='draft';}):[];
         if(activePrs.length>0)rowClass+=' open-pr-row';
+        if(t.priority==='high'||t.priority==='critical')rowClass+=' tr-prioritized';
         var prBtns='';
         if(activePrs.length){
           prBtns=activePrs.map(function(pr){
@@ -1035,12 +1043,13 @@ export function dashboardHtml(hasPassword: boolean): string {
           progressHtml='<div class="task-progress"><div class="progress-track"><div class="'+fillClass+'" style="width:'+pct+'%"></div></div><span class="progress-pct">'+pct+'%</span><span class="progress-est">/ '+estLabel+'</span></div>';
         }
         var prioBadge=priorityBadge(t.priority);
+        var prioStar=(t.priority==='high'||t.priority==='critical')?'<span class="prio-star" title="Prioritized">\u2605</span>':'';
         return '<tr class="'+rowClass+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'" data-idx="'+idx+'">'
           +'<td class="td-cb" onclick="event.stopPropagation()"><input type="checkbox" class="task-cb" data-id="'+esc(t.taskId)+'" '+(isChecked?'checked':'')+' onchange="toggleTaskSelection(this.dataset.id,this.checked)" onclick="event.stopPropagation()"></td>'
           +'<td>'+badge(t.status,t.completedAt,!t.readAt)+'</td>'
           +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
           +'<td class="td-taskid"><span class="mono">'+esc(t.taskId)+'</span></td>'
-          +'<td>'+(t.title?'<div class="ttitle">'+esc(t.title)+prioBadge+'</div>':'')+'<div class="tprompt">'+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+(t.title?'':prioBadge)+'</div>'+progressHtml+'</td>'
+          +'<td>'+(t.title?'<div class="ttitle">'+prioStar+esc(t.title)+prioBadge+'</div>':'')+'<div class="tprompt">'+prioStar+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+(t.title?'':prioBadge)+'</div>'+progressHtml+'</td>'
           +'<td class="td-dur mono">'+dur(t.durationSeconds)+'</td>'
           +'<td class="td-started mono">'+fmtDate(t.startedAt)+'</td>'
           +'<td class="td-pr">'+(prBtns||'')+'</td>'
@@ -1170,6 +1179,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       document.getElementById('task-cancel').style.display='none';
       document.getElementById('task-edit').style.display='none';
       document.getElementById('task-continue').style.display='none';
+      document.getElementById('task-prioritize').style.display='none';
       document.getElementById('task-overlay').style.display='flex';
       fetch('/dashboard/api/task/'+encodeURIComponent(taskId))
         .then(function(r){return r.json();})
@@ -1182,6 +1192,11 @@ export function dashboardHtml(hasPassword: boolean): string {
           document.getElementById('task-cancel').style.display=active.includes(t.status)?'':'none';
           document.getElementById('task-edit').style.display=(t.status==='queued'||t.status==='starting')?'':'none';
           document.getElementById('task-continue').style.display=(t.status==='completed')?'':'none';
+          var priBtn=document.getElementById('task-prioritize');
+          var isPrioritized=t.priority==='high'||t.priority==='critical';
+          priBtn.style.display='';
+          priBtn.className='btn '+(isPrioritized?'btn-depri':'btn-pri');
+          priBtn.innerHTML=isPrioritized?'&#x2605; Prioritized':'&#x2605; Prioritize';
           var prsHtml='None';
           if(t.pullRequests&&t.pullRequests.length){
             prsHtml=t.pullRequests.map(function(pr){
@@ -1199,14 +1214,8 @@ export function dashboardHtml(hasPassword: boolean): string {
           var html='';
           html+='<div class="det-row"><div class="det-lbl">Prompt</div><div class="det-pre">'+esc(t.prompt)+'</div></div>';
           if(t.title)html+='<div class="det-row"><div class="det-lbl">Title</div><div class="det-val">'+esc(t.title)+'</div></div>';
-          html+='<div class="det-row"><div class="det-lbl">Priority</div><div class="det-val" style="display:flex;align-items:center;gap:8px">'
-            +priorityBadge(t.priority||'normal')
-            +'<select id="task-priority-sel" class="form-inp" style="max-width:160px;padding:4px 8px;font-size:.8rem" onchange="changeTaskPriority(this.value)">'
-            +'<option value="low"'+(t.priority==='low'?' selected':'')+'>Low</option>'
-            +'<option value="normal"'+(!t.priority||t.priority==='normal'?' selected':'')+'>Normal</option>'
-            +'<option value="high"'+(t.priority==='high'?' selected':'')+'>High</option>'
-            +'<option value="critical"'+(t.priority==='critical'?' selected':'')+'>Critical</option>'
-            +'</select></div></div>';
+          var prioLabel=(t.priority==='normal'||!t.priority)?'<span class="muted" style="font-size:.82rem">Normal</span>':priorityBadge(t.priority);
+          html+='<div class="det-row"><div class="det-lbl">Priority</div><div class="det-val">'+prioLabel+'</div></div>';
           html+='<div class="det-row"><div class="det-lbl">Project</div><div class="det-val">'+esc(t.projectId)+'</div></div>';
           if(t.branch)html+='<div class="det-row"><div class="det-lbl">Branch</div><div class="det-val mono">'+esc(t.branch)+'</div></div>';
           if(t.chainId)html+='<div class="det-row"><div class="det-lbl">Chain</div><div class="det-val mono">'+esc(t.chainId)+'</div></div>';
@@ -1293,12 +1302,25 @@ export function dashboardHtml(hasPassword: boolean): string {
         })
         .catch(function(){btn.disabled=false;alert('Failed to retry task');});
     }
-    function changeTaskPriority(priority){
-      if(!currentTaskId)return;
-      fetch('/dashboard/api/task/'+encodeURIComponent(currentTaskId)+'/priority',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({priority:priority})})
+    function toggleTaskPriority(){
+      if(!currentTaskId||!currentTaskData)return;
+      var isPrioritized=currentTaskData.priority==='high'||currentTaskData.priority==='critical';
+      var newPriority=isPrioritized?'normal':'high';
+      var btn=document.getElementById('task-prioritize');
+      btn.disabled=true;
+      fetch('/dashboard/api/task/'+encodeURIComponent(currentTaskId)+'/priority',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({priority:newPriority})})
         .then(function(r){return r.json();})
-        .then(function(d){if(d.error)alert('Error: '+d.error);})
-        .catch(function(){alert('Failed to update priority');});
+        .then(function(d){
+          btn.disabled=false;
+          if(d.error){alert('Error: '+d.error);return;}
+          currentTaskData.priority=newPriority;
+          var nowPrioritized=newPriority==='high';
+          btn.className='btn '+(nowPrioritized?'btn-depri':'btn-pri');
+          btn.innerHTML=nowPrioritized?'&#x2605; Prioritized':'&#x2605; Prioritize';
+          // Refresh detail body to update priority badge
+          openTask(currentTaskId,currentTaskData.projectId);
+        })
+        .catch(function(){btn.disabled=false;alert('Failed to update priority');});
     }
     function retryNow(){
       if(!currentTaskId)return;
