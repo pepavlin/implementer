@@ -67,6 +67,11 @@ function makeConfig(): Partial<Config> {
 function makeTaskManager(tasks: any[], overrides: Partial<TaskManager> = {}): Partial<TaskManager> {
     return {
         listAllTasks: vi.fn(() => tasks),
+        isPaused: vi.fn().mockReturnValue(false),
+        pause: vi.fn(),
+        resume: vi.fn(),
+        setTaskPriority: vi.fn(),
+        markTaskRead: vi.fn(),
         ...overrides,
     };
 }

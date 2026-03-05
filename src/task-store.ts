@@ -40,6 +40,8 @@ export class TaskStore {
         const raw = readFileSync(join(this.dir, file), "utf-8");
         const task = JSON.parse(raw) as PersistedTask;
         if (task.taskId && (typeof task.workspaceId === "number" || task.workspaceId === null || task.workspaceId === undefined) && task.projectId) {
+          // Backward compatibility: tasks persisted before priority existed default to "normal"
+          if (!task.priority) task.priority = "normal";
           tasks.push(task);
         }
       } catch (err) {

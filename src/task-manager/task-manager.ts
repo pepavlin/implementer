@@ -6,6 +6,7 @@ import type {
     TaskCreateRequest,
     TaskId
 } from "../types.js";
+import { PRIORITY_WEIGHT } from "../types.js";
 import { GitManager } from "../git-manager.js";
 import { TaskStore } from "../task-store.js";
 import { Config } from "../config/config.js";
@@ -26,6 +27,10 @@ export class TaskManager {
     tasks: Map<TaskId, Task> = new Map();
     /** FIFO queue of taskIds waiting to run. */
     queue: TaskId[] = [];
+
+    private _paused: boolean = false;
+    /** Suppresses dequeueAvailableTasks() during bulk initialization to prevent partial-queue starts. */
+    private _initializing: boolean = false;
 
     private prPoller: PrPoller;
 
@@ -52,13 +57,16 @@ export class TaskManager {
             project.initialize()
         );
 
-        // Load all persisted tasks
+        // Load all persisted tasks while suppressing mid-loop dequeue so that
+        // all tasks are in the queue before priority sorting happens.
+        this._initializing = true;
         const persisted = this.store.loadAll();
         for (const pt of persisted) {
             const task = new Task(pt, this);
             this.tasks.set(pt.taskId, task);
             task.initialize();
         }
+        this._initializing = false;
         console.log(
             `[task-manager] Loaded ${persisted.length} persisted task(s) from disk`
         );
@@ -70,7 +78,34 @@ export class TaskManager {
         this.prPoller.start();
     }
 
+    /** Returns true when the queue is globally paused (no new tasks will be started). */
+    isPaused(): boolean {
+        return this._paused;
+    }
+
+    /**
+     * Pause queue processing. Tasks already running continue to completion,
+     * but no new tasks will be dequeued until resume() is called.
+     */
+    pause(): void {
+        this._paused = true;
+        console.log("[task-manager] Queue paused — running tasks continue but no new tasks will start");
+    }
+
+    /**
+     * Resume queue processing. Immediately triggers dequeueAvailableTasks
+     * so queued tasks start as soon as capacity allows.
+     */
+    resume(): void {
+        this._paused = false;
+        console.log("[task-manager] Queue resumed");
+        this.dequeueAvailableTasks();
+    }
+
     dequeueAvailableTasks(): void {
+        // Skip during bulk initialization — a single call is made at the end of init().
+        if (this._initializing) return;
+
         // Promote retrying tasks whose nextRetryAt has passed back into the queue
         const now = Date.now();
         for (const task of Array.from(this.tasks.values()).sort(
@@ -92,8 +127,23 @@ export class TaskManager {
             }
         }
 
+        // When paused, do not start any new tasks
+        if (this._paused) return;
+
+        // Sort queued tasks by priority (descending) then by queue position / startedAt (FIFO)
+        const sortedQueue = [...this.queue].sort((aId, bId) => {
+            const a = this.tasks.get(aId);
+            const b = this.tasks.get(bId);
+            if (!a || !b) return 0;
+            const aPriority = PRIORITY_WEIGHT[a.data.priority ?? "normal"] ?? 1;
+            const bPriority = PRIORITY_WEIGHT[b.data.priority ?? "normal"] ?? 1;
+            if (bPriority !== aPriority) return bPriority - aPriority; // Higher priority first
+            // Same priority — respect original queue order (FIFO via startedAt)
+            return new Date(a.data.startedAt).getTime() - new Date(b.data.startedAt).getTime();
+        });
+
         // Start queued tasks that have capacity
-        for (const taskId of [...this.queue]) {
+        for (const taskId of sortedQueue) {
             const task = this.tasks.get(taskId);
             if (!task) continue;
             if (!task.canBeStarted()) continue;
@@ -247,7 +297,8 @@ export class TaskManager {
                 completedAt: null,
                 output: "",
                 callbackUrl: request.callbackUrl,
-                attempt: 1
+                attempt: 1,
+                priority: request.priority ?? "normal"
             },
             this
         );
@@ -274,6 +325,18 @@ export class TaskManager {
     async cancelTask(projectId: ProjectId, taskId: TaskId): Promise<Task> {
         const task = this.requireTask(projectId, taskId);
         await task.cancel();
+        return task;
+    }
+
+    /**
+     * Update the priority of a queued task.
+     * Has no effect on tasks that are already running/completed.
+     */
+    setTaskPriority(taskId: TaskId, priority: import("../types.js").TaskPriority): Task {
+        const task = this.tasks.get(taskId);
+        if (!task) throw new Error(`Task not found: ${taskId}`);
+        task.data.priority = priority;
+        task.tickUpdate();
         return task;
     }
 

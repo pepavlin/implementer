@@ -17,10 +17,13 @@ import type { ChainId, ProjectId, TaskId, TaskStatus } from "./types.js";
 import { Config } from "./config/config.js";
 import type { Task } from "./task-manager/task.js";
 
+const TASK_PRIORITIES = ["low", "normal", "high", "critical"] as const;
+
 const TaskCreateSchema = z.object({
     prompt: z.string().min(1),
     continueTaskId: z.string().min(1).optional(),
-    callbackUrl: z.string().url().optional()
+    callbackUrl: z.string().url().optional(),
+    priority: z.enum(TASK_PRIORITIES).optional()
 });
 
 const TASK_STATUSES = [
@@ -104,7 +107,8 @@ export function createServer(
             }
             const task = taskManager.createNewTask(getProjectId(res), {
                 ...parsed.data,
-                continueTaskId: parsed.data.continueTaskId as TaskId | undefined
+                continueTaskId: parsed.data.continueTaskId as TaskId | undefined,
+                priority: parsed.data.priority
             });
             res.status(200).json({
                 taskId: task.id,
