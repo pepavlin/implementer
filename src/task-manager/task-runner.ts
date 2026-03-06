@@ -3,8 +3,10 @@ import { Executor } from "../executor.js";
 import { chownRecursive } from "../workspace-pool.js";
 import {
     buildSystemInstructions,
+    buildChainHistory,
     buildPrBody,
-    getDockerMount
+    getDockerMount,
+    type ChainTaskInfo
 } from "./utils.js";
 import { Task } from "./task.js";
 
@@ -81,9 +83,27 @@ export async function executeTask(task: Task): Promise<void> {
             manager.config.server.workspaceDir
         );
         console.log(`[${task.id}] Running Claude Code in workspace...`);
+
+        // Build chain history context from ancestor tasks
+        const ancestors: ChainTaskInfo[] = [];
+        let walkId = task.data.parentTaskId;
+        while (walkId) {
+            const ancestor = manager.tasks.get(walkId);
+            if (!ancestor) break;
+            ancestors.push({
+                prompt: ancestor.data.prompt,
+                status: ancestor.data.status,
+                output: ancestor.data.output
+            });
+            walkId = ancestor.data.parentTaskId;
+        }
+        ancestors.reverse();
+        const chainContext = buildChainHistory(ancestors);
+
         const systemPrompt = project.data.claudeCode.systemPrompt ?? "";
         const fullPrompt =
             task.data.prompt +
+            chainContext +
             buildSystemInstructions(repos, project.data.protectedPaths) +
             (systemPrompt ? `\n\n${systemPrompt}` : "");
         const result = await executor.run(

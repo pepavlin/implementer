@@ -1,4 +1,38 @@
-import type { TaskId } from "../types.js";
+import type { TaskId, TaskStatus } from "../types.js";
+import { extractLastAssistantMessage } from "../executor.js";
+
+const SUMMARY_MAX_LENGTH = 500;
+
+export interface ChainTaskInfo {
+    prompt: string;
+    status: TaskStatus;
+    output: string;
+}
+
+/**
+ * Build a textual summary of previous tasks in a chain so Claude
+ * has context about what was already implemented on this branch.
+ * Returns empty string when there is no chain history.
+ */
+export function buildChainHistory(ancestors: ChainTaskInfo[]): string {
+    if (ancestors.length === 0) return "";
+
+    const sections = ancestors.map((t, i) => {
+        const title = t.prompt.split("\n")[0].slice(0, 120);
+        const summary = extractLastAssistantMessage(t.output).trim().slice(0, SUMMARY_MAX_LENGTH);
+        return `### Task ${i + 1}: "${title}"
+Status: ${t.status}
+${summary ? `Summary: ${summary}` : "No summary available."}`;
+    });
+
+    return `
+
+## Previous tasks in this chain (oldest first):
+
+${sections.join("\n\n")}
+
+---`;
+}
 
 export function buildSystemInstructions(
     repos: { name: string }[],
