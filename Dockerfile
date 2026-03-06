@@ -12,7 +12,9 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     rm -rf /var/lib/apt/lists/*
 
 # Trust all directories for git (workspace files are chowned to sandbox user uid)
-RUN git config --global --add safe.directory '*'
+RUN git config --global --add safe.directory '*' && \
+    git config --global user.name "Implementer" && \
+    git config --global user.email "implementer@noreply"
 
 # Git credential helper that reads GITHUB_TOKEN env var at runtime
 RUN printf '#!/bin/sh\necho username=x-access-token\necho "password=$GITHUB_TOKEN"\n' \
