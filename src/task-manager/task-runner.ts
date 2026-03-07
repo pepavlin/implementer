@@ -58,7 +58,7 @@ export async function executeTask(task: Task): Promise<void> {
             );
         }
 
-        // Step 2: Push branch to remote immediately so it's visible in GitHub
+        // Step 2: Push branch to remote immediately so it's visible in GitHub.
         console.log(`[${task.id}] Pushing branch to remote...`);
         await manager.gitManager.pushBranchAll(
             workspace.dir,

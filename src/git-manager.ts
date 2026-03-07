@@ -102,10 +102,13 @@ export class GitManager {
         }
       }
 
+      // Ensure local branch is up-to-date with remote.
+      // Use reset --hard instead of pull to handle diverged histories
+      // (e.g. remote was force-pushed by a previous retry/timeout).
       try {
-        await git(["pull", "origin", branchName], repoDir, githubToken);
+        await git(["reset", "--hard", `origin/${branchName}`], repoDir);
       } catch {
-        // Branch may not exist on remote yet
+        // Branch may not exist on remote yet — local-only is fine
       }
     }
   }
