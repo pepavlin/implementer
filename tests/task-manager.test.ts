@@ -2021,4 +2021,214 @@ describe("TaskManager - handlePipelineFailure", () => {
     expect(fixTask).toBeDefined();
     expect(fixTask?.data.pipelineRetryAttempt).toBe(1);
   });
+
+  it("creates fix task from chain tip when failing task has descendants (post-manual-retry)", async () => {
+    // Reproduces the bug where a user manually retries a parent task after it had a
+    // pipeline failure (which created a child fix task). When the parent again fails
+    // its pipeline, handlePipelineFailure must use the chain tip (the child) as the
+    // continueTaskId, not the parent — otherwise createNewTask throws BadRequestError.
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
+    const { Executor } = await import("../src/executor.js");
+    const config = makePipelineConfig(2); // retryCount=2 so multiple retries are allowed
+    const store = new TaskStore(TMP);
+
+    // Task A: the original task (parent), now back in waiting_for_pipeline after a manual retry
+    store.save(makePersistedTask({
+      taskId: "pipe-parent",
+      status: "waiting_for_pipeline",
+      completedAt: null,
+      pipelineRetryAttempt: 0,
+      branch: "impl/fix-something-pipe-parent",
+      chainId: "chain-pipe",
+      pullRequests: [{ url: "https://github.com/test/repo/pull/10", state: "open", createdAt: new Date().toISOString() }],
+    }));
+
+    // Task B: a pipeline-fix child already created from a previous pipeline failure of A
+    store.save(makePersistedTask({
+      taskId: "pipe-child",
+      status: "failed",
+      completedAt: new Date().toISOString(),
+      pipelineRetryAttempt: 1,
+      branch: "impl/fix-something-pipe-parent",
+      chainId: "chain-pipe",
+      parentTaskId: "pipe-parent",
+      pullRequests: [{ url: "https://github.com/test/repo/pull/10", state: "open", createdAt: new Date().toISOString() }],
+    }));
+
+    const tm = new TaskManager(config);
+    vi.spyOn(Executor.prototype, "generateTaskMetadata").mockReturnValue(new Promise(() => {}));
+    const project = tm.config.projects[PROJECT_ID as any];
+    project.initialize();
+    vi.spyOn(project, "initialize").mockImplementation(() => {});
+    vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+    await tm.init();
+
+    const taskCountBefore = tm.listAllTasks().length;
+
+    // Pipeline fails again for the parent — handlePipelineFailure must NOT throw
+    // even though the parent is not the chain tip.
+    expect(() =>
+      tm.handlePipelineFailure("pipe-parent", "Pipeline check failed: ci")
+    ).not.toThrow();
+
+    // Parent should be marked failed
+    const parent = tm.getTask("pipe-parent" as any);
+    expect(parent?.data.status).toBe("failed");
+
+    // A new fix task should have been created (continuing from the chain tip = pipe-child)
+    expect(tm.listAllTasks().length).toBe(taskCountBefore + 1);
+    const fixTask = tm.listAllTasks().find(
+      (t) => t.id !== ("pipe-parent" as any) && t.id !== ("pipe-child" as any)
+    );
+    expect(fixTask).toBeDefined();
+    // The new fix task must inherit from pipe-child (chain tip), not pipe-parent
+    expect(fixTask?.data.parentTaskId).toBe("pipe-child");
+    expect(fixTask?.data.pipelineRetryAttempt).toBe(1); // currentAttempt(0) + 1
+  });
+});
+
+describe("TaskManager - waiting_for_pipeline chain blocking", () => {
+  beforeEach(() => {
+    rmSync(TMP, { recursive: true, force: true });
+    mkdirSync(TMP, { recursive: true });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it("isChainActive returns true when a chain member is waiting_for_pipeline", async () => {
+    // A task in waiting_for_pipeline still has an open PR on the branch and must
+    // block other tasks in the same chain from modifying it concurrently.
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
+    const { Task } = await import("../src/task-manager/task.js");
+    const config = makeConfig({ server: { workspaceDir: TMP, metaCpus: 0.4, sandboxCpus: 0.4, maxConcurrentTasks: 4 } });
+    const tm = new TaskManager(config);
+
+    const waitingTask = new Task(makePersistedTask({
+      taskId: "waiting-task",
+      status: "waiting_for_pipeline",
+      chainId: "chain-pipeline",
+      completedAt: null,
+    }) as any, tm);
+    tm.tasks.set("waiting-task" as any, waitingTask);
+
+    // isChainActive should return true — waiting_for_pipeline blocks the chain
+    expect(tm.isChainActive(PROJECT_ID as any, "chain-pipeline" as any)).toBe(true);
+    // Excluding the waiting task itself should return false
+    expect(tm.isChainActive(PROJECT_ID as any, "chain-pipeline" as any, "waiting-task" as any)).toBe(false);
+  });
+
+  it("queued task in same chain as waiting_for_pipeline task cannot be started", async () => {
+    // This prevents a manually-retried parent task from running while a child
+    // pipeline-fix task is still waiting for CI/CD results.
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
+    const { Executor } = await import("../src/executor.js");
+    const store = new TaskStore(TMP);
+    const config = makeConfig();
+
+    // Task A (parent): manually retried — now queued
+    store.save(makePersistedTask({
+      taskId: "chain-parent",
+      status: "queued",
+      completedAt: null,
+      branch: "impl/feature-chain-parent",
+      chainId: "chain-blk",
+      attempt: 2,
+    }));
+
+    // Task B (child): still waiting for its pipeline
+    store.save(makePersistedTask({
+      taskId: "chain-child",
+      status: "waiting_for_pipeline",
+      completedAt: null,
+      branch: "impl/feature-chain-parent",
+      chainId: "chain-blk",
+      parentTaskId: "chain-parent",
+      pullRequests: [{ url: "https://github.com/test/repo/pull/99", state: "open", createdAt: new Date().toISOString() }],
+    }));
+
+    const tm = new TaskManager(config);
+    vi.spyOn(Executor.prototype, "generateTaskMetadata").mockReturnValue(new Promise(() => {}));
+    const project = tm.config.projects[PROJECT_ID as any];
+    project.initialize();
+    vi.spyOn(project, "initialize").mockImplementation(() => {});
+    vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(true);
+
+    await tm.init();
+
+    // The parent (queued) must NOT be started while the child is waiting_for_pipeline
+    const parent = tm.getTask("chain-parent" as any);
+    expect(parent?.data.status).toBe("queued");
+
+    const child = tm.getTask("chain-child" as any);
+    expect(child?.data.status).toBe("waiting_for_pipeline");
+  });
+
+  it("retry() clears pipelineRetryAttempt, completedAt, and error", async () => {
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
+    const store = new TaskStore(TMP);
+    const config = makeConfig();
+
+    store.save(makePersistedTask({
+      taskId: "pipeline-retry-task",
+      status: "failed",
+      completedAt: "2025-01-01T10:00:00.000Z",
+      error: "Pipeline check failed: ci",
+      pipelineRetryAttempt: 1,
+      branch: "impl/fix-pipeline-retry-task",
+      attempt: 2,
+    }));
+
+    const tm = new TaskManager(config);
+    const project = tm.config.projects[PROJECT_ID as any];
+    project.initialize();
+    vi.spyOn(project, "initialize").mockImplementation(() => {});
+    vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+    await tm.init();
+
+    const result = tm.retryTask(PROJECT_ID as any, "pipeline-retry-task" as any);
+
+    // Manual retry must reset pipeline state for a clean slate
+    expect(result.data.pipelineRetryAttempt).toBeUndefined();
+    expect(result.data.completedAt).toBeNull();
+    expect(result.data.error).toBeUndefined();
+    expect(result.data.attempt).toBe(3);
+    expect(result.data.status).toBe("queued");
+  });
+
+  it("retry() on waiting_for_pipeline task clears pipeline state and re-queues", async () => {
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
+    const store = new TaskStore(TMP);
+    const config = makeConfig();
+
+    store.save(makePersistedTask({
+      taskId: "wfp-retry-task",
+      status: "waiting_for_pipeline",
+      completedAt: null,
+      pipelineRetryAttempt: 0,
+      branch: "impl/feature-wfp-retry-task",
+      attempt: 1,
+      pullRequests: [{ url: "https://github.com/test/repo/pull/5", state: "open", createdAt: new Date().toISOString() }],
+    }));
+
+    const tm = new TaskManager(config);
+    const project = tm.config.projects[PROJECT_ID as any];
+    project.initialize();
+    vi.spyOn(project, "initialize").mockImplementation(() => {});
+    vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+    await tm.init();
+
+    const result = tm.retryTask(PROJECT_ID as any, "wfp-retry-task" as any);
+
+    expect(result.data.status).toBe("queued");
+    expect(result.data.attempt).toBe(2);
+    expect(result.data.pipelineRetryAttempt).toBeUndefined();
+    // pullRequests are preserved — the PR still exists and is valid
+    expect(result.data.pullRequests).toHaveLength(1);
+  });
 });

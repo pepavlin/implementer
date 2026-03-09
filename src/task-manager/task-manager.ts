@@ -248,7 +248,11 @@ export class TaskManager {
      *
      * If handlePipelines.retryCount allows another attempt, a new continuation
      * task is automatically created to fix the failing code. Otherwise the task
-     * is marked as failed.
+     * is marked as completed (best-effort — PR was created, pipeline just failed).
+     *
+     * The continuation task continues from the CHAIN TIP (not necessarily the
+     * failing task itself), so that manual retries of earlier chain tasks don't
+     * cause a "not the chain tip" validation error when the pipeline fails again.
      */
     handlePipelineFailure(taskId: string, error: string): void {
         const task = this.tasks.get(taskId as TaskId);
@@ -260,6 +264,20 @@ export class TaskManager {
         const currentAttempt = task.data.pipelineRetryAttempt ?? 0;
 
         if (currentAttempt < retryCount) {
+            // Find the actual chain tip — if the user manually retried this task
+            // after children were already created, the tip may be a descendant.
+            const tipId = this.findChainTip(taskId as TaskId);
+            const tip = this.tasks.get(tipId);
+
+            if (!tip || !tip.branch) {
+                // Cannot create a continuation (tip has no branch). Complete instead.
+                console.warn(
+                    `[${taskId}] Pipeline failed but chain tip ${tipId} has no branch — marking as completed.`
+                );
+                task.completePipeline();
+                return;
+            }
+
             // Schedule an automatic pipeline-fix retry by creating a continuation task.
             const pipelinesInfo = handlePipelines?.pipelines?.length
                 ? `\n\nRequired passing pipelines: ${handlePipelines.pipelines.join(", ")}`
@@ -275,19 +293,23 @@ export class TaskManager {
                 pipelinesInfo;
 
             console.log(
-                `[${taskId}] Pipeline failed (attempt ${currentAttempt + 1}/${retryCount}) — scheduling automatic fix task.`
+                `[${taskId}] Pipeline failed (attempt ${currentAttempt + 1}/${retryCount}) — scheduling automatic fix task from chain tip ${tipId}.`
             );
 
-            // Mark the current task as failed (pipeline check failed)
+            // Mark the current task as failed (pipeline check failed).
+            // Do this AFTER validating we can create the continuation, so we
+            // never leave a task failed without a scheduled fix.
             task.failPipeline(error);
 
-            // Create a new continuation task to fix the code
+            // Create a new continuation task to fix the code, continuing from
+            // the chain tip (which may differ from taskId after a manual retry).
             const fixTask = this.createNewTask(task.data.projectId, {
                 prompt: fixPrompt,
-                continueTaskId: taskId as TaskId,
+                continueTaskId: tipId,
                 priority: task.data.priority
             });
-            // Track how many pipeline retries have been used
+            // Track how many pipeline retries have been used (based on the
+            // failing task's counter, not the tip's, to honour retryCount correctly).
             fixTask.data.pipelineRetryAttempt = currentAttempt + 1;
             fixTask.tickUpdate();
 
@@ -429,9 +451,13 @@ export class TaskManager {
     }
 
     /**
-     * Check if any OTHER task in the given chain is currently active.
+     * Check if any OTHER task in the given chain is currently blocking.
      * Excludes the calling task (by excludeTaskId) so a queued task
      * doesn't block itself from starting.
+     *
+     * Uses isChainBlocker() which includes "waiting_for_pipeline" in addition
+     * to "starting"/"running" — a task whose PR is being monitored by CI/CD
+     * still "owns" the branch and must not be interrupted by a sibling task.
      */
     isChainActive(
         projectId: ProjectId,
@@ -443,7 +469,7 @@ export class TaskManager {
                 task.data.projectId === projectId &&
                 task.data.chainId === chainId &&
                 task.id !== excludeTaskId &&
-                task.isActive()
+                task.isChainBlocker()
             ) {
                 return true;
             }
