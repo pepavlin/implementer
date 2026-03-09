@@ -123,11 +123,12 @@ describe("analyzePipelineChecks", () => {
         expect(analyzePipelineChecks(checks)).toEqual({ status: "passing" });
     });
 
-    it("returns passing for NEUTRAL and SKIPPED checks", () => {
+    it("returns passing for NEUTRAL, SKIPPED and CANCELLED checks", () => {
         const checks: GhCheckRun[] = [
             { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
             { name: "optional", state: "NEUTRAL", conclusion: "NEUTRAL" },
             { name: "skipped", state: "SKIPPED", conclusion: "SKIPPED" },
+            { name: "superseded", state: "CANCELLED", conclusion: "CANCELLED" },
         ];
         expect(analyzePipelineChecks(checks)).toEqual({ status: "passing" });
     });
@@ -168,12 +169,27 @@ describe("analyzePipelineChecks", () => {
         expect(result.status).toBe("failing");
     });
 
-    it("returns failing for CANCELLED state", () => {
+    it("returns passing for CANCELLED state (auto-cancelled by GitHub concurrency)", () => {
+        // GitHub auto-cancels jobs when a newer run supersedes the current one.
+        // This is not a code defect, so we treat it as passing (like SKIPPED).
         const checks: GhCheckRun[] = [
             { name: "ci", state: "CANCELLED", conclusion: "CANCELLED" },
         ];
         const result = analyzePipelineChecks(checks);
-        expect(result.status).toBe("failing");
+        expect(result.status).toBe("passing");
+    });
+
+    it("returns passing when state is PENDING but conclusion is CANCELLED (queued job in cancelled run)", () => {
+        // When a GitHub workflow run is auto-cancelled, jobs that were still
+        // QUEUED (never started) may have state="PENDING" from the QUEUED status
+        // but conclusion="CANCELLED" once the run is cancelled. We must use the
+        // conclusion in this case, not the stale PENDING state.
+        const checks: GhCheckRun[] = [
+            { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+            { name: "deploy", state: "PENDING", conclusion: "CANCELLED" },
+        ];
+        const result = analyzePipelineChecks(checks);
+        expect(result.status).toBe("passing");
     });
 
     it("returns pending when any check has empty state (in-progress)", () => {
@@ -676,6 +692,67 @@ describe("PrPoller", () => {
             expect(accessor.pipelineFailures[0].taskId).toBe("fail-task");
             expect(accessor.pipelineFailures[0].error).toContain("test");
             expect(accessor.pipelineCompleted).toHaveLength(0);
+        });
+
+        it("completes task when passing checks mix with CANCELLED (auto-cancelled by GitHub)", async () => {
+            // Reproduces: task stuck in waiting_for_pipeline when all important
+            // pipelines pass but one is auto-cancelled (e.g. by GitHub's concurrency
+            // group cancelling a superseded run).
+            const task = makeTask({
+                taskId: "cancelled-check-task",
+                status: "waiting_for_pipeline",
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/35", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const mixedChecks: GhCheckRun[] = [
+                { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+                { name: "test", state: "SUCCESS", conclusion: "SUCCESS" },
+                // auto-cancelled by GitHub concurrency / fail-fast
+                { name: "deploy", state: "CANCELLED", conclusion: "CANCELLED" },
+            ];
+            const poller = new PrPoller(
+                accessor, makeConfig("token"), 60_000,
+                fakeQuery("OPEN"), 1,
+                fakeChecksQuery(mixedChecks)
+            );
+
+            await poller.pollAll();
+
+            // Task should complete — CANCELLED is treated as neutral, not a failure
+            expect(accessor.pipelineCompleted).toContain("cancelled-check-task");
+            expect(accessor.pipelineFailures).toHaveLength(0);
+        });
+
+        it("completes task when a queued job shows PENDING state but CANCELLED conclusion", async () => {
+            // When a workflow run is auto-cancelled, jobs that were QUEUED (never
+            // started) may appear with state="PENDING" (from the QUEUED status) but
+            // conclusion="CANCELLED". Without checking the conclusion, the poller
+            // would wait forever for a check that will never change state.
+            const task = makeTask({
+                taskId: "queued-cancelled-task",
+                status: "waiting_for_pipeline",
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/36", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const mixedChecks: GhCheckRun[] = [
+                { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+                // QUEUED job in a cancelled run: state stays PENDING but conclusion is set
+                { name: "optional-job", state: "PENDING", conclusion: "CANCELLED" },
+            ];
+            const poller = new PrPoller(
+                accessor, makeConfig("token"), 60_000,
+                fakeQuery("OPEN"), 1,
+                fakeChecksQuery(mixedChecks)
+            );
+
+            await poller.pollAll();
+
+            expect(accessor.pipelineCompleted).toContain("queued-cancelled-task");
+            expect(accessor.pipelineFailures).toHaveLength(0);
         });
 
         it("keeps waiting when pipeline checks are still pending", async () => {

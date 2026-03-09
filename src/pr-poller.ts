@@ -84,16 +84,47 @@ export type PipelineCheckStatus = "passing" | "failing" | "pending";
 const PASSING_STATES = new Set([
     "SUCCESS",
     "NEUTRAL",
-    "SKIPPED"
+    "SKIPPED",
+    // CANCELLED is treated as a neutral/passing outcome: GitHub auto-cancels
+    // jobs when a newer run supersedes the current one (concurrency groups),
+    // or when a matrix job fails with fail-fast=true. In both cases the
+    // cancellation is not a code defect, so we should not trigger a fix-retry.
+    "CANCELLED"
 ]);
 
 const FAILING_STATES = new Set([
     "FAILURE",
     "ERROR",
     "TIMED_OUT",
-    "ACTION_REQUIRED",
-    "CANCELLED"
+    "ACTION_REQUIRED"
 ]);
+
+/**
+ * Resolve the effective state of a single check run.
+ *
+ * The `state` field returned by `gh pr checks` reflects the check's current
+ * GitHub status (e.g. PENDING, SUCCESS, CANCELLED). However, for jobs that
+ * were QUEUED when a workflow run was auto-cancelled, the GitHub API can
+ * return `state: "PENDING"` (from the QUEUED status) while simultaneously
+ * setting `conclusion: "CANCELLED"`.  In that case `state` alone is
+ * misleading and would cause the poller to wait forever.
+ *
+ * Resolution rules:
+ *  1. If `state` is already a recognised terminal value (in PASSING_STATES or
+ *     FAILING_STATES) → use `state` directly.
+ *  2. Otherwise, if `conclusion` is non-empty → use `conclusion` (it is more
+ *     authoritative once a check run has finished).
+ *  3. Otherwise → use `state` as-is (e.g. "PENDING" for a running check).
+ */
+function resolveCheckState(check: GhCheckRun): string {
+    const stateUpper = (check.state || "").toUpperCase();
+    const conclusionUpper = (check.conclusion || "").toUpperCase();
+
+    if (PASSING_STATES.has(stateUpper) || FAILING_STATES.has(stateUpper)) {
+        return stateUpper;
+    }
+    return conclusionUpper || stateUpper;
+}
 
 /**
  * Derive the overall pipeline status from a list of GitHub check runs.
@@ -129,14 +160,14 @@ export function analyzePipelineChecks(
     }
 
     for (const check of relevant) {
-        const state = (check.state || check.conclusion || "").toUpperCase();
+        const state = resolveCheckState(check);
         if (FAILING_STATES.has(state)) {
             return { status: "failing", failedCheck: check.name };
         }
     }
 
     for (const check of relevant) {
-        const state = (check.state || check.conclusion || "").toUpperCase();
+        const state = resolveCheckState(check);
         if (!PASSING_STATES.has(state)) {
             // Still pending or unknown — keep waiting
             return { status: "pending" };
