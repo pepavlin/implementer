@@ -83,7 +83,7 @@ describe("GitManager", () => {
       expect(branch).toBe("impl/new-task");
     });
 
-    it("checks out existing local branch instead of failing when it already exists", async () => {
+    it("resets existing local branch to defaultBranch instead of reusing stale commits", async () => {
       const bareDir = join(TMP, "bare-repo");
       const workDir = join(TMP, "workspace");
       const repoDir = join(workDir, "my-repo");
@@ -93,22 +93,60 @@ describe("GitManager", () => {
 
       const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
 
-      // First task creates the branch and adds a commit
+      // First task creates the branch and adds a commit (simulates a previous interrupted task)
       await gm.prepareNewBranchAll(workDir, repos, "impl/reused-branch");
-      await shell("echo work > work.txt && git add . && git commit -m 'work'", repoDir);
+      await shell("echo stale-work > stale.txt && git add . && git commit -m 'stale work from previous task'", repoDir);
 
       // Simulate workspace reuse: switch back to main
       await shell("git checkout main", repoDir);
 
-      // A new task with the same branch name — should checkout existing branch, not throw
+      // A new task with the same branch name — must NOT inherit stale commits
       await gm.prepareNewBranchAll(workDir, repos, "impl/reused-branch");
 
       const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
       expect(branch).toBe("impl/reused-branch");
 
-      // Previous work should still be there (branch was checked out, not recreated)
+      // Stale work from the previous task must NOT be present — branch was reset to origin/main
       const files = await shell("ls", repoDir);
-      expect(files).toContain("work.txt");
+      expect(files).not.toContain("stale.txt");
+
+      // The branch should point to origin/main HEAD (no extra commits)
+      const log = await shell("git log --oneline", repoDir);
+      expect(log).not.toContain("stale work from previous task");
+    });
+
+    it("resets existing remote branch to defaultBranch when branch was previously pushed", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+
+      // Previous task: create branch, commit, and push to remote
+      await gm.prepareNewBranchAll(workDir, repos, "impl/reused-branch");
+      await shell("echo stale-work > stale.txt && git add . && git commit -m 'stale commit'", repoDir);
+      await shell("git push origin impl/reused-branch", repoDir);
+
+      // Simulate workspace reset (pool reuse)
+      await shell("git checkout main", repoDir);
+      await shell("git branch -D impl/reused-branch", repoDir);
+
+      // New task with same branch name — after fetch, origin/impl/reused-branch exists.
+      // prepareNewBranchAll must NOT check out the old remote branch.
+      await gm.prepareNewBranchAll(workDir, repos, "impl/reused-branch");
+
+      const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
+      expect(branch).toBe("impl/reused-branch");
+
+      // Must NOT contain stale work from the previous task
+      const files = await shell("ls", repoDir);
+      expect(files).not.toContain("stale.txt");
+
+      const log = await shell("git log --oneline", repoDir);
+      expect(log).not.toContain("stale commit");
     });
   });
 

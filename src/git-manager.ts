@@ -66,6 +66,9 @@ export class GitManager {
 
   /**
    * Create a new branch from the default branch in all repos.
+   * Always resets the branch to origin/defaultBranch, even if a local or remote
+   * branch with the same name already exists (e.g. from an interrupted previous run).
+   * Using `checkout -B` prevents commits from a previous task leaking into a new one.
    */
   async prepareNewBranchAll(baseDir: string, repos: RepositoryConfig[], branchName: string, githubToken?: string): Promise<void> {
     for (const repo of repos) {
@@ -74,11 +77,10 @@ export class GitManager {
       await git(["reset", "--hard", "HEAD"], repoDir);
       await git(["checkout", repo.defaultBranch], repoDir);
       await git(["reset", "--hard", `origin/${repo.defaultBranch}`], repoDir);
-      try {
-        await git(["checkout", branchName], repoDir);
-      } catch {
-        await git(["checkout", "-b", branchName], repoDir);
-      }
+      // Use -B to create the branch if it doesn't exist, or reset it to the current
+      // position (origin/defaultBranch) if it does. This guarantees a clean start
+      // with no leftover commits, regardless of whether the branch previously existed.
+      await git(["checkout", "-B", branchName], repoDir);
     }
   }
 
