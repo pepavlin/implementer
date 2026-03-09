@@ -159,10 +159,32 @@ describe("server", () => {
     });
 
     describe("GET /", () => {
-        it("redirects to /docs", async () => {
+        it("returns 404 when no adminPassword is configured", async () => {
             const app = createServer(makeMockTaskManager(), makeConfig());
-            const res = await request(app).get("/").expect(302);
-            expect(res.headers.location).toBe("/docs");
+            await request(app).get("/").expect(404);
+        });
+
+        it("returns 404 when adminPassword is configured but user is not authenticated", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            await request(app).get("/").expect(404);
+        });
+
+        it("redirects to /dashboard when adminPassword is configured and user is authenticated", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app)
+                .get("/")
+                .set("Cookie", cookie)
+                .expect(302);
+            expect(res.headers.location).toBe("/dashboard");
+        });
+
+        it("returns 404 when adminPassword is configured and wrong cookie is provided", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            await request(app)
+                .get("/")
+                .set("Cookie", "impl_dash=wronghash")
+                .expect(404);
         });
     });
 
