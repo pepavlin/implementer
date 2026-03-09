@@ -923,9 +923,12 @@ describe("server", () => {
                 .expect(302);
             expect(res.headers.location).toBe("/dashboard");
             expect(res.headers["set-cookie"]).toBeDefined();
-            expect(
-                (res.headers["set-cookie"] as unknown as string[])[0]
-            ).toContain("impl_dash=");
+            const setCookieHeader = (res.headers["set-cookie"] as unknown as string[])[0];
+            expect(setCookieHeader).toContain("impl_dash=");
+            // Cookie path must be / so it is sent for all routes (including /)
+            // allowing the root redirect to /dashboard to work correctly
+            expect(setCookieHeader).toContain("Path=/");
+            expect(setCookieHeader).not.toContain("Path=/dashboard");
         });
 
         it("returns login form with error on wrong password", async () => {
@@ -992,6 +995,9 @@ describe("server", () => {
             const cookie =
                 (res.headers["set-cookie"] as unknown as string[])?.[0] ?? "";
             expect(cookie).toContain("Max-Age=0");
+            // Logout cookie path must also be / to properly clear the cookie
+            expect(cookie).toContain("Path=/");
+            expect(cookie).not.toContain("Path=/dashboard");
         });
     });
 
