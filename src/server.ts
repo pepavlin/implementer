@@ -5,7 +5,7 @@ import { z } from "zod";
 import { TaskManager } from "./task-manager/task-manager.js";
 import { extractLastAssistantMessage } from "./executor.js";
 import { openApiSpec } from "./openapi.js";
-import { registerDashboardRoutes } from "./dashboard.js";
+import { registerDashboardRoutes, isDashboardAuthenticated } from "./dashboard.js";
 import {
     BadRequestError,
     HttpError,
@@ -74,8 +74,12 @@ export function createServer(
 
     // 3. Add authentication middleware
     app.use((req, res, next) => {
-        // Ignore auth for docs and dashboard routes
-        if (req.path.startsWith("/docs") || req.path.startsWith("/dashboard"))
+        // Ignore auth for docs, dashboard, and root routes
+        if (
+            req.path === "/" ||
+            req.path.startsWith("/docs") ||
+            req.path.startsWith("/dashboard")
+        )
             return next();
 
         const token = req.headers.authorization?.replace("Bearer ", "") ?? "";
@@ -89,9 +93,14 @@ export function createServer(
         next();
     });
 
-    // GET / - redirect to docs
-    app.get("/", (_req, res) => {
-        res.redirect("/docs");
+    // GET / - redirect to /dashboard if admin is authenticated, otherwise 404
+    app.get("/", (req, res) => {
+        const adminPassword = config.server.adminPassword;
+        if (adminPassword && isDashboardAuthenticated(req, adminPassword)) {
+            res.redirect("/dashboard");
+        } else {
+            res.status(404).json({ error: "Not found" });
+        }
     });
 
     // POST /task - Start a new task
