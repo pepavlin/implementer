@@ -1558,7 +1558,7 @@ export function registerDashboardRoutes(
             const token = dashboardToken(adminPassword);
             res.setHeader(
                 "Set-Cookie",
-                `${DASH_COOKIE}=${token}; Path=/dashboard; HttpOnly; SameSite=Strict`
+                `${DASH_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict`
             );
             res.redirect("/dashboard");
         } else {
@@ -1571,7 +1571,7 @@ export function registerDashboardRoutes(
     app.get("/dashboard/logout", (_req, res) => {
         res.setHeader(
             "Set-Cookie",
-            `${DASH_COOKIE}=; Path=/dashboard; HttpOnly; SameSite=Strict; Max-Age=0`
+            `${DASH_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`
         );
         res.redirect("/dashboard");
     });
