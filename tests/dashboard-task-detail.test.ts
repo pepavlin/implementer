@@ -1457,3 +1457,149 @@ describe("dashboard - Prioritize button", () => {
         expect(setTaskPriority).toHaveBeenCalledWith("abc12345", "normal");
     });
 });
+
+describe("buildDashboardData - chain grouping fields", () => {
+    it("includes chainId in task data", () => {
+        const task = makeTask({
+            taskId: "task001" as TaskId,
+            chainId: "chain001" as ChainId
+        });
+        const tm = makeTaskManager([task]) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+        const t = data.tasks[0] as Record<string, unknown>;
+
+        expect(t.chainId).toBe("chain001");
+    });
+
+    it("includes parentTaskId in task data when set", () => {
+        const task = makeTask({
+            taskId: "task002" as TaskId,
+            chainId: "chain001" as ChainId,
+            parentTaskId: "task001" as TaskId
+        });
+        const tm = makeTaskManager([task]) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+        const t = data.tasks[0] as Record<string, unknown>;
+
+        expect(t.parentTaskId).toBe("task001");
+    });
+
+    it("includes parentTaskId as null when not set", () => {
+        const task = makeTask({
+            taskId: "task001" as TaskId,
+            chainId: "task001" as ChainId
+        });
+        const tm = makeTaskManager([task]) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+        const t = data.tasks[0] as Record<string, unknown>;
+
+        expect(t.parentTaskId).toBeNull();
+    });
+
+    it("returns chainId equal to taskId for root tasks", () => {
+        const task = makeTask({
+            taskId: "root001" as TaskId,
+            chainId: "root001" as ChainId
+        });
+        const tm = makeTaskManager([task]) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+        const t = data.tasks[0] as Record<string, unknown>;
+
+        expect(t.chainId).toBe("root001");
+        expect(t.taskId).toBe("root001");
+        expect(t.chainId).toBe(t.taskId);
+    });
+
+    it("returns chainId pointing to root for child tasks", () => {
+        const rootTask = makeTask({
+            taskId: "root001" as TaskId,
+            chainId: "root001" as ChainId
+        });
+        const childTask = makeTask({
+            taskId: "child001" as TaskId,
+            chainId: "root001" as ChainId,
+            parentTaskId: "root001" as TaskId
+        });
+        const tm = makeTaskManager([rootTask, childTask]) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+        const tasks = data.tasks as Array<Record<string, unknown>>;
+
+        const child = tasks.find((t) => t.taskId === "child001");
+        expect(child).toBeDefined();
+        expect(child!.chainId).toBe("root001");
+        expect(child!.parentTaskId).toBe("root001");
+    });
+});
+
+describe("dashboard - chain group UI", () => {
+    it("renders chain group toggle button next to select button", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain('id="btn-chain-group"');
+        expect(res.text).toContain("toggleChainGroup()");
+    });
+
+    it("chain group button is active (on) by default", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain('btn-chain-group" class="btn-sel-mode active"');
+    });
+
+    it("includes applyChainGrouping JS function", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("function applyChainGrouping");
+    });
+
+    it("includes getVisibleTasks JS function", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("function getVisibleTasks");
+    });
+
+    it("chain group button has Group chains label", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("Group chains");
+    });
+});

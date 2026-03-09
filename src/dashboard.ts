@@ -73,6 +73,8 @@ export function buildDashboardData(
         title: task.title ?? null,
         prompt: task.data.prompt,
         status: task.data.status,
+        chainId: task.data.chainId,
+        parentTaskId: task.data.parentTaskId ?? null,
         createdAt: task.data.createdAt,
         startedAt: task.data.startedAt ?? null,
         completedAt: task.data.completedAt,
@@ -654,6 +656,10 @@ export function dashboardHtml(hasPassword: boolean): string {
     .progress-fill.overrun{background:linear-gradient(90deg,#f59e0b,#d97706)}
     .progress-pct{font-size:.65rem;color:var(--text3);white-space:nowrap;min-width:28px;text-align:right}
     .progress-est{font-size:.65rem;color:var(--text4);white-space:nowrap}
+    /* ── Chain grouping ─────────────────────────────────────────────────────── */
+    .chain-badge{display:inline-flex;align-items:center;gap:3px;padding:1px 8px;border-radius:999px;font-size:.65rem;font-weight:700;background:var(--tag-bg);color:var(--text3);margin-left:6px;vertical-align:middle;white-space:nowrap;border:1px solid var(--border2);cursor:default}
+    .chain-badge:hover{background:var(--hover-bg);color:var(--text2)}
+    .tr-chain-grouped td:first-child{border-left-style:dashed!important}
     /* ── Bulk selection ─────────────────────────────────────────────────────── */
     .th-cb,.td-cb{width:36px;padding-left:12px;padding-right:4px;display:none}
     table.selection-mode .th-cb,table.selection-mode .td-cb{display:table-cell}
@@ -769,6 +775,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     <div class="section-title" style="flex:1;margin-bottom:0">Tasks</div>
     <button id="btn-clear-filters" class="btn-clear-filters" onclick="clearStatusFilters()" style="display:none" title="Clear all status filters">&#x2715; Clear filters</button>
     <span class="sel-hint" id="sel-hint" style="display:none">Shift+click for range</span>
+    <button id="btn-chain-group" class="btn-sel-mode active" onclick="toggleChainGroup()" title="Group tasks from the same chain together (show only the most active task per chain)">\u26D3 Group chains</button>
     <button id="btn-sel-mode" class="btn-sel-mode" onclick="toggleSelectionMode()" title="Enable multi-select mode (tip: hold Shift and click any row to select)">Select</button>
   </div>
   <div class="table-wrap">
@@ -919,6 +926,41 @@ export function dashboardHtml(hasPassword: boolean): string {
 
   <script>
     var selectedStatuses=new Set(),selectedProjects=new Set(),lastData=null,currentTaskId=null,currentTaskData=null,retryCountdownInterval=null,selectedTaskIds=new Set(),selectionMode=false,lastSelectedIdx=-1,voiceMode=false,voiceTarget=null,voiceRecognition=null,voiceTranscript='',voiceSilenceTimer=null,voiceSilenceStart=0,voiceLang='cs-CZ',voiceSubmittedLog=[],queuePaused=false;
+    var chainGroupMode=true;try{var _cgStored=localStorage.getItem('impl-chain-group');if(_cgStored!==null)chainGroupMode=_cgStored!=='false';}catch(e){}
+    (function(){var btn=document.getElementById('btn-chain-group');if(btn)btn.classList.toggle('active',chainGroupMode);})();
+    function applyChainGrouping(tasks){
+      if(!chainGroupMode)return tasks;
+      var chains={};
+      tasks.forEach(function(t){var cid=t.chainId||t.taskId;if(!chains[cid])chains[cid]=[];chains[cid].push(t);});
+      var statusPri={running:0,starting:1,queued:2,retrying:3,completed:4,failed:5,interrupted:6,cancelled:7};
+      var getP=function(s){return statusPri[s]!==undefined?statusPri[s]:8;};
+      var seen=new Set();
+      var result=[];
+      tasks.forEach(function(t){
+        var cid=t.chainId||t.taskId;
+        if(seen.has(cid))return;
+        seen.add(cid);
+        var chain=chains[cid].slice().sort(function(a,b){
+          var pa=getP(a.status),pb=getP(b.status);
+          if(pa!==pb)return pa-pb;
+          return new Date(b.createdAt).getTime()-new Date(a.createdAt).getTime();
+        });
+        var rep=chain[0];
+        result.push(Object.assign({},rep,{_chainSize:chain.length,_chainId:cid}));
+      });
+      return result;
+    }
+    function getVisibleTasks(tasks){
+      var filtered=tasks.filter(taskMatchesFilters);
+      return applyChainGrouping(filtered);
+    }
+    function toggleChainGroup(){
+      chainGroupMode=!chainGroupMode;
+      try{localStorage.setItem('impl-chain-group',chainGroupMode?'true':'false');}catch(e){}
+      var btn=document.getElementById('btn-chain-group');
+      if(btn)btn.classList.toggle('active',chainGroupMode);
+      if(lastData)renderTasks(lastData.tasks);
+    }
     function hasOpenPrs(t){return!!(t.pullRequests&&t.pullRequests.some(function(pr){return pr.state==='open'||pr.state==='draft'||!pr.state;}));}
     function hasDraftPrs(t){return!!(t.pullRequests&&t.pullRequests.some(function(pr){return pr.state==='draft';}));}
     function prStateBadge(state){
@@ -1023,7 +1065,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       });
     }
     function renderTasks(tasks){
-      var filtered=tasks.filter(taskMatchesFilters);
+      var filtered=getVisibleTasks(tasks);
       var tb=document.getElementById('tb');
       if(!filtered.length){
         var msg='No tasks';
@@ -1061,12 +1103,14 @@ export function dashboardHtml(hasPassword: boolean): string {
         }
         var prioBadge=priorityBadge(t.priority);
         var prioStar=(t.priority==='high'||t.priority==='critical')?'<span class="prio-star" title="Prioritized">\u2605</span>':'';
+        var chainBadge=t._chainSize>1?'<span class="chain-badge" title="Chain: '+esc(t._chainId)+' ('+t._chainSize+' tasks)">\u26D3 '+t._chainSize+'</span>':'';
+        if(t._chainSize>1)rowClass+=' tr-chain-grouped';
         return '<tr class="'+rowClass+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'" data-idx="'+idx+'">'
           +'<td class="td-cb" onclick="event.stopPropagation()"><input type="checkbox" class="task-cb" data-id="'+esc(t.taskId)+'" '+(isChecked?'checked':'')+' onchange="toggleTaskSelection(this.dataset.id,this.checked)" onclick="event.stopPropagation()"></td>'
           +'<td>'+badge(t.status,t.completedAt,!t.readAt)+'</td>'
           +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
           +'<td class="td-taskid"><span class="mono">'+esc(t.taskId)+'</span></td>'
-          +'<td>'+(t.title?'<div class="ttitle">'+prioStar+esc(t.title)+prioBadge+'</div>':'')+'<div class="tprompt">'+prioStar+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+(t.title?'':prioBadge)+'</div>'+progressHtml+'</td>'
+          +'<td>'+(t.title?'<div class="ttitle">'+prioStar+esc(t.title)+prioBadge+chainBadge+'</div>':'')+'<div class="tprompt">'+prioStar+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+(t.title?'':prioBadge+chainBadge)+'</div>'+progressHtml+'</td>'
           +'<td class="td-dur mono">'+dur(t.durationSeconds)+'</td>'
           +'<td class="td-started mono">'+fmtDate(t.createdAt)+'</td>'
           +'<td class="td-pr">'+(prBtns||'')+'</td>'
@@ -1150,9 +1194,9 @@ export function dashboardHtml(hasPassword: boolean): string {
     function toggleSelectionMode(){if(selectionMode)exitSelectionMode();else enterSelectionMode();}
     function rangeSelect(toIdx){
       if(!lastData)return;
-      var filtered=lastData.tasks.filter(taskMatchesFilters);
+      var visible=getVisibleTasks(lastData.tasks);
       var from=Math.min(lastSelectedIdx,toIdx),to=Math.max(lastSelectedIdx,toIdx);
-      for(var i=from;i<=to&&i<filtered.length;i++)selectedTaskIds.add(filtered[i].taskId);
+      for(var i=from;i<=to&&i<visible.length;i++)selectedTaskIds.add(visible[i].taskId);
       lastSelectedIdx=toIdx;
       updateBulkBar();
       renderTasks(lastData.tasks);
