@@ -47,7 +47,9 @@ const TaskListQuerySchema = z.object({
 const MAX_LOG_SIZE = 1024 * 1024; // 1MB
 
 function getDurationSeconds(task: Task): number {
-    const start = new Date(task.data.startedAt).getTime();
+    const start = new Date(
+        task.data.runStartedAt ?? task.data.startedAt
+    ).getTime();
     const end = task.data.completedAt
         ? new Date(task.data.completedAt).getTime()
         : Date.now();
@@ -157,6 +159,7 @@ export function createServer(
                 chainId: task.data.chainId ?? null,
                 status: task.data.status,
                 startedAt: task.data.startedAt,
+                runStartedAt: task.data.runStartedAt ?? null,
                 completedAt: task.data.completedAt,
                 durationSeconds: getDurationSeconds(task),
                 pullRequests: task.data.pullRequests ?? null
@@ -179,6 +182,7 @@ export function createServer(
             status: task.data.status,
             attempt: task.data.attempt,
             startedAt: task.data.startedAt,
+            runStartedAt: task.data.runStartedAt ?? null,
             completedAt: task.data.completedAt,
             durationSeconds: getDurationSeconds(task),
             output:

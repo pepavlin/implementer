@@ -333,6 +333,25 @@ describe("server", () => {
             expect(res.body.tasks[0].durationSeconds).toBe(3600);
         });
 
+        it("uses runStartedAt for durationSeconds in task list when set", async () => {
+            // Task queued at 00:00, started running at 00:50, completed at 01:00 (10 min execution)
+            const task = makeMockTask({
+                status: "completed",
+                startedAt: "2025-01-01T00:00:00.000Z",
+                runStartedAt: "2025-01-01T00:50:00.000Z",
+                completedAt: "2025-01-01T01:00:00.000Z"
+            });
+            const tm = makeMockTaskManager({
+                listTasks: vi.fn().mockReturnValue([task])
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app).get("/tasks").expect(200);
+            // Should be 10 minutes (600s) from runStartedAt, not 60 minutes (3600s) from startedAt
+            expect(res.body.tasks[0].durationSeconds).toBe(600);
+            expect(res.body.tasks[0].runStartedAt).toBe("2025-01-01T00:50:00.000Z");
+        });
+
         it("filters tasks by single status", async () => {
             const running = makeMockTask({ taskId: "t1", status: "running" });
             const completed = makeMockTask({
@@ -548,6 +567,41 @@ describe("server", () => {
             const res = await request(app).get("/task/abc123").expect(200);
             expect(res.body.durationSeconds).toBeGreaterThanOrEqual(4);
             expect(res.body.durationSeconds).toBeLessThanOrEqual(10);
+        });
+
+        it("uses runStartedAt instead of startedAt for durationSeconds when set", async () => {
+            // Task queued 10 minutes ago, started running 2 minutes ago
+            const task = makeMockTask({
+                status: "running",
+                startedAt: "2025-01-01T00:00:00.000Z",
+                runStartedAt: "2025-01-01T00:08:00.000Z",
+                completedAt: "2025-01-01T00:10:00.000Z"
+            });
+            const tm = makeMockTaskManager({
+                getTask: vi.fn().mockReturnValue(task)
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app).get("/task/abc123").expect(200);
+            // Duration should be 2 minutes (120s) from runStartedAt, not 10 minutes (600s) from startedAt
+            expect(res.body.durationSeconds).toBe(120);
+            expect(res.body.runStartedAt).toBe("2025-01-01T00:08:00.000Z");
+        });
+
+        it("falls back to startedAt for durationSeconds when runStartedAt is not set", async () => {
+            const task = makeMockTask({
+                status: "completed",
+                startedAt: "2025-01-01T00:00:00.000Z",
+                completedAt: "2025-01-01T00:05:00.000Z"
+            });
+            const tm = makeMockTaskManager({
+                getTask: vi.fn().mockReturnValue(task)
+            });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app).get("/task/abc123").expect(200);
+            expect(res.body.durationSeconds).toBe(300);
+            expect(res.body.runStartedAt).toBeNull();
         });
 
         it("returns null output for interrupted task", async () => {
@@ -1260,6 +1314,31 @@ describe("server", () => {
                 .expect(200);
 
             expect(res.body.tasks[0].durationSeconds).toBe(600);
+        });
+
+        it("uses runStartedAt for durationSeconds in dashboard data when set", async () => {
+            // Task queued at 00:00, started running at 00:30, completed at 01:00 (30 min execution)
+            const task = makeMockTask({
+                taskId: "t1",
+                status: "completed",
+                startedAt: "2025-01-01T00:00:00.000Z",
+                runStartedAt: "2025-01-01T00:30:00.000Z",
+                completedAt: "2025-01-01T01:00:00.000Z"
+            });
+            const tm = makeMockTaskManager({
+                listAllTasks: vi.fn().mockReturnValue([task])
+            });
+            const app = createServer(tm, makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+
+            const res = await request(app)
+                .get("/dashboard/api/data")
+                .set("Cookie", cookie)
+                .expect(200);
+
+            // Should be 30 minutes (1800s) from runStartedAt, not 60 minutes (3600s) from startedAt
+            expect(res.body.tasks[0].durationSeconds).toBe(1800);
+            expect(res.body.tasks[0].runStartedAt).toBe("2025-01-01T00:30:00.000Z");
         });
 
         it("counts each status correctly in stats", async () => {

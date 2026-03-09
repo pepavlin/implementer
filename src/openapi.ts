@@ -103,7 +103,17 @@ export const openApiSpec = {
                         type: "string",
                         enum: ["queued", "starting", "running", "retrying", "completed", "failed", "interrupted", "cancelled"]
                     },
-                    startedAt: { type: "string", format: "date-time" },
+                    startedAt: {
+                        type: "string",
+                        format: "date-time",
+                        description: "ISO timestamp of when the task entered the queue"
+                    },
+                    runStartedAt: {
+                        type: "string",
+                        format: "date-time",
+                        nullable: true,
+                        description: "ISO timestamp of when the task began active execution (left the queue). Null for tasks that have not yet started."
+                    },
                     completedAt: {
                         type: "string",
                         format: "date-time",
@@ -112,7 +122,7 @@ export const openApiSpec = {
                     durationSeconds: {
                         type: "number",
                         description:
-                            "Elapsed time in seconds (running tasks show time so far)"
+                            "Elapsed execution time in seconds, measured from runStartedAt (excludes queue wait time). Running tasks show time so far."
                     },
                     output: {
                         type: "string",

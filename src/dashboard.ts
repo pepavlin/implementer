@@ -74,6 +74,7 @@ export function buildDashboardData(
         prompt: task.data.prompt,
         status: task.data.status,
         startedAt: task.data.startedAt,
+        runStartedAt: task.data.runStartedAt ?? null,
         completedAt: task.data.completedAt,
         durationSeconds:
             task.data.status === "queued"
@@ -82,7 +83,9 @@ export function buildDashboardData(
                       ((task.data.completedAt
                           ? new Date(task.data.completedAt).getTime()
                           : Date.now()) -
-                          new Date(task.data.startedAt).getTime()) /
+                          new Date(
+                              task.data.runStartedAt ?? task.data.startedAt
+                          ).getTime()) /
                           1000
                   ),
         estimatedDurationSeconds: task.data.estimatedDurationSeconds ?? null,
@@ -1242,7 +1245,12 @@ export function dashboardHtml(hasPassword: boolean): string {
               +'<span class="muted" style="font-size:.8em">)</span>';
           }
           html+='<div class="det-row"><div class="det-lbl">Duration</div><div class="det-val mono">'+durationHtml+'</div></div>';
-          html+='<div class="det-row"><div class="det-lbl">Started</div><div class="det-val mono">'+fmtDate(t.startedAt)+'</div></div>';
+          if(t.runStartedAt&&t.runStartedAt!==t.startedAt){
+            html+='<div class="det-row"><div class="det-lbl">Queued</div><div class="det-val mono">'+fmtDate(t.startedAt)+'</div></div>';
+            html+='<div class="det-row"><div class="det-lbl">Started</div><div class="det-val mono">'+fmtDate(t.runStartedAt)+'</div></div>';
+          }else{
+            html+='<div class="det-row"><div class="det-lbl">Started</div><div class="det-val mono">'+fmtDate(t.startedAt)+'</div></div>';
+          }
           if(t.completedAt)html+='<div class="det-row"><div class="det-lbl">Completed</div><div class="det-val mono">'+fmtDate(t.completedAt)+'</div></div>';
           html+='<div class="det-row"><div class="det-lbl">Pull Requests</div><div class="det-val">'+prsHtml+'</div></div>';
           if(t.error)html+='<div class="det-row"><div class="det-lbl">Error</div><div class="det-err">'+esc(t.error)+'</div></div>';
@@ -1633,6 +1641,7 @@ export function registerDashboardRoutes(
                 task.project.data.errorRetry?.maxAttempts ?? null,
             nextRetryAt: task.data.nextRetryAt ?? null,
             startedAt: task.data.startedAt,
+            runStartedAt: task.data.runStartedAt ?? null,
             completedAt: task.data.completedAt,
             durationSeconds:
                 task.data.status === "queued"
@@ -1641,7 +1650,9 @@ export function registerDashboardRoutes(
                           ((task.data.completedAt
                               ? new Date(task.data.completedAt).getTime()
                               : Date.now()) -
-                              new Date(task.data.startedAt).getTime()) /
+                              new Date(
+                                  task.data.runStartedAt ?? task.data.startedAt
+                              ).getTime()) /
                               1000
                       ),
             estimatedDurationSeconds:

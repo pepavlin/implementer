@@ -1209,6 +1209,42 @@ describe("TaskManager", () => {
       expect(tm.getTask(task.id)?.data.status).toBe("starting");
     });
 
+    it("sets runStartedAt when task transitions to starting", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const tm = new TaskManager(config);
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "add-button", title: "Add a Button", estimatedDurationSeconds: 600 });
+
+      const project = tm.config.projects[PROJECT_ID as any];
+      project.initialize();
+      vi.spyOn(project, 'initialize').mockImplementation(() => {});
+      vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(true);
+      vi.spyOn(project.pool, "acquire").mockReturnValue(new Promise(() => {}));
+
+      const beforeCreate = new Date();
+      const task = tm.createNewTask(PROJECT_ID as any, { prompt: "Add a button" });
+
+      // Wait for dequeue + transition to starting
+      await new Promise((r) => setTimeout(r, 100));
+
+      const taskData = tm.getTask(task.id)?.data;
+      expect(taskData?.status).toBe("starting");
+
+      // runStartedAt must be set once the task transitions to starting
+      expect(taskData?.runStartedAt).toBeDefined();
+
+      // runStartedAt must be >= task creation time
+      const runStartedAt = new Date(taskData!.runStartedAt!);
+      expect(runStartedAt.getTime()).toBeGreaterThanOrEqual(beforeCreate.getTime());
+
+      // runStartedAt must be >= startedAt (queue entry time)
+      expect(runStartedAt.getTime()).toBeGreaterThanOrEqual(
+        new Date(taskData!.startedAt).getTime()
+      );
+    });
+
     it("queued task stays queued when pool has no free slot", async () => {
       const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const { Executor } = await import("../src/executor.js");
