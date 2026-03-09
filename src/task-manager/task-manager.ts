@@ -295,11 +295,11 @@ export class TaskManager {
                 `[${taskId}] Created pipeline-fix task ${fixTask.id} (pipelineRetryAttempt=${fixTask.data.pipelineRetryAttempt}).`
             );
         } else {
-            // No retries left — mark the task as permanently failed
+            // No retries left — mark as completed (best effort done, PR was created)
             console.log(
-                `[${taskId}] Pipeline failed and retry limit reached (${retryCount}) — marking as failed.`
+                `[${taskId}] Pipeline failed and retry limit reached (${retryCount}) — marking as completed.`
             );
-            task.failPipeline(error);
+            task.completePipeline();
         }
     }
 

@@ -1751,3 +1751,119 @@ describe("TaskManager - markTaskRead", () => {
     expect(reloadedTask?.data.readAt).toBe(savedReadAt);
   });
 });
+
+describe("TaskManager - handlePipelineFailure", () => {
+  beforeEach(() => {
+    rmSync(TMP, { recursive: true, force: true });
+    mkdirSync(TMP, { recursive: true });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  function makePipelineConfig(retryCount: number) {
+    return makeConfig({
+      projects: {
+        [PROJECT_ID]: {
+          maxConcurrentTasks: 4,
+          repositories: [
+            { name: "my-repo", url: "https://github.com/test/repo.git", defaultBranch: "main" },
+          ],
+          claudeCode: { command: "claude" },
+          handlePipelines: {
+            pipelines: ["ci"],
+            retryCount,
+          },
+        },
+      },
+    });
+  }
+
+  it("marks task as completed (not failed) when retry limit is reached", async () => {
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
+    const config = makePipelineConfig(1);
+    const store = new TaskStore(TMP);
+    // pipelineRetryAttempt === retryCount → exhausted
+    store.save(makePersistedTask({
+      taskId: "pipe-task-1",
+      status: "waiting_for_pipeline",
+      completedAt: null,
+      pipelineRetryAttempt: 1,
+      pullRequests: [{ url: "https://github.com/test/repo/pull/1", state: "open", createdAt: new Date().toISOString() }],
+    }));
+
+    const tm = new TaskManager(config);
+    await tm.init();
+
+    tm.handlePipelineFailure("pipe-task-1", "Pipeline check failed: ci");
+
+    const task = tm.getTask("pipe-task-1" as any);
+    expect(task?.data.status).toBe("completed");
+    expect(task?.data.completedAt).toBeTruthy();
+  });
+
+  it("marks task as completed when retryCount is 0 and first failure occurs", async () => {
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
+    const config = makePipelineConfig(0);
+    const store = new TaskStore(TMP);
+    store.save(makePersistedTask({
+      taskId: "pipe-task-2",
+      status: "waiting_for_pipeline",
+      completedAt: null,
+      pipelineRetryAttempt: 0,
+      pullRequests: [{ url: "https://github.com/test/repo/pull/2", state: "open", createdAt: new Date().toISOString() }],
+    }));
+
+    const tm = new TaskManager(config);
+    await tm.init();
+
+    tm.handlePipelineFailure("pipe-task-2", "Pipeline check failed: ci");
+
+    const task = tm.getTask("pipe-task-2" as any);
+    expect(task?.data.status).toBe("completed");
+    expect(task?.data.completedAt).toBeTruthy();
+  });
+
+  it("creates a continuation fix task when retry is still available", async () => {
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
+    const { Executor } = await import("../src/executor.js");
+    const config = makePipelineConfig(2);
+    const store = new TaskStore(TMP);
+    // pipelineRetryAttempt (0) < retryCount (2) → retry should be scheduled
+    store.save(makePersistedTask({
+      taskId: "pipe-task-3",
+      status: "waiting_for_pipeline",
+      completedAt: null,
+      pipelineRetryAttempt: 0,
+      branch: "fix-something",
+      pullRequests: [{ url: "https://github.com/test/repo/pull/3", state: "open", createdAt: new Date().toISOString() }],
+    }));
+
+    const tm = new TaskManager(config);
+    // Prevent real metadata generation
+    vi.spyOn(Executor.prototype, "generateTaskMetadata").mockReturnValue(new Promise(() => {}));
+    const project = tm.config.projects[PROJECT_ID as any];
+    project.initialize();
+    vi.spyOn(project, "initialize").mockImplementation(() => {});
+    vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+    await tm.init();
+
+    const taskCountBefore = tm.listAllTasks().length;
+    tm.handlePipelineFailure("pipe-task-3", "Pipeline check failed: ci");
+
+    // Original task should be marked failed (intermediate state before retry)
+    const originalTask = tm.getTask("pipe-task-3" as any);
+    expect(originalTask?.data.status).toBe("failed");
+
+    // A new continuation fix task should have been created
+    expect(tm.listAllTasks().length).toBe(taskCountBefore + 1);
+    const fixTask = tm.listAllTasks().find(
+      (t) => t.id !== ("pipe-task-3" as any) && t.data.parentTaskId === "pipe-task-3"
+    );
+    expect(fixTask).toBeDefined();
+    expect(fixTask?.data.pipelineRetryAttempt).toBe(1);
+  });
+});
