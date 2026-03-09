@@ -103,23 +103,19 @@ export function buildDashboardData(
         priority: task.data.priority ?? "normal"
     }));
 
-    // Count PRs separately by state
-    const openPrCount = allTasks.reduce((count, task) => {
-        return (
-            count +
-            (task.data.pullRequests ?? []).filter(
-                (pr) => pr.state === "open"
-            ).length
-        );
-    }, 0);
-    const draftPrCount = allTasks.reduce((count, task) => {
-        return (
-            count +
-            (task.data.pullRequests ?? []).filter(
-                (pr) => pr.state === "draft"
-            ).length
-        );
-    }, 0);
+    // Count unique PRs by URL and state (deduplicate across tasks sharing the same PR)
+    const openPrUrls = new Set<string>();
+    const draftPrUrls = new Set<string>();
+    for (const task of allTasks) {
+        for (const pr of task.data.pullRequests ?? []) {
+            if (pr.url) {
+                if (pr.state === "open") openPrUrls.add(pr.url);
+                else if (pr.state === "draft") draftPrUrls.add(pr.url);
+            }
+        }
+    }
+    const openPrCount = openPrUrls.size;
+    const draftPrCount = draftPrUrls.size;
 
     const stats = {
         running: allTasks.filter((t) => t.data.status === "running").length,
@@ -1078,7 +1074,50 @@ export function dashboardHtml(hasPassword: boolean): string {
         card.addEventListener('click',function(){toggleProject(this.dataset.proj);});
       });
     }
+    function recomputeFilteredStats(tasks){
+      // Filter by project only (not by status) — stat counts reflect project selection
+      var projTasks=selectedProjects.size===0?tasks:tasks.filter(function(t){return selectedProjects.has(t.projectId);});
+      var counts={running:0,starting:0,queued:0,retrying:0,completed:0,failed:0,interrupted:0,cancelled:0};
+      projTasks.forEach(function(t){if(counts.hasOwnProperty(t.status))counts[t.status]++;});
+      // Update status count DOM elements
+      document.getElementById('sr').textContent=counts.running;
+      document.getElementById('sst').textContent=counts.starting;
+      document.getElementById('sq').textContent=counts.queued;
+      document.getElementById('st').textContent=counts.retrying;
+      document.getElementById('sc').textContent=counts.completed;
+      document.getElementById('sf').textContent=counts.failed;
+      document.getElementById('sint').textContent=counts.interrupted;
+      document.getElementById('scan').textContent=counts.cancelled;
+      // Compute unique PR counts across filtered tasks
+      var openUrls={},draftUrls={};
+      projTasks.forEach(function(t){
+        (t.pullRequests||[]).forEach(function(pr){
+          if(pr.url){
+            if(pr.state==='open')openUrls[pr.url]=true;
+            else if(pr.state==='draft')draftUrls[pr.url]=true;
+          }
+        });
+      });
+      var openPrs=Object.keys(openUrls).length;
+      var draftPrs=Object.keys(draftUrls).length;
+      document.getElementById('spr').textContent=openPrs;
+      document.getElementById('sdpr').textContent=draftPrs;
+      // Update visual state indicators
+      var sprCard=document.getElementById('stat-open-prs');
+      if(sprCard)sprCard.classList.toggle('stat-has-open-prs',openPrs>0);
+      var sdprCard=document.getElementById('stat-draft-prs');
+      if(sdprCard)sdprCard.classList.toggle('stat-has-draft-prs',draftPrs>0);
+      var srCard=document.getElementById('stat-running');
+      var sqCard=document.getElementById('stat-queued');
+      var srLbl=document.getElementById('sr-lbl');
+      var sqLbl=document.getElementById('sq-lbl');
+      if(srCard){srCard.classList.toggle('stat-has-running',counts.running>0);}
+      if(srLbl){srLbl.innerHTML=counts.running>0?'<span class="stat-active-dot cr"></span>Running':'Running';}
+      if(sqCard){sqCard.classList.toggle('stat-has-queued',counts.queued>0);}
+      if(sqLbl){sqLbl.innerHTML=counts.queued>0?'<span class="stat-active-dot cq"></span>Queued':'Queued';}
+    }
     function renderTasks(tasks){
+      recomputeFilteredStats(tasks);
       var filtered=getVisibleTasks(tasks);
       var tb=document.getElementById('tb');
       if(!filtered.length){
