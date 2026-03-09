@@ -204,4 +204,74 @@ describe("TaskStore", () => {
     expect(loaded).toHaveLength(1);
     expect(loaded[0].taskId).toBe("valid-task");
   });
+
+  describe("backward compatibility: startedAt→createdAt / runStartedAt→startedAt rename", () => {
+    it("migrates old format: startedAt→createdAt and runStartedAt→startedAt", () => {
+      const store = new TaskStore(TMP);
+
+      // Simulate an old-format task file (before the field rename in commit 2b067ac)
+      // Old: startedAt = queue entry time, runStartedAt = execution start time
+      writeFileSync(
+        join(TMP, "tasks", "old-task.json"),
+        JSON.stringify({
+          taskId: "old-task",
+          projectId: "test-project",
+          status: "completed",
+          startedAt: "2025-01-01T00:00:00.000Z",       // old creation time → new createdAt
+          runStartedAt: "2025-01-01T00:01:00.000Z",     // old exec start  → new startedAt
+          completedAt: "2025-01-01T01:00:00.000Z",
+          prompt: "old task",
+          output: "done",
+          attempt: 1,
+          priority: "normal",
+        }),
+      );
+
+      const loaded = store.loadAll();
+      expect(loaded).toHaveLength(1);
+      const task = loaded[0];
+      expect(task.createdAt).toBe("2025-01-01T00:00:00.000Z");
+      expect(task.startedAt).toBe("2025-01-01T00:01:00.000Z");
+    });
+
+    it("migrates old format without runStartedAt (task never started execution)", () => {
+      const store = new TaskStore(TMP);
+
+      writeFileSync(
+        join(TMP, "tasks", "old-queued.json"),
+        JSON.stringify({
+          taskId: "old-queued",
+          projectId: "test-project",
+          status: "cancelled",
+          startedAt: "2025-02-01T10:00:00.000Z",  // old creation time
+          completedAt: null,
+          prompt: "never ran",
+          output: "",
+          attempt: 1,
+          priority: "normal",
+        }),
+      );
+
+      const loaded = store.loadAll();
+      expect(loaded).toHaveLength(1);
+      const task = loaded[0];
+      expect(task.createdAt).toBe("2025-02-01T10:00:00.000Z");
+      expect(task.startedAt).toBeUndefined();
+    });
+
+    it("does not overwrite createdAt in new-format tasks", () => {
+      const store = new TaskStore(TMP);
+
+      store.save(makeTask({
+        taskId: "new-task",
+        createdAt: "2025-03-01T08:00:00.000Z",
+        startedAt: "2025-03-01T08:00:30.000Z",
+      }));
+
+      const loaded = store.loadAll();
+      expect(loaded).toHaveLength(1);
+      expect(loaded[0].createdAt).toBe("2025-03-01T08:00:00.000Z");
+      expect(loaded[0].startedAt).toBe("2025-03-01T08:00:30.000Z");
+    });
+  });
 });
