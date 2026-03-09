@@ -94,7 +94,12 @@ const PASSING_STATES = new Set([
     // as stale when the PR's commit was updated and the old check run is no
     // longer relevant. A stale check is a terminal state that cannot change,
     // so waiting for it to complete would block the task forever.
-    "STALE"
+    "STALE",
+    // EXPECTED is used by GitHub legacy required status checks as a placeholder
+    // for a check that is "expected" but has not been submitted. If the
+    // external service never reports, the check stays "expected" forever.
+    // Treat it as a neutral passing state to avoid blocking the task indefinitely.
+    "EXPECTED"
 ]);
 
 const FAILING_STATES = new Set([
@@ -142,10 +147,13 @@ function resolveCheckState(check: GhCheckRun): string {
  * - Any relevant check in a failing terminal state → "failing"
  * - All relevant checks in passing terminal states → "passing"
  * - Any relevant check still pending/in-progress → "pending"
+ *
+ * @param logPrefix Optional prefix for debug log lines (e.g. task ID + PR URL).
  */
 export function analyzePipelineChecks(
     checks: GhCheckRun[],
-    pipelineNames?: string[]
+    pipelineNames?: string[],
+    logPrefix?: string
 ): {
     status: PipelineCheckStatus;
     failedCheck?: string;
@@ -156,11 +164,39 @@ export function analyzePipelineChecks(
             ? checks.filter((c) => pipelineNames.includes(c.name))
             : checks;
 
+    // Debug: log all resolved check states when a prefix is provided
+    if (logPrefix && checks.length > 0) {
+        const checkSummary = checks
+            .map((c) => {
+                const resolved = resolveCheckState(c);
+                const category = PASSING_STATES.has(resolved)
+                    ? "pass"
+                    : FAILING_STATES.has(resolved)
+                      ? "fail"
+                      : "pending";
+                return `${c.name}(state=${c.state},conclusion=${c.conclusion},resolved=${resolved},${category})`;
+            })
+            .join("; ");
+        console.log(`[pr-poller] ${logPrefix} checks: ${checkSummary}`);
+        if (pipelineNames && pipelineNames.length > 0 && relevant.length < checks.length) {
+            const ignoredNames = checks
+                .filter((c) => !pipelineNames.includes(c.name))
+                .map((c) => c.name)
+                .join(", ");
+            console.log(
+                `[pr-poller] ${logPrefix} ignoring non-configured checks: ${ignoredNames}`
+            );
+        }
+    }
+
     if (relevant.length === 0) {
         if (pipelineNames && pipelineNames.length > 0) {
             // None of the configured pipeline names appear in the check runs.
             if (checks.length === 0) {
                 // No checks at all — CI hasn't started yet, keep waiting.
+                if (logPrefix) {
+                    console.log(`[pr-poller] ${logPrefix} no checks yet — pending`);
+                }
                 return { status: "pending" };
             }
             // Checks exist but none match the configured names.
@@ -173,9 +209,17 @@ export function analyzePipelineChecks(
                 const state = resolveCheckState(c);
                 return PASSING_STATES.has(state) || FAILING_STATES.has(state);
             });
+            if (logPrefix) {
+                console.log(
+                    `[pr-poller] ${logPrefix} none of configured pipelines [${pipelineNames.join(", ")}] found; allTerminal=${allTerminal} → ${allTerminal ? "passing" : "pending"}`
+                );
+            }
             return allTerminal ? { status: "passing" } : { status: "pending" };
         }
         // No filter — no checks means no CI configured; treat as passing.
+        if (logPrefix) {
+            console.log(`[pr-poller] ${logPrefix} no checks and no filter → passing`);
+        }
         return { status: "passing" };
     }
 
@@ -190,6 +234,11 @@ export function analyzePipelineChecks(
         const state = resolveCheckState(check);
         if (!PASSING_STATES.has(state)) {
             // Still pending or unknown — keep waiting
+            if (logPrefix) {
+                console.log(
+                    `[pr-poller] ${logPrefix} check "${check.name}" still pending (resolved=${state})`
+                );
+            }
             return { status: "pending" };
         }
     }
@@ -246,6 +295,8 @@ export interface PollableTask {
     pullRequests?: PullRequest[];
     /** Task status — used to identify "waiting_for_pipeline" tasks. */
     status: string;
+    /** ISO timestamp of when the task first entered "waiting_for_pipeline" status. */
+    pipelineWaitingSince?: string;
 }
 
 export interface TaskAccessor {
@@ -445,6 +496,10 @@ export class PrPoller {
      * If any configured pipeline job fails → delegate to handlePipelineFailure
      *   (which may retry automatically or mark the task as failed).
      * Otherwise → keep waiting (do nothing).
+     *
+     * Also enforces the handlePipelines.timeoutHours safety net: if the task has
+     * been waiting longer than the configured timeout, it is auto-completed with a
+     * warning to prevent indefinite blocking on unresolvable check states.
      */
     private async checkPipelineForTask(task: PollableTask): Promise<void> {
         const projectConfig =
@@ -453,7 +508,32 @@ export class PrPoller {
         // Retrieve the configured pipeline job names to watch (if any)
         const pipelineNames =
             projectConfig?.data.handlePipelines?.pipelines ?? [];
+        // Default timeout: 8 hours. Set to 0 to disable.
+        const timeoutHours =
+            projectConfig?.data.handlePipelines?.timeoutHours ?? 8;
         const pullRequests = task.pullRequests ?? [];
+
+        // ── Timeout safety net ───────────────────────────────────────────────
+        // If the task has been stuck in "waiting_for_pipeline" longer than the
+        // configured timeout, auto-complete it to avoid blocking indefinitely.
+        // This covers unresolvable states like GitHub EXPECTED checks, WAITING
+        // environment-approval gates, or persistent gh CLI errors.
+        if (timeoutHours > 0 && task.pipelineWaitingSince) {
+            const waitingMs =
+                Date.now() - new Date(task.pipelineWaitingSince).getTime();
+            const timeoutMs = timeoutHours * 60 * 60 * 1000;
+            if (waitingMs >= timeoutMs) {
+                console.warn(
+                    `[pr-poller] Task ${task.taskId} has been waiting for pipeline checks ` +
+                    `for ${Math.round(waitingMs / 3600000 * 10) / 10}h ` +
+                    `(timeout: ${timeoutHours}h) — auto-completing to unblock the chain. ` +
+                    `If this is unexpected, check the check states on the PR and review ` +
+                    `handlePipelines.timeoutHours in your config.`
+                );
+                this.accessor.completePipelineTask(task.taskId);
+                return;
+            }
+        }
 
         let overallStatus: PipelineCheckStatus = "passing";
         let failedCheckName: string | undefined;
@@ -462,11 +542,13 @@ export class PrPoller {
             // Skip terminal PR states (merged/closed) — they won't get new checks
             if (pr.state === "merged" || pr.state === "closed") continue;
 
+            const logPrefix = `task ${task.taskId} PR ${pr.url}:`;
             try {
                 const checks = await this.checksQueryFn(pr.url, token);
                 const { status, failedCheck } = analyzePipelineChecks(
                     checks,
-                    pipelineNames
+                    pipelineNames,
+                    logPrefix
                 );
 
                 // Warn when configured pipeline names never appeared despite other
@@ -494,9 +576,9 @@ export class PrPoller {
                     // Don't break — there might be a failing check in a later PR
                 }
             } catch (err) {
+                const errMsg = err instanceof Error ? err.message : String(err);
                 console.warn(
-                    `[pr-poller] Failed to check pipeline for PR ${pr.url}:`,
-                    err instanceof Error ? err.message : String(err)
+                    `[pr-poller] Failed to check pipeline for PR ${pr.url}: ${errMsg}`
                 );
                 // On error, assume pending (keep waiting)
                 overallStatus = "pending";
