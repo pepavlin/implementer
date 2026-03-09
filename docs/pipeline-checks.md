@@ -30,13 +30,14 @@ When `handlePipelines` is configured:
 3. The workspace (Docker container) is **released immediately** — the task is in a passive wait state and does not consume resources.
 4. **Other tasks can start while this task is waiting** — `waiting_for_pipeline` does not count against concurrent task limits.
 5. The `PrPoller` (background poller, every 5 min) checks the GitHub check runs on the PR, **only evaluating the jobs listed in `pipelines`** — all others are ignored.
-6. When all watched pipeline jobs pass → task moves to `completed`.
-7. If any watched pipeline job fails:
+6. When all watched pipeline jobs pass (or are cancelled/skipped) → task moves to `completed`.
+7. If any watched pipeline job **fails** (FAILURE, ERROR, TIMED_OUT, ACTION_REQUIRED):
    - If the pipeline retry limit has not been reached (`pipelineRetryAttempt < retryCount`):
      - The failing task is marked as `failed`.
      - A new **continuation task** is automatically created on the **same branch**, with a prompt explaining which pipeline job failed and instructions to fix it.
      - The new task also enters `waiting_for_pipeline` after its PR update, repeating the cycle.
    - If the retry limit is reached → task is marked as `failed` (no more automatic retries).
+8. **Cancelled checks are treated as neutral** — a `CANCELLED` job (e.g. auto-cancelled by GitHub's concurrency group when a newer run supersedes the current one) does not trigger a fix retry. It is treated the same as `SKIPPED`.
 
 When `handlePipelines` is not configured (default):
 
@@ -65,11 +66,15 @@ If none of the listed jobs have appeared yet (e.g. they haven't started), the st
 
 | Matched check state | How it's treated |
 |---------------------|-----------------|
-| `SUCCESS`, `NEUTRAL`, `SKIPPED` | Passing |
-| `FAILURE`, `ERROR`, `TIMED_OUT`, `ACTION_REQUIRED`, `CANCELLED` | Failing → triggers retry or failure |
+| `SUCCESS`, `NEUTRAL`, `SKIPPED`, `CANCELLED` | Passing / neutral — task can complete |
+| `FAILURE`, `ERROR`, `TIMED_OUT`, `ACTION_REQUIRED` | Failing → triggers retry or failure |
 | `PENDING`, empty string | Pending — keep waiting |
 | No matching checks found yet | Pending — keep waiting for listed jobs to appear |
 | No checks at all (empty array, no filter) | Passing — no CI configured |
+
+> **Note on `CANCELLED`:** GitHub automatically cancels jobs when a newer workflow run supersedes the current one (via `concurrency: cancel-in-progress: true`), or when another matrix job fails with `fail-fast: true`. These cancellations are not code defects. Treating `CANCELLED` as neutral means the task will complete even if one job was auto-cancelled, as long as all other watched jobs passed.
+>
+> **State resolution:** The poller checks both `state` and `conclusion` fields from `gh pr checks`. If `state` is not a recognized terminal value (e.g. `PENDING` for a job that was queued when its run was cancelled) but `conclusion` is set (e.g. `CANCELLED`), the `conclusion` takes precedence. This prevents tasks from being stuck waiting for a check that has already finished.
 
 ## Automatic Pipeline Fix Retry
 
@@ -91,7 +96,8 @@ Tasks may have PRs across multiple repositories (one per repo). All PRs must hav
 ## Error Handling
 
 - If the `gh pr checks` command fails due to a transient error (network issue, GitHub API rate limit), the poller logs a warning and keeps waiting — the task stays in `waiting_for_pipeline` and will be re-checked on the next poll cycle.
-- Permanent failures (job conclusion `FAILURE` etc.) immediately trigger the retry/fail logic.
+- Permanent failures (job conclusion `FAILURE`, `ERROR`, `TIMED_OUT`, `ACTION_REQUIRED`) immediately trigger the retry/fail logic.
+- `CANCELLED` jobs are treated as neutral — they do not trigger retries.
 
 ## Cancellation and Manual Retry
 
