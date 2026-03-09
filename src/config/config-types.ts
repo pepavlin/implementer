@@ -56,6 +56,22 @@ export interface ErrorRetryConfig {
     /** Seconds to wait between attempts. */
     delaySeconds: number;
 }
+
+export interface HandlePipelinesConfig {
+    /**
+     * List of CI/CD pipeline job names to monitor on the pull request.
+     * Only these jobs are checked — others are ignored.
+     * If any of the listed jobs fail, the task is automatically retried.
+     */
+    pipelines: string[];
+    /**
+     * How many times to automatically re-run the implementer when a pipeline
+     * job fails. Each retry creates a new continuation task that receives the
+     * failure details and attempts to fix the code.
+     * Defaults to 1 (one automatic fix attempt).
+     */
+    retryCount?: number;
+}
 export interface DefaultsConfig {
     systemPrompt?: string;
     mcpServers?: Record<string, McpServerConfig>;
@@ -71,13 +87,13 @@ export interface ProjectConfig {
     /** Paths (files or directories) that Claude must not modify. Changes to these paths are reverted before PR creation. Supports git pathspec patterns (e.g. ".github", "Dockerfile", "docker-compose*.yml"). */
     protectedPaths?: string[];
     /**
-     * When true, tasks transition to "waiting_for_pipeline" after PR creation instead
-     * of completing immediately. The task completes only after all CI/CD pipeline checks
-     * on the PR pass. If any check fails, the task is marked as failed.
-     * Other tasks can start while this task is waiting.
-     * Defaults to false.
+     * When configured, tasks transition to "waiting_for_pipeline" after PR creation
+     * instead of completing immediately. The task completes only after all listed
+     * CI/CD pipeline jobs on the PR pass. If any listed job fails, the implementer
+     * is automatically re-triggered (up to retryCount times) to fix the code.
+     * Other tasks can start while this task is in waiting_for_pipeline.
      */
-    waitForPipeline?: boolean;
+    handlePipelines?: HandlePipelinesConfig;
 }
 
 const ServerSchema = z
@@ -136,6 +152,15 @@ const ErrorRetrySchema = z
     })
     .strict();
 
+const HandlePipelinesSchema = z
+    .object({
+        pipelines: z.array(z.string().min(1)).min(1, {
+            message: "handlePipelines.pipelines must contain at least one pipeline job name"
+        }),
+        retryCount: z.number().int().min(0).default(1)
+    })
+    .strict();
+
 const DefaultsSchema = z
     .object({
         systemPrompt: z.string().optional(),
@@ -152,7 +177,7 @@ const ProjectSchema = z
         auth: ProjectAuthSchema.optional(),
         errorRetry: ErrorRetrySchema.optional(),
         protectedPaths: z.array(z.string()).optional(),
-        waitForPipeline: z.boolean().optional()
+        handlePipelines: HandlePipelinesSchema.optional()
     })
     .strict();
 

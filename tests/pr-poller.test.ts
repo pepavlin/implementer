@@ -23,7 +23,7 @@ function makeTask(overrides: Partial<PollableTask> = {}): PollableTask {
     };
 }
 
-function makeConfig(githubToken?: string): Config {
+function makeConfig(githubToken?: string, pipelineNames?: string[]): Config {
     return {
         server: { workspaceDir: "/tmp", maxConcurrentTasks: 3, adminPassword: "pw", metaCpus: 0.4, sandboxCpus: 0.4 },
         projects: {
@@ -34,6 +34,9 @@ function makeConfig(githubToken?: string): Config {
                     claudeCode: { command: "claude", timeoutSeconds: 3600, mcpServers: {} },
                     auth: githubToken ? { githubToken } : {},
                     maxConcurrentTasks: 1,
+                    handlePipelines: pipelineNames
+                        ? { pipelines: pipelineNames, retryCount: 1 }
+                        : undefined,
                 },
             },
         },
@@ -43,11 +46,11 @@ function makeConfig(githubToken?: string): Config {
 function makeAccessor(tasks: PollableTask[]): TaskAccessor & {
     updates: Array<{ taskId: string; prUrl: string; state: PullRequestState }>;
     pipelineCompleted: string[];
-    pipelineFailed: Array<{ taskId: string; error: string }>;
+    pipelineFailures: Array<{ taskId: string; error: string }>;
 } {
     const updates: Array<{ taskId: string; prUrl: string; state: PullRequestState }> = [];
     const pipelineCompleted: string[] = [];
-    const pipelineFailed: Array<{ taskId: string; error: string }> = [];
+    const pipelineFailures: Array<{ taskId: string; error: string }> = [];
     return {
         listAllTasks: () => tasks,
         updatePrState(taskId, prUrl, state) {
@@ -56,12 +59,12 @@ function makeAccessor(tasks: PollableTask[]): TaskAccessor & {
         completePipelineTask(taskId) {
             pipelineCompleted.push(taskId);
         },
-        failPipelineTask(taskId, error) {
-            pipelineFailed.push({ taskId, error });
+        handlePipelineFailure(taskId, error) {
+            pipelineFailures.push({ taskId, error });
         },
         updates,
         pipelineCompleted,
-        pipelineFailed,
+        pipelineFailures,
     };
 }
 
@@ -205,6 +208,70 @@ describe("analyzePipelineChecks", () => {
             { name: "build", state: "success", conclusion: "success" },
         ];
         expect(analyzePipelineChecks(checks)).toEqual({ status: "passing" });
+    });
+
+    // ── Pipeline name filtering ────────────────────────────────────────────────
+
+    it("returns pending when pipelineNames filter provided but no checks match yet", () => {
+        const checks: GhCheckRun[] = [
+            { name: "unrelated-job", state: "SUCCESS", conclusion: "SUCCESS" },
+        ];
+        expect(analyzePipelineChecks(checks, ["build", "test"])).toEqual({
+            status: "pending",
+        });
+    });
+
+    it("returns pending when pipelineNames provided but checks array is empty", () => {
+        expect(analyzePipelineChecks([], ["build"])).toEqual({ status: "pending" });
+    });
+
+    it("returns passing (no-CI) when pipelineNames is empty array", () => {
+        // Empty filter = no filtering → treat as no CI configured
+        expect(analyzePipelineChecks([], [])).toEqual({ status: "passing" });
+    });
+
+    it("only evaluates checks matching pipelineNames — ignores others", () => {
+        const checks: GhCheckRun[] = [
+            // This unrelated failing check should be ignored
+            { name: "deploy", state: "FAILURE", conclusion: "FAILURE" },
+            // The watched check passes
+            { name: "test", state: "SUCCESS", conclusion: "SUCCESS" },
+        ];
+        // Only watching "test" — "deploy" failure should not affect result
+        expect(analyzePipelineChecks(checks, ["test"])).toEqual({ status: "passing" });
+    });
+
+    it("returns failing when a watched pipeline check fails, even if others pass", () => {
+        const checks: GhCheckRun[] = [
+            { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+            { name: "test", state: "FAILURE", conclusion: "FAILURE" },
+            { name: "lint", state: "SUCCESS", conclusion: "SUCCESS" },
+        ];
+        const result = analyzePipelineChecks(checks, ["build", "test"]);
+        expect(result.status).toBe("failing");
+        expect(result.failedCheck).toBe("test");
+    });
+
+    it("returns pending when some watched pipeline checks are still running", () => {
+        const checks: GhCheckRun[] = [
+            { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+            { name: "test", state: "PENDING", conclusion: "" },
+        ];
+        expect(analyzePipelineChecks(checks, ["build", "test"])).toEqual({
+            status: "pending",
+        });
+    });
+
+    it("returns passing when all watched pipeline checks pass (others ignored)", () => {
+        const checks: GhCheckRun[] = [
+            { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+            { name: "test", state: "SUCCESS", conclusion: "SUCCESS" },
+            // An unrelated check still running — should be ignored
+            { name: "e2e", state: "PENDING", conclusion: "" },
+        ];
+        expect(analyzePipelineChecks(checks, ["build", "test"])).toEqual({
+            status: "passing",
+        });
     });
 });
 
@@ -535,7 +602,7 @@ describe("PrPoller", () => {
 
             expect(checksQuery).not.toHaveBeenCalled();
             expect(accessor.pipelineCompleted).toHaveLength(0);
-            expect(accessor.pipelineFailed).toHaveLength(0);
+            expect(accessor.pipelineFailures).toHaveLength(0);
         });
 
         it("completes task when all pipeline checks pass", async () => {
@@ -560,7 +627,7 @@ describe("PrPoller", () => {
             await poller.pollAll();
 
             expect(accessor.pipelineCompleted).toContain("pipe-task");
-            expect(accessor.pipelineFailed).toHaveLength(0);
+            expect(accessor.pipelineFailures).toHaveLength(0);
         });
 
         it("completes task when no checks are configured (empty checks array)", async () => {
@@ -581,7 +648,7 @@ describe("PrPoller", () => {
             await poller.pollAll();
 
             expect(accessor.pipelineCompleted).toContain("no-ci-task");
-            expect(accessor.pipelineFailed).toHaveLength(0);
+            expect(accessor.pipelineFailures).toHaveLength(0);
         });
 
         it("fails task when a pipeline check fails", async () => {
@@ -605,9 +672,9 @@ describe("PrPoller", () => {
 
             await poller.pollAll();
 
-            expect(accessor.pipelineFailed).toHaveLength(1);
-            expect(accessor.pipelineFailed[0].taskId).toBe("fail-task");
-            expect(accessor.pipelineFailed[0].error).toContain("test");
+            expect(accessor.pipelineFailures).toHaveLength(1);
+            expect(accessor.pipelineFailures[0].taskId).toBe("fail-task");
+            expect(accessor.pipelineFailures[0].error).toContain("test");
             expect(accessor.pipelineCompleted).toHaveLength(0);
         });
 
@@ -633,7 +700,7 @@ describe("PrPoller", () => {
             await poller.pollAll();
 
             expect(accessor.pipelineCompleted).toHaveLength(0);
-            expect(accessor.pipelineFailed).toHaveLength(0);
+            expect(accessor.pipelineFailures).toHaveLength(0);
         });
 
         it("keeps waiting and does not fail if checks query throws (transient error)", async () => {
@@ -656,7 +723,7 @@ describe("PrPoller", () => {
 
             // Should not complete or fail the task on transient error
             expect(accessor.pipelineCompleted).toHaveLength(0);
-            expect(accessor.pipelineFailed).toHaveLength(0);
+            expect(accessor.pipelineFailures).toHaveLength(0);
         });
 
         it("checks pipeline for all PRs on a task — fails if any PR has a failing check", async () => {
@@ -687,8 +754,8 @@ describe("PrPoller", () => {
 
             await poller.pollAll();
 
-            expect(accessor.pipelineFailed).toHaveLength(1);
-            expect(accessor.pipelineFailed[0].taskId).toBe("multi-pr-task");
+            expect(accessor.pipelineFailures).toHaveLength(1);
+            expect(accessor.pipelineFailures[0].taskId).toBe("multi-pr-task");
         });
 
         it("skips merged/closed PRs when checking pipeline status", async () => {
@@ -753,7 +820,121 @@ describe("PrPoller", () => {
             await poller.pollAll();
 
             expect(accessor.pipelineCompleted).toContain("task-pass");
-            expect(accessor.pipelineFailed.map((f) => f.taskId)).toContain("task-fail");
+            expect(accessor.pipelineFailures.map((f) => f.taskId)).toContain("task-fail");
+        });
+
+        // ── handlePipelines name filtering in the poller ───────────────────────
+
+        it("keeps waiting when watched pipeline jobs have not appeared yet (pending filter)", async () => {
+            const task = makeTask({
+                taskId: "filter-pending-task",
+                status: "waiting_for_pipeline",
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/60", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            // Config: only watching "build" and "test"
+            const configWithPipelines = makeConfig("token", ["build", "test"]);
+            const checks: GhCheckRun[] = [
+                // Only an unrelated job has run so far
+                { name: "unrelated", state: "SUCCESS", conclusion: "SUCCESS" },
+            ];
+            const poller = new PrPoller(
+                accessor, configWithPipelines, 60_000,
+                fakeQuery("OPEN"), 1,
+                fakeChecksQuery(checks)
+            );
+
+            await poller.pollAll();
+
+            // None of the watched jobs appeared yet — should keep waiting
+            expect(accessor.pipelineCompleted).toHaveLength(0);
+            expect(accessor.pipelineFailures).toHaveLength(0);
+        });
+
+        it("completes task when all watched pipeline jobs pass (unrelated jobs ignored)", async () => {
+            const task = makeTask({
+                taskId: "filter-pass-task",
+                status: "waiting_for_pipeline",
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/70", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const configWithPipelines = makeConfig("token", ["build", "test"]);
+            const checks: GhCheckRun[] = [
+                { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+                { name: "test", state: "SUCCESS", conclusion: "SUCCESS" },
+                // Unrelated still pending — should be ignored
+                { name: "e2e", state: "PENDING", conclusion: "" },
+            ];
+            const poller = new PrPoller(
+                accessor, configWithPipelines, 60_000,
+                fakeQuery("OPEN"), 1,
+                fakeChecksQuery(checks)
+            );
+
+            await poller.pollAll();
+
+            expect(accessor.pipelineCompleted).toContain("filter-pass-task");
+            expect(accessor.pipelineFailures).toHaveLength(0);
+        });
+
+        it("calls handlePipelineFailure when a watched pipeline job fails", async () => {
+            const task = makeTask({
+                taskId: "filter-fail-task",
+                status: "waiting_for_pipeline",
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/80", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const configWithPipelines = makeConfig("token", ["build", "test"]);
+            const checks: GhCheckRun[] = [
+                { name: "build", state: "FAILURE", conclusion: "FAILURE" },
+                { name: "test", state: "SUCCESS", conclusion: "SUCCESS" },
+            ];
+            const poller = new PrPoller(
+                accessor, configWithPipelines, 60_000,
+                fakeQuery("OPEN"), 1,
+                fakeChecksQuery(checks)
+            );
+
+            await poller.pollAll();
+
+            expect(accessor.pipelineFailures).toHaveLength(1);
+            expect(accessor.pipelineFailures[0].taskId).toBe("filter-fail-task");
+            expect(accessor.pipelineFailures[0].error).toContain("build");
+            expect(accessor.pipelineCompleted).toHaveLength(0);
+        });
+
+        it("ignores failures in unwatched jobs when handlePipelines filter is set", async () => {
+            const task = makeTask({
+                taskId: "ignore-unrelated-task",
+                status: "waiting_for_pipeline",
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/90", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            // Only watching "test" — "deploy" failure should be ignored
+            const configWithPipelines = makeConfig("token", ["test"]);
+            const checks: GhCheckRun[] = [
+                { name: "test", state: "SUCCESS", conclusion: "SUCCESS" },
+                { name: "deploy", state: "FAILURE", conclusion: "FAILURE" },
+            ];
+            const poller = new PrPoller(
+                accessor, configWithPipelines, 60_000,
+                fakeQuery("OPEN"), 1,
+                fakeChecksQuery(checks)
+            );
+
+            await poller.pollAll();
+
+            // "deploy" failure is not in watched pipelines — should complete
+            expect(accessor.pipelineCompleted).toContain("ignore-unrelated-task");
+            expect(accessor.pipelineFailures).toHaveLength(0);
         });
     });
 });

@@ -43,11 +43,20 @@ projects:
         #     - .github
         #     - Dockerfile
         #     - docker-compose.yml
-        # When true, tasks transition to "waiting_for_pipeline" after PR creation instead
-        # of completing immediately. The task completes only after all CI/CD pipeline checks
-        # on the PR pass. If any check fails, the task is marked as failed.
-        # Other tasks can start while this task is waiting. Defaults to false.
-        # waitForPipeline: true
+        # Monitor specific CI/CD pipeline jobs on the PR and auto-retry on failure (optional).
+        # When configured, tasks wait in "waiting_for_pipeline" status after PR creation.
+        # Only the listed pipeline job names are checked — all others are ignored.
+        # If any listed job fails, the implementer is automatically re-triggered to fix
+        # the code (up to retryCount times). Other tasks can start while waiting.
+        # handlePipelines:
+        #     # CI/CD pipeline job names to monitor (required)
+        #     pipelines:
+        #         - build
+        #         - test
+        #         - lint
+        #     # How many automatic fix attempts to allow when a pipeline fails.
+        #     # Defaults to 1. Set to 0 to disable auto-retry (only wait and fail).
+        #     retryCount: 1
         claudeCode:
             command: claude
             model: sonnet

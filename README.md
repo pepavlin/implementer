@@ -70,20 +70,25 @@ projects:
             - docker-compose*.yml  # glob pattern
 ```
 
-### Wait for pipeline checks
+### Monitor CI/CD pipelines and auto-fix failures
 
-Set `waitForPipeline: true` on a project to make tasks wait for all CI/CD pipeline checks to pass on the PR before being marked `completed`. The workspace is released immediately after the PR is created — other tasks can start while this task waits. If a check fails, the task is marked `failed`.
+Configure `handlePipelines` on a project to monitor specific CI/CD pipeline jobs on the PR and automatically re-trigger the implementer when any of them fail. The workspace is released immediately after the PR is created — other tasks can start while this task waits.
 
 ```yaml
 projects:
     my-project:
-        waitForPipeline: true   # default: false
+        handlePipelines:
+            pipelines:        # CI/CD job names to watch (required)
+                - build
+                - test
+                - lint
+            retryCount: 1     # automatic fix attempts on failure (default: 1, use 0 to disable)
         repositories:
             - name: my-repo
               url: git@github.com:user/my-repo.git
 ```
 
-The background PR poller (every 5 min) checks `gh pr checks` for tasks in `waiting_for_pipeline` status and completes or fails them based on the results. If no checks are configured, the task completes immediately.
+The background PR poller (every 5 min) checks `gh pr checks` for tasks in `waiting_for_pipeline` status, filtering results to only the listed job names. When all listed jobs pass, the task completes. When a listed job fails and retries remain, a new continuation task is automatically queued on the same branch with a prompt to fix the failing pipeline. If the retry limit is reached, the task is marked `failed`.
 
 `apiKey` is configured per project (`projects.<projectId>.apiKey`), not as a single global top-level config field.
 

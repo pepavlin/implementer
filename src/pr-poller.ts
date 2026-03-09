@@ -98,27 +98,44 @@ const FAILING_STATES = new Set([
 /**
  * Derive the overall pipeline status from a list of GitHub check runs.
  *
- * - No checks → "passing" (no CI configured, nothing to wait for)
- * - Any check in a failing terminal state → "failing"
- * - All checks in passing terminal states → "passing"
- * - Any check still pending/in-progress → "pending"
+ * When `pipelineNames` is provided and non-empty, only checks whose name
+ * appears in that list are evaluated. If none of the listed checks are
+ * present yet the status is "pending" (waiting for them to start).
+ *
+ * - No relevant checks → "passing" when no filter, "pending" when filter provided
+ * - Any relevant check in a failing terminal state → "failing"
+ * - All relevant checks in passing terminal states → "passing"
+ * - Any relevant check still pending/in-progress → "pending"
  */
-export function analyzePipelineChecks(checks: GhCheckRun[]): {
+export function analyzePipelineChecks(
+    checks: GhCheckRun[],
+    pipelineNames?: string[]
+): {
     status: PipelineCheckStatus;
     failedCheck?: string;
 } {
-    if (checks.length === 0) {
-        return { status: "passing" };
+    // Filter to only the requested pipeline jobs if a list was provided
+    const relevant =
+        pipelineNames && pipelineNames.length > 0
+            ? checks.filter((c) => pipelineNames.includes(c.name))
+            : checks;
+
+    if (relevant.length === 0) {
+        // No matching checks found yet — if we're waiting for specific pipelines,
+        // treat as pending until they appear. Otherwise treat as passing (no CI).
+        return pipelineNames && pipelineNames.length > 0
+            ? { status: "pending" }
+            : { status: "passing" };
     }
 
-    for (const check of checks) {
+    for (const check of relevant) {
         const state = (check.state || check.conclusion || "").toUpperCase();
         if (FAILING_STATES.has(state)) {
             return { status: "failing", failedCheck: check.name };
         }
     }
 
-    for (const check of checks) {
+    for (const check of relevant) {
         const state = (check.state || check.conclusion || "").toUpperCase();
         if (!PASSING_STATES.has(state)) {
             // Still pending or unknown — keep waiting
@@ -185,8 +202,12 @@ export interface TaskAccessor {
     updatePrState(taskId: string, prUrl: string, state: PullRequestState): void;
     /** Complete a task that was waiting for pipeline checks (all checks passed). */
     completePipelineTask(taskId: string): void;
-    /** Fail a task that was waiting for pipeline checks (a check failed). */
-    failPipelineTask(taskId: string, error: string): void;
+    /**
+     * Handle a pipeline failure for a waiting task. The TaskManager decides
+     * whether to fail the task outright or schedule an automatic pipeline-fix
+     * retry based on handlePipelines.retryCount configuration.
+     */
+    handlePipelineFailure(taskId: string, error: string): void;
 }
 
 /**
@@ -364,14 +385,18 @@ export class PrPoller {
 
     /**
      * Check all PR pipeline checks for a single "waiting_for_pipeline" task.
-     * If all PRs have passing checks → complete the task.
-     * If any PR has a failing check → fail the task.
+     * If all configured pipeline jobs pass → complete the task.
+     * If any configured pipeline job fails → delegate to handlePipelineFailure
+     *   (which may retry automatically or mark the task as failed).
      * Otherwise → keep waiting (do nothing).
      */
     private async checkPipelineForTask(task: PollableTask): Promise<void> {
         const projectConfig =
             this.config.projects[task.projectId as ProjectId];
         const token = projectConfig?.data.auth?.githubToken;
+        // Retrieve the configured pipeline job names to watch (if any)
+        const pipelineNames =
+            projectConfig?.data.handlePipelines?.pipelines ?? [];
         const pullRequests = task.pullRequests ?? [];
 
         let overallStatus: PipelineCheckStatus = "passing";
@@ -383,7 +408,10 @@ export class PrPoller {
 
             try {
                 const checks = await this.checksQueryFn(pr.url, token);
-                const { status, failedCheck } = analyzePipelineChecks(checks);
+                const { status, failedCheck } = analyzePipelineChecks(
+                    checks,
+                    pipelineNames
+                );
 
                 if (status === "failing") {
                     overallStatus = "failing";
@@ -415,7 +443,7 @@ export class PrPoller {
             console.log(
                 `[pr-poller] Pipeline check failed for task ${task.taskId}: ${failedCheckName ?? "(unknown)"}`
             );
-            this.accessor.failPipelineTask(task.taskId, errorMsg);
+            this.accessor.handlePipelineFailure(task.taskId, errorMsg);
         }
         // "pending" — do nothing, will be checked again on next poll
     }

@@ -382,7 +382,7 @@ projects:
         expect(config.projects["my-project"].data.protectedPaths).toBeUndefined();
     });
 
-    it("loads waitForPipeline: true when set", () => {
+    it("loads handlePipelines with pipelines list and default retryCount", () => {
         const path = writeYaml(
             "config.yaml",
             `
@@ -391,15 +391,21 @@ projects:
     repositories:
       - name: repo
         url: https://github.com/test/repo.git
-    waitForPipeline: true
+    handlePipelines:
+      pipelines:
+        - build
+        - test
 `
         );
 
         const config = Config.load(path);
-        expect(config.projects["my-project"].data.waitForPipeline).toBe(true);
+        const hp = config.projects["my-project"].data.handlePipelines;
+        expect(hp).toBeDefined();
+        expect(hp!.pipelines).toEqual(["build", "test"]);
+        expect(hp!.retryCount).toBe(1); // default
     });
 
-    it("loads waitForPipeline: false when explicitly set to false", () => {
+    it("loads handlePipelines with explicit retryCount", () => {
         const path = writeYaml(
             "config.yaml",
             `
@@ -408,15 +414,57 @@ projects:
     repositories:
       - name: repo
         url: https://github.com/test/repo.git
-    waitForPipeline: false
+    handlePipelines:
+      pipelines:
+        - lint
+      retryCount: 3
 `
         );
 
         const config = Config.load(path);
-        expect(config.projects["my-project"].data.waitForPipeline).toBe(false);
+        const hp = config.projects["my-project"].data.handlePipelines;
+        expect(hp).toBeDefined();
+        expect(hp!.retryCount).toBe(3);
     });
 
-    it("sets waitForPipeline to undefined when not provided", () => {
+    it("allows retryCount: 0 (wait-only mode — no auto-retry)", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+    handlePipelines:
+      pipelines:
+        - build
+      retryCount: 0
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.projects["my-project"].data.handlePipelines!.retryCount).toBe(0);
+    });
+
+    it("rejects handlePipelines with an empty pipelines list", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+    handlePipelines:
+      pipelines: []
+`
+        );
+
+        expect(() => Config.load(path)).toThrow();
+    });
+
+    it("sets handlePipelines to undefined when not provided", () => {
         const path = writeYaml(
             "config.yaml",
             `
@@ -429,7 +477,7 @@ projects:
         );
 
         const config = Config.load(path);
-        expect(config.projects["my-project"].data.waitForPipeline).toBeUndefined();
+        expect(config.projects["my-project"].data.handlePipelines).toBeUndefined();
     });
 
 });
