@@ -74,8 +74,11 @@ export interface GhCheckRun {
     /** Overall check state. Values: SUCCESS, FAILURE, ERROR, PENDING, CANCELLED,
      *  SKIPPED, NEUTRAL, STALE, TIMED_OUT, ACTION_REQUIRED, or empty string. */
     state: string;
-    /** Final conclusion — may be empty string while check is in progress. */
-    conclusion: string;
+    /**
+     * Final conclusion — may be absent or empty string while check is in progress.
+     * Not all versions of the `gh` CLI expose this as a JSON field; treat as optional.
+     */
+    conclusion?: string;
 }
 
 /** Overall pipeline status derived from a set of check runs. */
@@ -255,7 +258,7 @@ function ghChecksQuery(url: string, token?: string): Promise<GhCheckRun[]> {
         const env = token ? { ...process.env, GH_TOKEN: token } : undefined;
         execFile(
             "gh",
-            ["pr", "checks", url, "--json", "name,state,conclusion"],
+            ["pr", "checks", url, "--json", "name,state"],
             { env, maxBuffer: 4 * 1024 * 1024 },
             (error, stdout) => {
                 if (error) {
