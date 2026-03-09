@@ -138,9 +138,21 @@ export class Task {
     }
 
     /**
+     * Whether this task should block other tasks in the same chain from starting.
+     * Includes "waiting_for_pipeline" in addition to the active states — a task
+     * waiting for its CI/CD pipeline still has an open PR on the branch and must
+     * finish (pass or fail) before a sibling task can safely modify the same branch.
+     */
+    isChainBlocker(): boolean {
+        return ["starting", "running", "waiting_for_pipeline"].includes(
+            this.data.status
+        );
+    }
+
+    /**
      * Retry a task from a terminal or retrying state (completed, failed, cancelled, retrying,
      * waiting_for_pipeline).
-     * Increments attempt counter and pushes to front of queue.
+     * Increments attempt counter, resets pipeline-related state, and pushes to front of queue.
      */
     retry(): void {
         // Queued tasks are already scheduled to run — retrying them makes no sense
@@ -153,7 +165,15 @@ export class Task {
             throw new TaskActiveError(this.data.status);
         }
 
+        // Reset scheduling and pipeline retry state for a clean manual retry.
+        // pipelineRetryAttempt is cleared so the automatic fix-retry counter
+        // starts fresh — the user explicitly chose to retry, so previous pipeline
+        // attempts should not count against the configured retryCount limit.
         this.data.nextRetryAt = undefined;
+        this.data.pipelineRetryAttempt = undefined;
+        // Clear terminal-state timestamps and error so the retried run starts clean.
+        this.data.completedAt = null;
+        this.data.error = undefined;
         this.data.attempt++;
         console.log(`[${this.id}] Manual retry requested`);
         this.unshift();
