@@ -89,7 +89,12 @@ const PASSING_STATES = new Set([
     // jobs when a newer run supersedes the current one (concurrency groups),
     // or when a matrix job fails with fail-fast=true. In both cases the
     // cancellation is not a code defect, so we should not trigger a fix-retry.
-    "CANCELLED"
+    "CANCELLED",
+    // STALE is treated as a neutral/passing outcome: GitHub marks a check run
+    // as stale when the PR's commit was updated and the old check run is no
+    // longer relevant. A stale check is a terminal state that cannot change,
+    // so waiting for it to complete would block the task forever.
+    "STALE"
 ]);
 
 const FAILING_STATES = new Set([
