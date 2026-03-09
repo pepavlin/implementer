@@ -959,7 +959,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     function isRecentCompleted(ca){return!!ca&&(Date.now()-new Date(ca).getTime())<1200000;}
     function badge(s,completedAt,isUnread){var isNew=s==='completed'&&!!isUnread;var cc=isNew?'b-completed-new':(isRecentCompleted(completedAt)?'b-completed':'b-completed-old');var newDot=isNew?'<span class="badge-new-dot"></span>':'';var m={running:['b-running',_spin+'Running'],starting:['b-starting',_spin+'Starting'],queued:['b-queued','Queued'+_dots],retrying:['b-retrying',_clock+'Scheduled Retry'],completed:[cc,'&#10003; Completed'+newDot],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','&#215; Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
     function dur(s){if(s==null)return '—';if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
-    function fmtDate(d){try{return new Date(d).toLocaleString();}catch(e){return String(d);}}
+    function fmtDate(d){if(d==null)return '—';try{var dt=new Date(d);return isNaN(dt.getTime())?'—':dt.toLocaleString();}catch(e){return String(d);}}
     function taskMatchesFilters(t){
       var statusOk=selectedStatuses.size===0||selectedStatuses.has(t.status)||(selectedStatuses.has('open-prs')&&taskHasOpenPr(t))||(selectedStatuses.has('draft-prs')&&taskHasDraftPr(t));
       var projOk=selectedProjects.size===0||selectedProjects.has(t.projectId);

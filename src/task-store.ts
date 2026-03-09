@@ -38,10 +38,19 @@ export class TaskStore {
     for (const file of files) {
       try {
         const raw = readFileSync(join(this.dir, file), "utf-8");
-        const task = JSON.parse(raw) as PersistedTask;
+        const data = JSON.parse(raw) as Record<string, unknown>;
+        const task = data as unknown as PersistedTask;
         if (task.taskId && (typeof task.workspaceId === "number" || task.workspaceId === null || task.workspaceId === undefined) && task.projectId) {
           // Backward compatibility: tasks persisted before priority existed default to "normal"
           if (!task.priority) task.priority = "normal";
+          // Backward compatibility: field rename (commit 2b067ac):
+          //   old `startedAt`    → new `createdAt`   (when task entered the queue)
+          //   old `runStartedAt` → new `startedAt`   (when task began active execution)
+          // Detect old format by absence of `createdAt` with presence of old `startedAt`.
+          if (!task.createdAt && data["startedAt"]) {
+            task.createdAt = data["startedAt"] as string;
+            task.startedAt = data["runStartedAt"] as string | undefined;
+          }
           tasks.push(task);
         }
       } catch (err) {
