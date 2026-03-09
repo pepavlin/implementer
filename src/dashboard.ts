@@ -49,15 +49,16 @@ export function buildDashboardData(
 } {
     const allTasks = taskManager.listAllTasks();
     // Sort: active tasks first by status priority, then by newest createdAt within each group
-    // Status priority: running (0) > starting (1) > queued (2) > retrying (3) > rest (4)
+    // Status priority: running (0) > starting (1) > queued (2) > retrying (3) > waiting_for_pipeline (4) > rest (5)
     const statusPriority: Record<string, number> = {
         running: 0,
         starting: 1,
         queued: 2,
-        retrying: 3
+        retrying: 3,
+        waiting_for_pipeline: 4
     };
     const getStatusPriority = (status: string): number =>
-        statusPriority[status] ?? 4;
+        statusPriority[status] ?? 5;
     const sortedTasks = allTasks.slice().sort((a, b) => {
         const aPriority = getStatusPriority(a.data.status);
         const bPriority = getStatusPriority(b.data.status);
@@ -125,6 +126,9 @@ export function buildDashboardData(
         starting: allTasks.filter((t) => t.data.status === "starting").length,
         queued: allTasks.filter((t) => t.data.status === "queued").length,
         retrying: allTasks.filter((t) => t.data.status === "retrying").length,
+        waiting_for_pipeline: allTasks.filter(
+            (t) => t.data.status === "waiting_for_pipeline"
+        ).length,
         completed: allTasks.filter((t) => t.data.status === "completed").length,
         failed: allTasks.filter((t) => t.data.status === "failed").length,
         interrupted: allTasks.filter(
@@ -143,6 +147,7 @@ export function buildDashboardData(
             starting: 0,
             queued: 0,
             retrying: 0,
+            waiting_for_pipeline: 0,
             completed: 0,
             failed: 0,
             interrupted: 0
@@ -155,6 +160,7 @@ export function buildDashboardData(
                 running: 0,
                 queued: 0,
                 retrying: 0,
+                waiting_for_pipeline: 0,
                 completed: 0,
                 failed: 0,
                 interrupted: 0
@@ -480,6 +486,8 @@ export function dashboardHtml(hasPassword: boolean): string {
     @keyframes queued-row-pulse{0%,100%{background:transparent}50%{background:rgba(245,158,11,.04)}}
     @keyframes starting-row-pulse{0%,100%{background:transparent}50%{background:rgba(34,211,238,.04)}}
     @keyframes retrying-row-pulse{0%,100%{background:transparent}50%{background:rgba(96,165,250,.04)}}
+    @keyframes pipeline-row-pulse{0%,100%{background:transparent}50%{background:rgba(45,212,191,.04)}}
+    @keyframes badge-pipe-pulse{0%,100%{box-shadow:0 0 0 0 rgba(45,212,191,.4)}50%{box-shadow:0 0 0 4px rgba(45,212,191,0)}}
     .badge-spin{display:inline-block;width:9px;height:9px;border:1.5px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;margin-right:5px;vertical-align:middle;flex-shrink:0}
     .badge-clock-ico{width:10px;height:10px;margin-right:5px;vertical-align:middle;flex-shrink:0;display:inline-block}
     .badge-dots{display:inline-flex;gap:2px;margin-left:5px;align-items:center}
@@ -490,6 +498,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     .b-running{animation:badge-run-pulse 2s ease-in-out infinite}
     .b-queued{animation:badge-q-pulse 1.6s ease-in-out infinite}
     .b-retrying{animation:badge-ret-pulse 1.8s ease-in-out infinite}
+    .b-pipeline{background:var(--b-pipe-bg);color:var(--b-pipe-fg);animation:badge-pipe-pulse 1.8s ease-in-out infinite}
     .b-completed-new{background:var(--b-done-bg);color:var(--b-done-fg);animation:badge-new-glow 2s ease-in-out infinite}
     @keyframes badge-new-glow{0%,100%{box-shadow:0 0 0 0 rgba(52,211,153,.55)}50%{box-shadow:0 0 0 6px rgba(52,211,153,0)}}
     @keyframes completed-new-row{0%,100%{background:transparent}50%{background:rgba(52,211,153,.05)}}
@@ -501,6 +510,8 @@ export function dashboardHtml(hasPassword: boolean): string {
     .tr-starting td:first-child{border-left:3px solid #22d3ee80}
     .tr-retrying td{animation:retrying-row-pulse 2s ease-in-out infinite}
     .tr-retrying td:first-child{border-left:3px solid #60a5fa80}
+    .tr-waiting_for_pipeline td{animation:pipeline-row-pulse 2s ease-in-out infinite}
+    .tr-waiting_for_pipeline td:first-child{border-left:3px solid #2dd4bf80}
     .tr-completed td:first-child{border-left:3px solid #34d39960}
     .tr-completed-old td:first-child{border-left:3px solid #47556930}
     .tr-completed-new td{animation:completed-new-row 2.5s ease-in-out infinite}
@@ -514,12 +525,13 @@ export function dashboardHtml(hasPassword: boolean): string {
     .stat-filter.stat-selected{border-color:#3b82f6!important;background:var(--proj-sel)!important;box-shadow:0 0 0 1px rgba(59,130,246,.15),0 0 12px rgba(59,130,246,.1)!important}
     .stat.stat-has-running{box-shadow:0 0 0 1px rgba(34,197,94,.3),0 0 12px rgba(34,197,94,.1)}
     .stat.stat-has-queued{box-shadow:0 0 0 1px rgba(245,158,11,.3),0 0 12px rgba(245,158,11,.08)}
+    .stat.stat-has-pipeline{box-shadow:0 0 0 1px rgba(45,212,191,.3),0 0 12px rgba(45,212,191,.08)}
     .stat.stat-has-open-prs{box-shadow:0 0 0 1px rgba(74,222,128,.3),0 0 12px rgba(74,222,128,.1)}
     .stat.stat-has-draft-prs{box-shadow:0 0 0 1px rgba(148,163,184,.3),0 0 10px rgba(148,163,184,.07)}
     .stat-label{font-size:.68rem;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;display:flex;align-items:center;gap:5px}
     .stat-active-dot{width:6px;height:6px;border-radius:50%;background:currentColor;animation:pulse 1.5s ease-in-out infinite;flex-shrink:0}
     .stat-val{font-size:1.8rem;font-weight:700;margin-top:2px}
-    .cr{color:#22c55e}.cq{color:#f59e0b}.ct{color:#60a5fa}.cc{color:var(--b-done-fg)}.cf{color:#ef4444}
+    .cr{color:#22c55e}.cq{color:#f59e0b}.ct{color:#60a5fa}.cp{color:#2dd4bf}.cc{color:var(--b-done-fg)}.cf{color:#ef4444}
     .section-title{font-size:.8rem;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
     .projects{display:flex;gap:10px;margin-bottom:8px;flex-wrap:wrap}
     .proj-card{background:var(--bg-card);border-radius:8px;padding:14px 18px;min-width:160px;border:1px solid var(--border);cursor:pointer;user-select:none;transition:border-color .3s,background .3s,box-shadow .3s}
@@ -760,6 +772,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     <div class="stat stat-filter" id="stat-starting" data-filter="starting" onclick="toggleStatus('starting')" title="Click to filter by Starting tasks"><div class="stat-label" style="color:var(--b-start-fg)" id="sst-lbl">Starting</div><div class="stat-val" style="color:var(--b-start-fg)" id="sst">\u2014</div></div>
     <div class="stat stat-filter" id="stat-queued" data-filter="queued" onclick="toggleStatus('queued')" title="Click to filter by Queued tasks"><div class="stat-label cq" id="sq-lbl">Queued</div><div class="stat-val cq" id="sq">\u2014</div></div>
     <div class="stat stat-filter" id="stat-retrying" data-filter="retrying" onclick="toggleStatus('retrying')" title="Click to filter by Retrying tasks"><div class="stat-label ct">Retrying</div><div class="stat-val ct" id="st">\u2014</div></div>
+    <div class="stat stat-filter" id="stat-waiting-for-pipeline" data-filter="waiting_for_pipeline" onclick="toggleStatus('waiting_for_pipeline')" title="Click to filter by tasks waiting for pipeline"><div class="stat-label cp" id="swfp-lbl">Pipeline</div><div class="stat-val cp" id="swfp">\u2014</div></div>
     <div class="stat stat-filter" id="stat-completed" data-filter="completed" onclick="toggleStatus('completed')" title="Click to filter by Completed tasks"><div class="stat-label">Completed</div><div class="stat-val cc" id="sc">\u2014</div></div>
     <div class="stat stat-filter" id="stat-failed" data-filter="failed" onclick="toggleStatus('failed')" title="Click to filter by Failed tasks"><div class="stat-label">Failed</div><div class="stat-val cf" id="sf">\u2014</div></div>
     <div class="stat stat-filter" id="stat-interrupted" data-filter="interrupted" onclick="toggleStatus('interrupted')" title="Click to filter by Interrupted tasks"><div class="stat-label" style="color:var(--b-fail-fg)">Interrupted</div><div class="stat-val" style="color:var(--b-fail-fg)" id="sint">\u2014</div></div>
@@ -999,7 +1012,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     var _dots='<span class="badge-dots"><span></span><span></span><span></span></span>';
     var _clock='<svg class="badge-clock-ico" viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5" xmlns="http://www.w3.org/2000/svg"><circle cx="6" cy="6" r="5"/><path stroke-linecap="round" d="M6 3v3l2 1"/></svg>';
     function isRecentCompleted(ca){return!!ca&&(Date.now()-new Date(ca).getTime())<1200000;}
-    function badge(s,completedAt,isUnread){var isNew=s==='completed'&&!!isUnread;var cc=isNew?'b-completed-new':(isRecentCompleted(completedAt)?'b-completed':'b-completed-old');var newDot=isNew?'<span class="badge-new-dot"></span>':'';var m={running:['b-running',_spin+'Running'],starting:['b-starting',_spin+'Starting'],queued:['b-queued','Queued'+_dots],retrying:['b-retrying',_clock+'Scheduled Retry'],completed:[cc,'&#10003; Completed'+newDot],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','&#215; Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
+    function badge(s,completedAt,isUnread){var isNew=s==='completed'&&!!isUnread;var cc=isNew?'b-completed-new':(isRecentCompleted(completedAt)?'b-completed':'b-completed-old');var newDot=isNew?'<span class="badge-new-dot"></span>':'';var m={running:['b-running',_spin+'Running'],starting:['b-starting',_spin+'Starting'],queued:['b-queued','Queued'+_dots],retrying:['b-retrying',_clock+'Scheduled Retry'],waiting_for_pipeline:['b-pipeline',_clock+'Waiting for Pipeline'],completed:[cc,'&#10003; Completed'+newDot],failed:['b-failed','Failed'],interrupted:['b-interrupted','Interrupted'],cancelled:['b-cancelled','&#215; Cancelled']};var r=m[s]||['','Unknown'];return '<span class="badge '+r[0]+'">'+r[1]+'</span>';}
     function dur(s){if(s==null)return '—';if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
     function fmtDate(d){if(d==null)return '—';try{var dt=new Date(d);return isNaN(dt.getTime())?'—':dt.toLocaleString();}catch(e){return String(d);}}
     function taskMatchesFilters(t){
@@ -1042,13 +1055,14 @@ export function dashboardHtml(hasPassword: boolean): string {
       el.innerHTML=ids.map(function(id){
         var p=projects[id],sel=selectedProjects.has(id);
         var isVoiceTarget=voiceMode&&voiceTarget===id;
-        var hasActive=(p.running||0)+(p.starting||0)+(p.retrying||0)>0;
+        var hasActive=(p.running||0)+(p.starting||0)+(p.retrying||0)+(p.waiting_for_pipeline||0)>0;
         var hasQueued=(p.queued||0)>0;
         var parts=[];
         if(p.running)parts.push('<span class="ps ps-running">'+_spin+p.running+' running</span>');
         if(p.starting)parts.push('<span class="ps ps-starting">'+_spin+p.starting+' starting</span>');
         if(p.queued)parts.push('<span class="ps ps-queued">'+p.queued+' queued'+_dots+'</span>');
         if(p.retrying)parts.push('<span class="ps ps-retrying">'+_clock+p.retrying+' scheduled</span>');
+        if(p.waiting_for_pipeline)parts.push('<span class="ps ps-pipeline">'+_clock+p.waiting_for_pipeline+' pipeline</span>');
         if(p.completed)parts.push('<span class="ps ps-completed">'+p.completed+' done</span>');
         if(p.failed)parts.push('<span class="ps ps-failed">'+p.failed+' failed</span>');
         if(!parts.length)parts.push('<span class="muted" style="font-size:.72rem">No tasks</span>');
@@ -1243,7 +1257,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         .then(function(t){
           currentTaskData=t;
           document.getElementById('task-badge').innerHTML=badge(t.status,t.completedAt);
-          var active=['queued','starting','running','retrying'];
+          var active=['queued','starting','running','retrying','waiting_for_pipeline'];
           document.getElementById('task-retry').style.display=active.includes(t.status)?'none':'';
           document.getElementById('task-retry-now').style.display=(t.status==='retrying')?'':'none';
           document.getElementById('task-cancel').style.display=active.includes(t.status)?'':'none';
@@ -1488,6 +1502,7 @@ export function dashboardHtml(hasPassword: boolean): string {
       document.getElementById('sst').textContent=stats.starting||0;
       document.getElementById('sq').textContent=stats.queued;
       document.getElementById('st').textContent=stats.retrying;
+      document.getElementById('swfp').textContent=stats.waiting_for_pipeline||0;
       document.getElementById('sc').textContent=stats.completed;
       document.getElementById('sf').textContent=stats.failed;
       document.getElementById('sint').textContent=stats.interrupted||0;
@@ -1503,12 +1518,17 @@ export function dashboardHtml(hasPassword: boolean): string {
       if(sdprCard)sdprCard.classList.toggle('stat-has-draft-prs',draftPrs>0);
       var srCard=document.getElementById('stat-running');
       var sqCard=document.getElementById('stat-queued');
+      var swfpCard=document.getElementById('stat-waiting-for-pipeline');
       var srLbl=document.getElementById('sr-lbl');
       var sqLbl=document.getElementById('sq-lbl');
+      var swfpLbl=document.getElementById('swfp-lbl');
       if(srCard){srCard.classList.toggle('stat-has-running',stats.running>0);}
       if(srLbl){srLbl.innerHTML=stats.running>0?'<span class="stat-active-dot cr"></span>Running':'Running';}
       if(sqCard){sqCard.classList.toggle('stat-has-queued',stats.queued>0);}
       if(sqLbl){sqLbl.innerHTML=stats.queued>0?'<span class="stat-active-dot cq"></span>Queued':'Queued';}
+      var wfpCount=stats.waiting_for_pipeline||0;
+      if(swfpCard){swfpCard.classList.toggle('stat-has-pipeline',wfpCount>0);}
+      if(swfpLbl){swfpLbl.innerHTML=wfpCount>0?'<span class="stat-active-dot cp"></span>Pipeline':'Pipeline';}
     }
     function refreshData(){
       var btn=document.getElementById('refresh-btn');

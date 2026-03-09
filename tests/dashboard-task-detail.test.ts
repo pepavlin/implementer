@@ -216,6 +216,68 @@ describe("buildDashboardData", () => {
         expect(data.stats.failed).toBe(1);
     });
 
+    it("includes waiting_for_pipeline count in stats", () => {
+        const tasks: Task[] = [
+            makeTask({ status: "running" }),
+            makeTask({ taskId: "pip11111" as TaskId, status: "waiting_for_pipeline" }),
+            makeTask({ taskId: "pip22222" as TaskId, status: "waiting_for_pipeline" }),
+            makeTask({ taskId: "ccc33333" as TaskId, status: "completed" })
+        ];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        expect((data.stats as any).waiting_for_pipeline).toBe(2);
+        expect(data.stats.running).toBe(1);
+    });
+
+    it("includes waiting_for_pipeline in project stats", () => {
+        const tasks: Task[] = [
+            makeTask({ status: "waiting_for_pipeline" }),
+            makeTask({ taskId: "pip22222" as TaskId, status: "waiting_for_pipeline" }),
+            makeTask({ taskId: "ccc33333" as TaskId, status: "completed" })
+        ];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        expect(data.projects["my-project"]).toBeDefined();
+        expect((data.projects["my-project"] as any).waiting_for_pipeline).toBe(2);
+    });
+
+    it("places waiting_for_pipeline tasks before completed tasks in sort order", () => {
+        const tasks: Task[] = [
+            makeTask({
+                taskId: "completed1" as TaskId,
+                status: "completed",
+                createdAt: new Date("2024-01-01T14:00:00Z").toISOString()
+            }),
+            makeTask({
+                taskId: "pipeline1" as TaskId,
+                status: "waiting_for_pipeline",
+                createdAt: new Date("2024-01-01T12:00:00Z").toISOString()
+            }),
+            makeTask({
+                taskId: "retrying1" as TaskId,
+                status: "retrying",
+                attempt: 2,
+                createdAt: new Date("2024-01-01T11:00:00Z").toISOString()
+            })
+        ];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+        const taskList = data.tasks as Array<{ taskId: string; status: string }>;
+
+        // retrying (priority 3) > waiting_for_pipeline (priority 4) > completed (priority 5)
+        expect(taskList[0].taskId).toBe("retrying1");
+        expect(taskList[1].taskId).toBe("pipeline1");
+        expect(taskList[2].taskId).toBe("completed1");
+    });
+
     it("builds project stats", () => {
         const tasks: Task[] = [
             makeTask({ status: "completed" }),
@@ -1601,5 +1663,31 @@ describe("dashboard - chain group UI", () => {
 
         expect(res.status).toBe(200);
         expect(res.text).toContain("Group chains");
+    });
+
+    it("includes pipeline filter card in stats bar", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("waiting_for_pipeline");
+        expect(res.text).toContain("stat-waiting-for-pipeline");
+    });
+
+    it("includes b-pipeline badge class in badge function", async () => {
+        const task = makeTask({ status: "completed" });
+        const app = createApp([task]);
+
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("b-pipeline");
+        expect(res.text).toContain("Waiting for Pipeline");
     });
 });
