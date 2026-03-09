@@ -31,6 +31,7 @@ const TASK_STATUSES = [
     "starting",
     "running",
     "retrying",
+    "waiting_for_pipeline",
     "completed",
     "failed",
     "interrupted",
