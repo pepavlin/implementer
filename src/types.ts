@@ -19,6 +19,7 @@ export type TaskStatus =
     | "starting"
     | "running"
     | "retrying"
+    | "waiting_for_pipeline"
     | "completed"
     | "failed"
     | "interrupted"
@@ -69,6 +70,12 @@ export interface TaskData {
     readAt?: string;
     /** Priority level for queue ordering. Higher priority tasks are dequeued first. Defaults to "normal". */
     priority: TaskPriority;
+    /**
+     * Tracks how many automatic pipeline-fix retries have been made for this task in the chain.
+     * Set on tasks created automatically when a pipeline check fails and handlePipelines.retryCount > 0.
+     * Used to enforce the retryCount limit for pipeline-triggered retries.
+     */
+    pipelineRetryAttempt?: number;
 }
 
 export interface PersistedTask extends TaskData {

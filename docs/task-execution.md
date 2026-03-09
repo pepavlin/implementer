@@ -53,11 +53,15 @@ errorRetry:
 ## Task State Machine
 
 ```
-starting → queued → running → completed
+queued → starting → running → completed
                   ↓          ↓
                retrying ← failed (if retries configured)
                   ↓
                running → ...
+
+                  running → waiting_for_pipeline → completed
+                                                  ↓
+                                                failed (if a check fails)
 ```
 
 States:
@@ -65,8 +69,9 @@ States:
 - `queued` – waiting for a free workspace slot
 - `running` – Docker container active
 - `retrying` – either: (a) waiting for `delaySeconds` before next auto-retry, or (b) timed out, waiting for server restart or manual `/retry`
-- `completed` – Claude exited 0, PR created
-- `failed` – terminal failure (all retries exhausted or no retry configured; never set on timeout)
+- `waiting_for_pipeline` – Claude finished, PR created, waiting for CI/CD pipeline checks to pass (only when `waitForPipeline: true` is set in project config); workspace is released, other tasks can start
+- `completed` – Claude exited 0, PR created (and pipeline passed if `waitForPipeline` is set)
+- `failed` – terminal failure (all retries exhausted or no retry configured; never set on timeout; also set when `waitForPipeline` is on and a pipeline check fails)
 - `interrupted` – server restarted while task was running; will be resumed on next boot
 - `cancelled` – manually cancelled via API
 

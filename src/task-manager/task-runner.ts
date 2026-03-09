@@ -241,8 +241,19 @@ export async function executeTask(task: Task): Promise<void> {
                     );
                 }
 
-                task.complete();
-                console.log(`[${task.id}] Completed and pushed successfully.`);
+                // If handlePipelines is configured and PRs were created, transition to
+                // "waiting_for_pipeline" so the PR poller can monitor the configured
+                // CI/CD pipeline jobs and retry on failure if needed.
+                if (project.data.handlePipelines && task.data.pullRequests?.length) {
+                    task.waitForPipeline();
+                    const pipelineNames = project.data.handlePipelines.pipelines;
+                    console.log(
+                        `[${task.id}] Waiting for pipeline checks [${pipelineNames.join(", ")}] on ${task.data.pullRequests.length} PR(s)...`
+                    );
+                } else {
+                    task.complete();
+                    console.log(`[${task.id}] Completed and pushed successfully.`);
+                }
             } else {
                 // Success with no commits — keep the branch for future chain tasks
                 console.log(

@@ -43,7 +43,11 @@ export class TaskManager {
             {
                 listAllTasks: () => this.listAllPollableTasks(),
                 updatePrState: (taskId, prUrl, state) =>
-                    this.updatePrState(taskId, prUrl, state)
+                    this.updatePrState(taskId, prUrl, state),
+                completePipelineTask: (taskId) =>
+                    this.completePipelineTask(taskId),
+                handlePipelineFailure: (taskId, error) =>
+                    this.handlePipelineFailure(taskId, error)
             },
             config
         );
@@ -207,7 +211,8 @@ export class TaskManager {
         return Array.from(this.tasks.values()).map((task) => ({
             taskId: task.id as string,
             projectId: task.data.projectId as string,
-            pullRequests: task.data.pullRequests
+            pullRequests: task.data.pullRequests,
+            status: task.data.status
         }));
     }
 
@@ -224,6 +229,78 @@ export class TaskManager {
         pr.state = state;
         pr.lastCheckedAt = new Date().toISOString();
         task.tickUpdate();
+    }
+
+    /**
+     * Complete a task that was waiting for pipeline checks.
+     * Called by PrPoller when all CI/CD checks on the PR have passed.
+     */
+    completePipelineTask(taskId: string): void {
+        const task = this.tasks.get(taskId as TaskId);
+        if (!task) return;
+        if (task.data.status !== "waiting_for_pipeline") return;
+        task.completePipeline();
+    }
+
+    /**
+     * Handle a pipeline failure for a task that was waiting for pipeline checks.
+     * Called by PrPoller when a CI/CD pipeline job fails.
+     *
+     * If handlePipelines.retryCount allows another attempt, a new continuation
+     * task is automatically created to fix the failing code. Otherwise the task
+     * is marked as failed.
+     */
+    handlePipelineFailure(taskId: string, error: string): void {
+        const task = this.tasks.get(taskId as TaskId);
+        if (!task) return;
+        if (task.data.status !== "waiting_for_pipeline") return;
+
+        const handlePipelines = task.project.data.handlePipelines;
+        const retryCount = handlePipelines?.retryCount ?? 1;
+        const currentAttempt = task.data.pipelineRetryAttempt ?? 0;
+
+        if (currentAttempt < retryCount) {
+            // Schedule an automatic pipeline-fix retry by creating a continuation task.
+            const pipelinesInfo = handlePipelines?.pipelines?.length
+                ? `\n\nRequired passing pipelines: ${handlePipelines.pipelines.join(", ")}`
+                : "";
+
+            const fixPrompt =
+                `CI/CD pipeline check(s) failed on the pull request.\n\n` +
+                `Failed pipeline job: ${error}\n\n` +
+                `Please:\n` +
+                `1. Review the CI pipeline output and identify what is failing\n` +
+                `2. Fix the code in the repository so the failing pipeline job(s) pass\n` +
+                `3. Do NOT change the PR title, description, or branch name unless strictly necessary` +
+                pipelinesInfo;
+
+            console.log(
+                `[${taskId}] Pipeline failed (attempt ${currentAttempt + 1}/${retryCount}) — scheduling automatic fix task.`
+            );
+
+            // Mark the current task as failed (pipeline check failed)
+            task.failPipeline(error);
+
+            // Create a new continuation task to fix the code
+            const fixTask = this.createNewTask(task.data.projectId, {
+                prompt: fixPrompt,
+                continueTaskId: taskId as TaskId,
+                priority: task.data.priority
+            });
+            // Track how many pipeline retries have been used
+            fixTask.data.pipelineRetryAttempt = currentAttempt + 1;
+            fixTask.tickUpdate();
+
+            console.log(
+                `[${taskId}] Created pipeline-fix task ${fixTask.id} (pipelineRetryAttempt=${fixTask.data.pipelineRetryAttempt}).`
+            );
+        } else {
+            // No retries left — mark as completed (best effort done, PR was created)
+            console.log(
+                `[${taskId}] Pipeline failed and retry limit reached (${retryCount}) — marking as completed.`
+            );
+            task.completePipeline();
+        }
     }
 
     /** Walk parentTaskId links to find the leaf (latest) task in a chain. */
