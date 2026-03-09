@@ -460,11 +460,46 @@ describe("TaskManager", () => {
       // After recovery, interrupted tasks should be queued
       const task = tm.getTask("restart-retry-task" as any);
       expect(task?.data.status).toBe("queued");
-      expect(task?.data.attempt).toBe(1); // attempt not changed by recovery itself
+      // attempt is incremented when the task has a branch, so the restarted run
+      // uses checkoutBranchAll (resume) instead of prepareNewBranchAll (fresh start).
+      // This prevents commits from the interrupted run from leaking into the new run.
+      expect(task?.data.attempt).toBe(2);
 
       // Branch should be preserved for the next run
       const entry = tm.tasks.get("restart-retry-task" as any);
       expect(entry?.branch?.name).toBe("impl/test-restart-retry-task");
+    });
+
+    it("interrupted task WITHOUT a branch keeps attempt=1 (branch not yet generated)", async () => {
+      // If a task was interrupted before branch generation, attempt must NOT be incremented —
+      // it should start fresh via prepareNewBranchAll.
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({
+        taskId: "no-branch-task",
+        status: "running",
+        completedAt: null,
+        workspaceId: 0,
+        attempt: 1,
+        branch: undefined,
+      }));
+
+      mkdirSync(join(TMP, "projects", PROJECT_ID, "instances", "0"), { recursive: true });
+
+      const tm = new TaskManager(config);
+      const project = tm.config.projects[PROJECT_ID as any];
+      project.initialize();
+      vi.spyOn(project, "initialize").mockImplementation(() => {});
+      vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+      await tm.init();
+
+      const task = tm.getTask("no-branch-task" as any);
+      expect(task?.data.status).toBe("queued");
+      // No branch → attempt stays at 1 so a fresh branch is created via prepareNewBranchAll
+      expect(task?.data.attempt).toBe(1);
     });
 
     it("retrying tasks with past nextRetryAt are re-queued on restart", async () => {

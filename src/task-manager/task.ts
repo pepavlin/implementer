@@ -47,6 +47,15 @@ export class Task {
                 break;
             case "running":
             case "interrupted":
+                // Increment attempt so the task resumes on its existing branch
+                // (via checkoutBranchAll) rather than attempting to create a new
+                // branch (prepareNewBranchAll). Without this, a restarted task
+                // with attempt=1 would call prepareNewBranchAll, which could
+                // check out a stale local or remote branch with commits from
+                // the interrupted run and contaminate the new execution.
+                if (this.data.branch) {
+                    this.data.attempt++;
+                }
                 this.unshift();
                 break;
             // "retrying" tasks stay as-is — dequeueAvailableTasks will
