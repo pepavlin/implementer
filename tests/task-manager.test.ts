@@ -1320,7 +1320,7 @@ describe("TaskManager", () => {
       expect(result.data.completedAt).toBeDefined();
     });
 
-    it("recoverTask re-enqueues starting tasks as queued", async () => {
+    it("recoverTask re-enqueues starting tasks (no branch) as queued without incrementing attempt", async () => {
       const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
@@ -1331,6 +1331,7 @@ describe("TaskManager", () => {
         branch: null,
         completedAt: null,
         workspaceId: null,
+        attempt: 1,
       }));
 
       const tm = new TaskManager(config);
@@ -1343,12 +1344,131 @@ describe("TaskManager", () => {
       await tm.init();
 
       const task = tm.getTask("starting-task" as any);
+      // No branch → start fresh (attempt stays at 1, unshifted to front of queue)
       expect(task?.data.status).toBe("queued");
+      expect(task?.data.attempt).toBe(1);
 
       const onDisk = JSON.parse(
         readFileSync(join(TMP, "tasks", "starting-task.json"), "utf-8"),
       );
       expect(onDisk.status).toBe("queued");
+    });
+
+    it("starting task WITH branch on restart increments attempt and unshifts to front of queue", async () => {
+      // When a task was in "starting" with branch metadata already generated, on restart
+      // it should be treated like an interrupted running task: attempt++ and unshifted
+      // to front. This ensures executeTask uses checkoutBranchAll (resume existing branch)
+      // rather than prepareNewBranchAll (create new branch), avoiding duplicate branches.
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      // Simulate a task that was retried from waiting_for_pipeline (attempt=2),
+      // entered "starting", but the service restarted before it progressed to "running".
+      store.save(makePersistedTask({
+        taskId: "starting-with-branch",
+        status: "starting" as any,
+        branch: "impl/test-starting-with-branch",
+        completedAt: null,
+        workspaceId: null,
+        attempt: 2,
+      }));
+
+      const tm = new TaskManager(config);
+      const project = tm.config.projects[PROJECT_ID as any];
+      project.initialize();
+      vi.spyOn(project, 'initialize').mockImplementation(() => {});
+      vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+      await tm.init();
+
+      const task = tm.getTask("starting-with-branch" as any);
+      // Branch present → attempt incremented so checkoutBranchAll is used on next run
+      expect(task?.data.status).toBe("queued");
+      expect(task?.data.attempt).toBe(3);
+      expect(task?.branch?.name).toBe("impl/test-starting-with-branch");
+    });
+
+    it("starting task fails with timeout when pool.acquire hangs beyond startingTimeoutSeconds", async () => {
+      // This simulates the reported bug: a task stuck in "starting" for too long
+      // (e.g. workspace acquisition hanging on git network operations).
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+
+      const config = makeConfig({
+        server: {
+          workspaceDir: TMP,
+          metaCpus: 0.4,
+          sandboxCpus: 0.4,
+          // Very short timeout so the test doesn't take long
+          startingTimeoutSeconds: 0.05, // 50 ms
+        },
+        projects: {
+          [PROJECT_ID]: {
+            repositories: [{ name: "my-repo", url: "https://github.com/test/repo.git", defaultBranch: "main" }],
+            claudeCode: { command: "claude" },
+            errorRetry: { maxAttempts: 3, delaySeconds: 60 },
+          },
+        },
+      });
+
+      const tm = new TaskManager(config);
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({
+        slug: "hang-task",
+        title: "Hang Task",
+        estimatedDurationSeconds: 600,
+      });
+
+      const project = tm.config.projects[PROJECT_ID as any];
+      project.initialize();
+      vi.spyOn(project, "initialize").mockImplementation(() => {});
+      vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(true);
+      // pool.acquire never resolves — simulates a hanging git operation
+      vi.spyOn(project.pool, "acquire").mockReturnValue(new Promise(() => {}));
+
+      const task = tm.createNewTask(PROJECT_ID as any, { prompt: "Hang task" });
+
+      // Wait for the starting phase to time out (50ms timeout + overhead)
+      await new Promise((r) => setTimeout(r, 300));
+
+      // Task should be in "retrying" (errorRetry is configured) rather than stuck in "starting"
+      expect(task.data.status).toBe("retrying");
+    });
+
+    it("starting task fails (no errorRetry) when starting timeout fires", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+
+      const config = makeConfig({
+        server: {
+          workspaceDir: TMP,
+          metaCpus: 0.4,
+          sandboxCpus: 0.4,
+          startingTimeoutSeconds: 0.05, // 50 ms
+        },
+      });
+
+      const tm = new TaskManager(config);
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({
+        slug: "hang-task",
+        title: "Hang Task",
+        estimatedDurationSeconds: 600,
+      });
+
+      const project = tm.config.projects[PROJECT_ID as any];
+      project.initialize();
+      vi.spyOn(project, "initialize").mockImplementation(() => {});
+      vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(true);
+      vi.spyOn(project.pool, "acquire").mockReturnValue(new Promise(() => {}));
+
+      const task = tm.createNewTask(PROJECT_ID as any, { prompt: "Hang task" });
+
+      await new Promise((r) => setTimeout(r, 300));
+
+      // No errorRetry → should be "failed"
+      expect(task.data.status).toBe("failed");
     });
 
     it("retryTask rejects starting tasks with TaskActiveError", async () => {

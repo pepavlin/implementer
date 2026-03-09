@@ -42,6 +42,20 @@ export class Task {
     initialize() {
         switch (this.data.status) {
             case "starting":
+                // A "starting" task was interrupted mid-startup (after status was
+                // persisted to disk but before execution began). Treat it like an
+                // interrupted running task so it resumes correctly:
+                //  - If branch metadata was already generated, increment attempt so
+                //    the restarted run uses checkoutBranchAll (resume the existing
+                //    branch) instead of prepareNewBranchAll (create a new branch).
+                //    Without this, the fresh run with the same branch name could fail
+                //    or create a duplicate branch.
+                //  - Unshift to the front of the queue to restore execution priority.
+                if (this.data.branch) {
+                    this.data.attempt++;
+                }
+                this.unshift();
+                break;
             case "queued":
                 this.enqueue();
                 break;
@@ -277,8 +291,40 @@ export class Task {
         this.data.startedAt = new Date().toISOString();
         this.tickUpdate();
 
+        const startingTimeoutMs =
+            (this.manager.config.server.startingTimeoutSeconds ?? 300) * 1000;
+
+        // Track whether the starting-phase timeout fired.
+        // Used to suppress redundant fail() calls from the catch block when the
+        // timeout already handled the failure, and to guard against the workspace
+        // being used after a timeout fires mid-acquire.
+        let startingTimedOut = false;
+        // Holds the workspace id if acquire() completes AFTER the timeout fired,
+        // so the timeout handler can release it immediately.
+        let postTimeoutWorkspaceId: import("../workspace-pool.js").WorkspaceId | undefined;
+
+        const startingTimeoutId = setTimeout(() => {
+            if (this.cancelled || startingTimedOut) return;
+            startingTimedOut = true;
+            const msg = `Task stuck in starting state for more than ${startingTimeoutMs / 1000}s — failing and re-queuing`;
+            console.warn(`[${this.id}] ${msg}`);
+            // fail() will set status to "retrying" (if errorRetry is configured) or
+            // "failed", and call tickUpdate() → dequeueAvailableTasks().
+            this.fail(msg);
+            // If acquire() was already in-flight and completes after this timeout,
+            // the resolved workspace id will be stored in postTimeoutWorkspaceId and
+            // released below.
+            if (postTimeoutWorkspaceId !== undefined) {
+                this.project.pool.release(postTimeoutWorkspaceId);
+                postTimeoutWorkspaceId = undefined;
+            }
+        }, startingTimeoutMs);
+
         try {
-            if (this.cancelled) return;
+            if (this.cancelled) {
+                clearTimeout(startingTimeoutId);
+                return;
+            }
 
             // Generate metadata (branch, title, duration estimate)
             if (
@@ -298,7 +344,10 @@ export class Task {
                 this.tickUpdate();
             }
 
-            if (this.cancelled) return;
+            if (this.cancelled || startingTimedOut) {
+                clearTimeout(startingTimeoutId);
+                return;
+            }
 
             this.executor = new Executor(
                 this.project.data.claudeCode,
@@ -306,22 +355,42 @@ export class Task {
                 this.manager.config.server
             );
 
-            this.workspace = await this.project.pool.acquire(
+            const acquired = await this.project.pool.acquire(
                 this.project.data.repositories,
                 this.project.data.auth?.githubToken
             );
 
+            // If the timeout fired while acquire() was in-flight, release the
+            // workspace immediately and bail out — the task is already failed/retrying.
+            if (startingTimedOut) {
+                this.project.pool.release(acquired.id);
+                return;
+            }
+            // Store the workspace; also set postTimeoutWorkspaceId so the timeout
+            // handler can release it in the unlikely race where the timer fires
+            // between the acquire resolve and the startingTimedOut check above.
+            this.workspace = acquired;
+            postTimeoutWorkspaceId = acquired.id;
+
             if (this.cancelled) {
+                clearTimeout(startingTimeoutId);
                 this.project.pool.release(this.workspace.id);
                 return;
             }
+
+            // Clear postTimeoutWorkspaceId now that we've confirmed we own the
+            // workspace and will manage its lifecycle via executeTask's finally block.
+            clearTimeout(startingTimeoutId);
+            postTimeoutWorkspaceId = undefined;
 
             this.data.status = "running";
             this.tickUpdate();
 
             await executeTask(this);
         } catch (err) {
-            if (!this.cancelled) {
+            clearTimeout(startingTimeoutId);
+            // If the starting timeout already called fail(), don't call it again.
+            if (!this.cancelled && !startingTimedOut) {
                 const msg = err instanceof Error ? err.message : String(err);
                 this.fail(msg);
                 console.error(`[${this.id}] Run failed:`, msg);
