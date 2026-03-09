@@ -212,7 +212,8 @@ export class TaskManager {
             taskId: task.id as string,
             projectId: task.data.projectId as string,
             pullRequests: task.data.pullRequests,
-            status: task.data.status
+            status: task.data.status,
+            pipelineWaitingSince: task.data.pipelineWaitingSince
         }));
     }
 

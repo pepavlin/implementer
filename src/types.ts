@@ -76,6 +76,14 @@ export interface TaskData {
      * Used to enforce the retryCount limit for pipeline-triggered retries.
      */
     pipelineRetryAttempt?: number;
+    /**
+     * ISO timestamp of when the task first entered "waiting_for_pipeline" status.
+     * Used by the PR poller to enforce the handlePipelines.timeoutHours safety net —
+     * if the task has been waiting longer than the configured timeout, it is
+     * auto-completed to prevent indefinite blocking on unresolvable check states
+     * (e.g. EXPECTED legacy checks, WAITING environment-approval checks, etc.).
+     */
+    pipelineWaitingSince?: string;
 }
 
 export interface PersistedTask extends TaskData {

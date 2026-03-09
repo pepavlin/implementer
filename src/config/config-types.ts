@@ -78,6 +78,14 @@ export interface HandlePipelinesConfig {
      * Defaults to 1 (one automatic fix attempt).
      */
     retryCount?: number;
+    /**
+     * Maximum number of hours a task may remain in "waiting_for_pipeline" state
+     * before it is automatically completed. This is a safety net to prevent tasks
+     * from being stuck indefinitely when GitHub returns unknown check states (e.g.
+     * EXPECTED, WAITING, or other unrecognised values that can't be resolved).
+     * Defaults to 8 hours. Set to 0 to disable the timeout entirely.
+     */
+    timeoutHours?: number;
 }
 export interface DefaultsConfig {
     systemPrompt?: string;
@@ -165,7 +173,8 @@ const HandlePipelinesSchema = z
         pipelines: z.array(z.string().min(1)).min(1, {
             message: "handlePipelines.pipelines must contain at least one pipeline job name"
         }),
-        retryCount: z.number().int().min(0).default(1)
+        retryCount: z.number().int().min(0).default(1),
+        timeoutHours: z.number().min(0).default(8)
     })
     .strict();
 

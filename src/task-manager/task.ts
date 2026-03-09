@@ -203,9 +203,15 @@ export class Task {
      * The task has finished executing and a PR has been created, but we are
      * waiting for all CI/CD pipeline checks on the PR to pass before completing.
      * The workspace is already released at this point — this is a passive wait state.
+     *
+     * Records pipelineWaitingSince on the first transition so that the PR poller
+     * can enforce the handlePipelines.timeoutHours safety net.
      */
     waitForPipeline(): void {
         this.data.status = "waiting_for_pipeline";
+        if (!this.data.pipelineWaitingSince) {
+            this.data.pipelineWaitingSince = new Date().toISOString();
+        }
         this.tickUpdate();
     }
 

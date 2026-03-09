@@ -23,7 +23,7 @@ function makeTask(overrides: Partial<PollableTask> = {}): PollableTask {
     };
 }
 
-function makeConfig(githubToken?: string, pipelineNames?: string[]): Config {
+function makeConfig(githubToken?: string, pipelineNames?: string[], timeoutHours?: number): Config {
     return {
         server: { workspaceDir: "/tmp", maxConcurrentTasks: 3, adminPassword: "pw", metaCpus: 0.4, sandboxCpus: 0.4 },
         projects: {
@@ -35,7 +35,7 @@ function makeConfig(githubToken?: string, pipelineNames?: string[]): Config {
                     auth: githubToken ? { githubToken } : {},
                     maxConcurrentTasks: 1,
                     handlePipelines: pipelineNames
-                        ? { pipelines: pipelineNames, retryCount: 1 }
+                        ? { pipelines: pipelineNames, retryCount: 1, timeoutHours: timeoutHours ?? 8 }
                         : undefined,
                 },
             },
@@ -246,6 +246,31 @@ describe("analyzePipelineChecks", () => {
     it("is case-insensitive for state values", () => {
         const checks: GhCheckRun[] = [
             { name: "build", state: "success", conclusion: "success" },
+        ];
+        expect(analyzePipelineChecks(checks)).toEqual({ status: "passing" });
+    });
+
+    it("returns passing for EXPECTED state (legacy required status check placeholder that never completes)", () => {
+        // GitHub creates EXPECTED checks for required status contexts that
+        // haven't been submitted. If no service reports, the check stays EXPECTED
+        // forever. Treating it as neutral/passing prevents blocking the task indefinitely.
+        const checks: GhCheckRun[] = [
+            { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+            { name: "legacy-required", state: "EXPECTED", conclusion: "" },
+        ];
+        expect(analyzePipelineChecks(checks)).toEqual({ status: "passing" });
+    });
+
+    it("returns passing when only EXPECTED checks are present", () => {
+        const checks: GhCheckRun[] = [
+            { name: "status-check", state: "EXPECTED", conclusion: "" },
+        ];
+        expect(analyzePipelineChecks(checks)).toEqual({ status: "passing" });
+    });
+
+    it("returns passing for EXPECTED state (case-insensitive)", () => {
+        const checks: GhCheckRun[] = [
+            { name: "legacy", state: "expected", conclusion: "" },
         ];
         expect(analyzePipelineChecks(checks)).toEqual({ status: "passing" });
     });
@@ -1144,6 +1169,159 @@ describe("PrPoller", () => {
 
             // "deploy" failure is not in watched pipelines — should complete
             expect(accessor.pipelineCompleted).toContain("ignore-unrelated-task");
+            expect(accessor.pipelineFailures).toHaveLength(0);
+        });
+
+        it("completes task when EXPECTED check is present (legacy required status check never submitted)", async () => {
+            // Reproduces: task stuck in waiting_for_pipeline when GitHub has an
+            // "EXPECTED" legacy required status check that a service never submits.
+            // These checks stay EXPECTED forever — treating them as pending blocks the task.
+            const task = makeTask({
+                taskId: "expected-check-task",
+                status: "waiting_for_pipeline",
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/100", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const checksWithExpected: GhCheckRun[] = [
+                { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+                { name: "test", state: "SUCCESS", conclusion: "SUCCESS" },
+                // Legacy required status check that was never submitted
+                { name: "legacy-ci", state: "EXPECTED", conclusion: "" },
+            ];
+            const poller = new PrPoller(
+                accessor, makeConfig("token"), 60_000,
+                fakeQuery("OPEN"), 1,
+                fakeChecksQuery(checksWithExpected)
+            );
+
+            await poller.pollAll();
+
+            // EXPECTED is treated as neutral/passing — task should complete
+            expect(accessor.pipelineCompleted).toContain("expected-check-task");
+            expect(accessor.pipelineFailures).toHaveLength(0);
+        });
+
+        // ── Pipeline timeout safety net ────────────────────────────────────────
+
+        it("auto-completes task that has been stuck in waiting_for_pipeline beyond configured timeout", async () => {
+            // Simulate a task that entered waiting_for_pipeline 9 hours ago (timeout: 8h)
+            const nineHoursAgo = new Date(Date.now() - 9 * 60 * 60 * 1000).toISOString();
+            const task = makeTask({
+                taskId: "timeout-task",
+                status: "waiting_for_pipeline",
+                pipelineWaitingSince: nineHoursAgo,
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/110", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            // Config with 8h timeout (default) — task has been waiting 9h → should auto-complete
+            const configWithTimeout = makeConfig("token", ["build"], 8);
+            const checksQuery = vi.fn(fakeChecksQuery([
+                // Still pending — would normally keep waiting
+                { name: "build", state: "PENDING", conclusion: "" },
+            ]));
+            const poller = new PrPoller(
+                accessor, configWithTimeout, 60_000,
+                fakeQuery("OPEN"), 1,
+                checksQuery
+            );
+
+            await poller.pollAll();
+
+            // Timeout expired — task should be auto-completed without checking pipeline
+            expect(accessor.pipelineCompleted).toContain("timeout-task");
+            expect(accessor.pipelineFailures).toHaveLength(0);
+            // checksQuery should NOT have been called (timeout fires before pipeline check)
+            expect(checksQuery).not.toHaveBeenCalled();
+        });
+
+        it("does not auto-complete task that is within the timeout window", async () => {
+            // Task that entered waiting_for_pipeline 1 hour ago (timeout: 8h) — still within window
+            const oneHourAgo = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString();
+            const task = makeTask({
+                taskId: "within-timeout-task",
+                status: "waiting_for_pipeline",
+                pipelineWaitingSince: oneHourAgo,
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/111", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const configWithTimeout = makeConfig("token", ["build"], 8);
+            const pendingChecks: GhCheckRun[] = [
+                { name: "build", state: "PENDING", conclusion: "" },
+            ];
+            const poller = new PrPoller(
+                accessor, configWithTimeout, 60_000,
+                fakeQuery("OPEN"), 1,
+                fakeChecksQuery(pendingChecks)
+            );
+
+            await poller.pollAll();
+
+            // Within timeout — should keep waiting
+            expect(accessor.pipelineCompleted).toHaveLength(0);
+            expect(accessor.pipelineFailures).toHaveLength(0);
+        });
+
+        it("does not auto-complete when timeoutHours is 0 (timeout disabled)", async () => {
+            // timeoutHours=0 disables the safety net entirely
+            const longAgo = new Date(Date.now() - 100 * 60 * 60 * 1000).toISOString();
+            const task = makeTask({
+                taskId: "no-timeout-task",
+                status: "waiting_for_pipeline",
+                pipelineWaitingSince: longAgo,
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/112", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const configWithZeroTimeout = makeConfig("token", ["build"], 0);
+            const pendingChecks: GhCheckRun[] = [
+                { name: "build", state: "PENDING", conclusion: "" },
+            ];
+            const poller = new PrPoller(
+                accessor, configWithZeroTimeout, 60_000,
+                fakeQuery("OPEN"), 1,
+                fakeChecksQuery(pendingChecks)
+            );
+
+            await poller.pollAll();
+
+            // Timeout disabled (0) — should keep waiting even after 100 hours
+            expect(accessor.pipelineCompleted).toHaveLength(0);
+            expect(accessor.pipelineFailures).toHaveLength(0);
+        });
+
+        it("does not auto-complete when pipelineWaitingSince is not set", async () => {
+            // Task in waiting_for_pipeline but pipelineWaitingSince was not recorded
+            // (e.g. tasks created before the field was added) — timeout should not fire
+            const task = makeTask({
+                taskId: "no-since-task",
+                status: "waiting_for_pipeline",
+                pipelineWaitingSince: undefined,
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/113", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const configWithTimeout = makeConfig("token", ["build"], 8);
+            const pendingChecks: GhCheckRun[] = [
+                { name: "build", state: "PENDING", conclusion: "" },
+            ];
+            const poller = new PrPoller(
+                accessor, configWithTimeout, 60_000,
+                fakeQuery("OPEN"), 1,
+                fakeChecksQuery(pendingChecks)
+            );
+
+            await poller.pollAll();
+
+            // No pipelineWaitingSince → timeout cannot fire → keep waiting
+            expect(accessor.pipelineCompleted).toHaveLength(0);
             expect(accessor.pipelineFailures).toHaveLength(0);
         });
     });
