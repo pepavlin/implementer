@@ -52,6 +52,20 @@ IMPORTANT WORKSPACE RULES:
 - At the very end of your response, write a concise 2-3 sentence summary of what you implemented or changed. Do not repeat the full details — just the key outcome.`;
 }
 
+/**
+ * Build the PR description body from the original task prompt.
+ * This becomes the main pull request description so reviewers immediately
+ * see what was requested.
+ */
+export function buildPrDescription(prompt: string): string {
+    return `## Task\n\n${prompt}`;
+}
+
+/**
+ * Build the PR result comment from Claude's summary and commit logs.
+ * Posted as a comment after PR creation so the outcome is visible
+ * alongside the original task description.
+ */
 export function buildPrBody(
     assistantMessage: string,
     commitLogs: Map<string, string>

@@ -1,5 +1,52 @@
 import { describe, it, expect } from "vitest";
-import { buildChainHistory, type ChainTaskInfo } from "../src/task-manager/utils.js";
+import { buildChainHistory, buildPrDescription, buildPrBody, type ChainTaskInfo } from "../src/task-manager/utils.js";
+
+describe("buildPrDescription", () => {
+    it("wraps the task prompt under a ## Task heading", () => {
+        const result = buildPrDescription("Add dark mode toggle");
+        expect(result).toBe("## Task\n\nAdd dark mode toggle");
+    });
+
+    it("preserves multi-line prompts verbatim", () => {
+        const prompt = "Fix login bug\n\nUsers cannot log in with email.";
+        const result = buildPrDescription(prompt);
+        expect(result).toBe(`## Task\n\n${prompt}`);
+    });
+});
+
+describe("buildPrBody", () => {
+    it("returns summary and commits when both are provided", () => {
+        const logs = new Map([["repo", "abc123 feat: add stuff"]]);
+        const result = buildPrBody("Implemented the feature.", logs);
+        expect(result).toContain("## Summary\n\nImplemented the feature.");
+        expect(result).toContain("## Commits\n\nabc123 feat: add stuff");
+    });
+
+    it("returns only summary when commit logs are empty", () => {
+        const result = buildPrBody("Done.", new Map());
+        expect(result).toBe("## Summary\n\nDone.");
+    });
+
+    it("returns only commits when assistant message is empty", () => {
+        const logs = new Map([["repo", "abc123 fix: bug"]]);
+        const result = buildPrBody("", logs);
+        expect(result).toBe("## Commits\n\nabc123 fix: bug");
+    });
+
+    it("returns fallback when both are empty", () => {
+        const result = buildPrBody("", new Map());
+        expect(result).toBe("No summary available.");
+    });
+
+    it("joins commits from multiple repos with newlines", () => {
+        const logs = new Map([
+            ["repo-a", "aaa feat: first"],
+            ["repo-b", "bbb fix: second"],
+        ]);
+        const result = buildPrBody("Summary", logs);
+        expect(result).toContain("aaa feat: first\nbbb fix: second");
+    });
+});
 
 describe("buildChainHistory", () => {
     it("returns empty string when there are no ancestors", () => {

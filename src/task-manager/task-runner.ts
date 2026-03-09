@@ -5,6 +5,7 @@ import {
     buildSystemInstructions,
     buildChainHistory,
     buildPrBody,
+    buildPrDescription,
     getDockerMount,
     type ChainTaskInfo
 } from "./utils.js";
@@ -193,7 +194,7 @@ export async function executeTask(task: Task): Promise<void> {
                     githubToken
                 );
 
-                // Build PR body from Claude's summary + commit log
+                // PR description = original task; result comment = Claude's summary + commits
                 const assistantMessage = extractLastAssistantMessage(
                     task.data.output
                 );
@@ -203,7 +204,8 @@ export async function executeTask(task: Task): Promise<void> {
                     branchName,
                     preRunHeads
                 );
-                const prBody = buildPrBody(assistantMessage, commitLogs);
+                const prBody = buildPrDescription(task.data.prompt);
+                const resultComment = buildPrBody(assistantMessage, commitLogs);
 
                 console.log(`[${task.id}] Creating pull request(s)...`);
                 const prTitle = task.data.prompt.split("\n")[0].slice(0, 120);
@@ -224,12 +226,11 @@ export async function executeTask(task: Task): Promise<void> {
                             `[${task.id}] Created ${pullRequests.length} PR(s): ${pullRequests.map((pr) => pr.url).join(", ")}`
                         );
 
-                        // Post original task prompt as a comment
-                        const taskComment = `## Task\n\n${task.data.prompt}`;
+                        // Post result (summary + commits) as a comment
                         await manager.gitManager.commentOnPullRequestAll(
                             workspace.dir,
                             pullRequests,
-                            taskComment,
+                            resultComment,
                             githubToken
                         );
                     }
@@ -273,7 +274,8 @@ export async function executeTask(task: Task): Promise<void> {
                     branchName,
                     preRunHeads
                 );
-                const prBody = buildPrBody(assistantMessage, commitLogs);
+                const prBody = buildPrDescription(task.data.prompt);
+                const resultComment = buildPrBody(assistantMessage, commitLogs);
 
                 console.log(
                     `[${task.id}] Creating draft pull request(s) for partial work...`
@@ -296,11 +298,11 @@ export async function executeTask(task: Task): Promise<void> {
                             `[${task.id}] Created ${pullRequests.length} draft PR(s): ${pullRequests.map((pr) => pr.url).join(", ")}`
                         );
 
-                        const taskComment = `## Task\n\n${task.data.prompt}`;
+                        // Post result (summary + commits) as a comment
                         await manager.gitManager.commentOnPullRequestAll(
                             workspace.dir,
                             pullRequests,
-                            taskComment,
+                            resultComment,
                             githubToken
                         );
                     }
@@ -335,7 +337,7 @@ export async function executeTask(task: Task): Promise<void> {
                     githubToken
                 );
 
-                // Build PR body from Claude's summary + commit log
+                // PR description = original task; result comment = Claude's summary + commits
                 const assistantMessage = extractLastAssistantMessage(
                     task.data.output
                 );
@@ -345,7 +347,8 @@ export async function executeTask(task: Task): Promise<void> {
                     branchName,
                     preRunHeads
                 );
-                const prBody = buildPrBody(assistantMessage, commitLogs);
+                const prBody = buildPrDescription(task.data.prompt);
+                const resultComment = buildPrBody(assistantMessage, commitLogs);
 
                 console.log(`[${task.id}] Creating draft pull request(s)...`);
                 const prTitle = task.data.prompt.split("\n")[0].slice(0, 120);
@@ -366,12 +369,11 @@ export async function executeTask(task: Task): Promise<void> {
                             `[${task.id}] Created ${pullRequests.length} draft PR(s): ${pullRequests.map((pr) => pr.url).join(", ")}`
                         );
 
-                        // Post original task prompt as a comment
-                        const taskComment = `## Task\n\n${task.data.prompt}`;
+                        // Post result (summary + commits) as a comment
                         await manager.gitManager.commentOnPullRequestAll(
                             workspace.dir,
                             pullRequests,
-                            taskComment,
+                            resultComment,
                             githubToken
                         );
                     }
