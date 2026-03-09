@@ -47,7 +47,10 @@ export interface TaskData {
     prompt: string;
     title?: string;
     status: TaskStatus;
-    startedAt: string;
+    createdAt: string;
+    /** ISO timestamp of when the task transitioned out of "queued" and began active processing.
+     *  Set at the "starting" transition. Used for accurate duration calculation (excludes queue wait time). */
+    startedAt?: string;
     completedAt: string | null;
     nextRetryAt?: string; // ISO timestamp for when the next retry will be attempted, if status is "retrying"
     output: string;

@@ -16,7 +16,7 @@ Tasks can be assigned a **priority level** that controls the order in which they
 ### Sorting Rules
 
 1. **Priority first** — higher weight tasks are started before lower weight tasks.
-2. **FIFO within same priority** — when two tasks share the same priority, the one that was created earlier (`startedAt`) runs first.
+2. **FIFO within same priority** — when two tasks share the same priority, the one that was created earlier (`createdAt`) runs first.
 
 ### Setting Priority
 
@@ -98,7 +98,7 @@ const sortedQueue = [...this.queue].sort((aId, bId) => {
     const aPriority = PRIORITY_WEIGHT[a.data.priority ?? "normal"];
     const bPriority = PRIORITY_WEIGHT[b.data.priority ?? "normal"];
     if (bPriority !== aPriority) return bPriority - aPriority; // Higher priority first
-    return new Date(a.data.startedAt).getTime() - new Date(b.data.startedAt).getTime(); // FIFO
+    return new Date(a.data.createdAt).getTime() - new Date(b.data.createdAt).getTime(); // FIFO
 });
 ```
 

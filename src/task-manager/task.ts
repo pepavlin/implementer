@@ -218,6 +218,7 @@ export class Task {
         this.dequeue();
 
         this.data.status = "starting";
+        this.data.startedAt = new Date().toISOString();
         this.tickUpdate();
 
         try {

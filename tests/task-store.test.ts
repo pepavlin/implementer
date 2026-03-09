@@ -13,7 +13,7 @@ function makeTask(overrides: Partial<PersistedTask> = {}): PersistedTask {
     branch: "impl/test-abc123",
     prompt: "Add a button",
     status: "completed",
-    startedAt: "2025-01-01T00:00:00.000Z",
+    createdAt: "2025-01-01T00:00:00.000Z",
     completedAt: "2025-01-01T01:00:00.000Z",
     output: "Done",
     workspaceId: 0,
@@ -145,7 +145,7 @@ describe("TaskStore", () => {
         projectId: "test-project",
         status: "queued",
         prompt: "test",
-        startedAt: "2025-01-01T00:00:00.000Z",
+        createdAt: "2025-01-01T00:00:00.000Z",
         output: "",
         attempt: 1,
       }),
@@ -165,7 +165,7 @@ describe("TaskStore", () => {
       branch: "impl/round-trip-rt-test",
       prompt: "Implement dark mode",
       status: "failed",
-      startedAt: "2025-06-01T12:00:00.000Z",
+      createdAt: "2025-06-01T12:00:00.000Z",
       completedAt: "2025-06-01T13:30:00.000Z",
       output: "Error occurred",
       error: "Claude Code exited with code 1",
@@ -182,7 +182,7 @@ describe("TaskStore", () => {
     expect(rt.branch).toBe("impl/round-trip-rt-test");
     expect(rt.prompt).toBe("Implement dark mode");
     expect(rt.status).toBe("failed");
-    expect(rt.startedAt).toBe("2025-06-01T12:00:00.000Z");
+    expect(rt.createdAt).toBe("2025-06-01T12:00:00.000Z");
     expect(rt.completedAt).toBe("2025-06-01T13:30:00.000Z");
     expect(rt.output).toBe("Error occurred");
     expect(rt.error).toBe("Claude Code exited with code 1");

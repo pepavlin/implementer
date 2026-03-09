@@ -22,7 +22,8 @@ function makeTask(overrides: Partial<any> = {}): any {
         projectId: overrides.projectId ?? "my-project",
         prompt: overrides.prompt ?? "Do something",
         status: overrides.status ?? "completed",
-        startedAt: overrides.startedAt ?? new Date("2024-01-01T10:00:00Z").toISOString(),
+        createdAt: overrides.createdAt ?? new Date("2024-01-01T10:00:00Z").toISOString(),
+        startedAt: overrides.startedAt,
         completedAt: overrides.completedAt !== undefined ? overrides.completedAt : new Date("2024-01-01T10:05:00Z").toISOString(),
         output: overrides.output ?? "",
         chainId: overrides.chainId ?? "abc12345",
@@ -236,17 +237,17 @@ describe("buildDashboardData", () => {
             makeTask({
                 taskId: "completed1" as TaskId,
                 status: "completed",
-                startedAt: new Date("2024-01-01T12:00:00Z").toISOString()
+                createdAt: new Date("2024-01-01T12:00:00Z").toISOString()
             }),
             makeTask({
                 taskId: "running1" as TaskId,
                 status: "running",
-                startedAt: new Date("2024-01-01T11:00:00Z").toISOString()
+                createdAt: new Date("2024-01-01T11:00:00Z").toISOString()
             }),
             makeTask({
                 taskId: "queued1" as TaskId,
                 status: "queued",
-                startedAt: new Date("2024-01-01T10:00:00Z").toISOString()
+                createdAt: new Date("2024-01-01T10:00:00Z").toISOString()
             })
         ];
         const tm = makeTaskManager(tasks) as unknown as TaskManager;
@@ -271,17 +272,17 @@ describe("buildDashboardData", () => {
             makeTask({
                 taskId: "completed1" as TaskId,
                 status: "completed",
-                startedAt: new Date("2024-01-01T13:00:00Z").toISOString()
+                createdAt: new Date("2024-01-01T13:00:00Z").toISOString()
             }),
             makeTask({
                 taskId: "starting1" as TaskId,
                 status: "starting",
-                startedAt: new Date("2024-01-01T11:00:00Z").toISOString()
+                createdAt: new Date("2024-01-01T11:00:00Z").toISOString()
             }),
             makeTask({
                 taskId: "queued1" as TaskId,
                 status: "queued",
-                startedAt: new Date("2024-01-01T10:00:00Z").toISOString()
+                createdAt: new Date("2024-01-01T10:00:00Z").toISOString()
             })
         ];
         const tm = makeTaskManager(tasks) as unknown as TaskManager;
@@ -304,22 +305,22 @@ describe("buildDashboardData", () => {
             makeTask({
                 taskId: "completed1" as TaskId,
                 status: "completed",
-                startedAt: new Date("2024-01-01T14:00:00Z").toISOString()
+                createdAt: new Date("2024-01-01T14:00:00Z").toISOString()
             }),
             makeTask({
                 taskId: "running1" as TaskId,
                 status: "running",
-                startedAt: new Date("2024-01-01T13:00:00Z").toISOString()
+                createdAt: new Date("2024-01-01T13:00:00Z").toISOString()
             }),
             makeTask({
                 taskId: "starting1" as TaskId,
                 status: "starting",
-                startedAt: new Date("2024-01-01T12:00:00Z").toISOString()
+                createdAt: new Date("2024-01-01T12:00:00Z").toISOString()
             }),
             makeTask({
                 taskId: "queued1" as TaskId,
                 status: "queued",
-                startedAt: new Date("2024-01-01T11:00:00Z").toISOString()
+                createdAt: new Date("2024-01-01T11:00:00Z").toISOString()
             })
         ];
         const tm = makeTaskManager(tasks) as unknown as TaskManager;
@@ -340,17 +341,17 @@ describe("buildDashboardData", () => {
             makeTask({
                 taskId: "queued-old" as TaskId,
                 status: "queued",
-                startedAt: new Date("2024-01-01T09:00:00Z").toISOString()
+                createdAt: new Date("2024-01-01T09:00:00Z").toISOString()
             }),
             makeTask({
                 taskId: "queued-new" as TaskId,
                 status: "queued",
-                startedAt: new Date("2024-01-01T11:00:00Z").toISOString()
+                createdAt: new Date("2024-01-01T11:00:00Z").toISOString()
             }),
             makeTask({
                 taskId: "completed1" as TaskId,
                 status: "completed",
-                startedAt: new Date("2024-01-01T10:00:00Z").toISOString()
+                createdAt: new Date("2024-01-01T10:00:00Z").toISOString()
             })
         ];
         const tm = makeTaskManager(tasks) as unknown as TaskManager;

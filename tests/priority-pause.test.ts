@@ -52,7 +52,7 @@ function makePersistedTask(overrides: Partial<any> = {}): PersistedTask {
     projectId: PROJECT_ID,
     prompt: "Add a button",
     status: "completed",
-    startedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
     completedAt: new Date().toISOString(),
     output: "Done",
     workspaceId: undefined,
@@ -314,19 +314,19 @@ describe("Priority-based dequeue ordering", () => {
       taskId: "low-task",
       status: "queued",
       priority: "low",
-      startedAt: new Date(now.getTime() + 1000).toISOString()
+      createdAt: new Date(now.getTime() + 1000).toISOString()
     }));
     store.save(makePersistedTask({
       taskId: "normal-task",
       status: "queued",
       priority: "normal",
-      startedAt: new Date(now.getTime() + 2000).toISOString()
+      createdAt: new Date(now.getTime() + 2000).toISOString()
     }));
     store.save(makePersistedTask({
       taskId: "high-task",
       status: "queued",
       priority: "high",
-      startedAt: new Date(now.getTime() + 3000).toISOString()
+      createdAt: new Date(now.getTime() + 3000).toISOString()
     }));
 
     const runOrder: string[] = [];
@@ -354,10 +354,10 @@ describe("Priority-based dequeue ordering", () => {
 
     const now = new Date();
     // Insert in non-priority order
-    store.save(makePersistedTask({ taskId: "normal-task", status: "queued", priority: "normal", startedAt: new Date(now.getTime() + 1000).toISOString() }));
-    store.save(makePersistedTask({ taskId: "critical-task", status: "queued", priority: "critical", startedAt: new Date(now.getTime() + 2000).toISOString() }));
-    store.save(makePersistedTask({ taskId: "low-task", status: "queued", priority: "low", startedAt: new Date(now.getTime() + 3000).toISOString() }));
-    store.save(makePersistedTask({ taskId: "high-task", status: "queued", priority: "high", startedAt: new Date(now.getTime() + 4000).toISOString() }));
+    store.save(makePersistedTask({ taskId: "normal-task", status: "queued", priority: "normal", createdAt: new Date(now.getTime() + 1000).toISOString() }));
+    store.save(makePersistedTask({ taskId: "critical-task", status: "queued", priority: "critical", createdAt: new Date(now.getTime() + 2000).toISOString() }));
+    store.save(makePersistedTask({ taskId: "low-task", status: "queued", priority: "low", createdAt: new Date(now.getTime() + 3000).toISOString() }));
+    store.save(makePersistedTask({ taskId: "high-task", status: "queued", priority: "high", createdAt: new Date(now.getTime() + 4000).toISOString() }));
 
     const runOrder: string[] = [];
     vi.spyOn(Task.prototype, "run").mockImplementation(function(this: any) {
@@ -385,8 +385,8 @@ describe("Priority-based dequeue ordering", () => {
 
     const now = new Date();
     // Both are "high" priority; task A was created first
-    store.save(makePersistedTask({ taskId: "high-task-a", status: "queued", priority: "high", startedAt: new Date(now.getTime()).toISOString() }));
-    store.save(makePersistedTask({ taskId: "high-task-b", status: "queued", priority: "high", startedAt: new Date(now.getTime() + 5000).toISOString() }));
+    store.save(makePersistedTask({ taskId: "high-task-a", status: "queued", priority: "high", createdAt: new Date(now.getTime()).toISOString() }));
+    store.save(makePersistedTask({ taskId: "high-task-b", status: "queued", priority: "high", createdAt: new Date(now.getTime() + 5000).toISOString() }));
 
     const runOrder: string[] = [];
     vi.spyOn(Task.prototype, "run").mockImplementation(function(this: any) {

@@ -110,8 +110,8 @@ export class TaskManager {
         const now = Date.now();
         for (const task of Array.from(this.tasks.values()).sort(
             (a, b) =>
-                new Date(a.data.startedAt).getTime() -
-                new Date(b.data.startedAt).getTime()
+                new Date(a.data.createdAt).getTime() -
+                new Date(b.data.createdAt).getTime()
         )) {
             if (
                 task.data.status === "retrying" &&
@@ -138,8 +138,8 @@ export class TaskManager {
             const aPriority = PRIORITY_WEIGHT[a.data.priority ?? "normal"] ?? 1;
             const bPriority = PRIORITY_WEIGHT[b.data.priority ?? "normal"] ?? 1;
             if (bPriority !== aPriority) return bPriority - aPriority; // Higher priority first
-            // Same priority — respect original queue order (FIFO via startedAt)
-            return new Date(a.data.startedAt).getTime() - new Date(b.data.startedAt).getTime();
+            // Same priority — respect original queue order (FIFO via createdAt)
+            return new Date(a.data.createdAt).getTime() - new Date(b.data.createdAt).getTime();
         });
 
         // Start queued tasks that have capacity
@@ -184,12 +184,12 @@ export class TaskManager {
         });
     }
 
-    /** Returns all tasks across all projects, sorted by startedAt descending. */
+    /** Returns all tasks across all projects, sorted by createdAt descending. */
     listAllTasks(): Task[] {
         return Array.from(this.tasks.values()).sort(
             (a, b) =>
-                new Date(b.data.startedAt).getTime() -
-                new Date(a.data.startedAt).getTime()
+                new Date(b.data.createdAt).getTime() -
+                new Date(a.data.createdAt).getTime()
         );
     }
 
@@ -293,7 +293,7 @@ export class TaskManager {
                 chainId: chainId ?? (nanoid(8) as ChainId),
                 prompt: request.prompt,
                 status: "queued",
-                startedAt: new Date().toISOString(),
+                createdAt: new Date().toISOString(),
                 completedAt: null,
                 output: "",
                 callbackUrl: request.callbackUrl,

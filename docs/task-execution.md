@@ -91,6 +91,17 @@ When metadata (branch slug + title) is generated before a task runs, the same Cl
 
 The estimate is stored as `estimatedDurationSeconds` on the task and persisted to disk. The admin dashboard uses it to render a **progress bar** next to running tasks (elapsed time / estimated time). The bar is informational only — the task continues past 100%.
 
+## Task Timing Fields
+
+Tasks carry two distinct timestamp fields for tracking when work began:
+
+| Field | Set when | Purpose |
+|---|---|---|
+| `createdAt` | Task created / enters queue | Queue entry time; used for FIFO ordering |
+| `startedAt` | Task transitions to `starting` | Execution start time; used for duration calculation |
+
+`durationSeconds` (in both dashboard and REST API responses) is calculated from `startedAt` when available, falling back to `createdAt` for backward compatibility with tasks that pre-date this field. This means the reported duration reflects actual execution time, excluding any time spent waiting in the queue.
+
 If estimation fails (Docker error, non-numeric response), the system defaults to **600 seconds**.
 
 ## Known Limitations

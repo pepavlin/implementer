@@ -59,7 +59,7 @@ function makePersistedTask(overrides: Partial<any> = {}): PersistedTask {
     branch,
     prompt: "Add a button",
     status: "completed",
-    startedAt: "2025-01-01T00:00:00.000Z",
+    createdAt: "2025-01-01T00:00:00.000Z",
     completedAt: "2025-01-01T01:00:00.000Z",
     output: "Done",
     workspaceId: 0,
@@ -1207,6 +1207,42 @@ describe("TaskManager", () => {
       await new Promise((r) => setTimeout(r, 100));
 
       expect(tm.getTask(task.id)?.data.status).toBe("starting");
+    });
+
+    it("sets startedAt when task transitions to starting", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const tm = new TaskManager(config);
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "add-button", title: "Add a Button", estimatedDurationSeconds: 600 });
+
+      const project = tm.config.projects[PROJECT_ID as any];
+      project.initialize();
+      vi.spyOn(project, 'initialize').mockImplementation(() => {});
+      vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(true);
+      vi.spyOn(project.pool, "acquire").mockReturnValue(new Promise(() => {}));
+
+      const beforeCreate = new Date();
+      const task = tm.createNewTask(PROJECT_ID as any, { prompt: "Add a button" });
+
+      // Wait for dequeue + transition to starting
+      await new Promise((r) => setTimeout(r, 100));
+
+      const taskData = tm.getTask(task.id)?.data;
+      expect(taskData?.status).toBe("starting");
+
+      // startedAt must be set once the task transitions to starting
+      expect(taskData?.startedAt).toBeDefined();
+
+      // startedAt must be >= task creation time
+      const startedAt = new Date(taskData!.startedAt!);
+      expect(startedAt.getTime()).toBeGreaterThanOrEqual(beforeCreate.getTime());
+
+      // startedAt must be >= createdAt (queue entry time)
+      expect(startedAt.getTime()).toBeGreaterThanOrEqual(
+        new Date(taskData!.createdAt).getTime()
+      );
     });
 
     it("queued task stays queued when pool has no free slot", async () => {
