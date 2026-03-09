@@ -933,6 +933,69 @@ describe("buildDashboardData - PR stats separated into openPrs and draftPrs", ()
         expect(data.stats.openPrs).toBe(0);
         expect(data.stats.draftPrs).toBe(0);
     });
+
+    it("deduplicates open PRs shared across multiple tasks", () => {
+        const sharedOpenUrl = "https://github.com/org/repo/pull/42";
+        const sharedDraftUrl = "https://github.com/org/repo/pull/43";
+        const tasks = [
+            makeTask({
+                taskId: "task1111",
+                pullRequests: [
+                    { repo: "org/repo", url: sharedOpenUrl, state: "open" },
+                    { repo: "org/repo", url: sharedDraftUrl, state: "draft" },
+                ]
+            }),
+            makeTask({
+                taskId: "task2222",
+                pullRequests: [
+                    { repo: "org/repo", url: sharedOpenUrl, state: "open" },
+                    { repo: "org/repo", url: sharedDraftUrl, state: "draft" },
+                ]
+            }),
+            makeTask({
+                taskId: "task3333",
+                pullRequests: [
+                    { repo: "org/repo", url: sharedOpenUrl, state: "open" },
+                ]
+            })
+        ];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        // Each unique URL should be counted only once regardless of how many tasks reference it
+        expect(data.stats.openPrs).toBe(1);
+        expect(data.stats.draftPrs).toBe(1);
+    });
+
+    it("counts multiple distinct open PRs correctly after deduplication", () => {
+        const tasks = [
+            makeTask({
+                taskId: "task1111",
+                pullRequests: [
+                    { repo: "org/repo", url: "https://github.com/org/repo/pull/10", state: "open" },
+                    { repo: "org/repo", url: "https://github.com/org/repo/pull/11", state: "open" },
+                ]
+            }),
+            makeTask({
+                taskId: "task2222",
+                pullRequests: [
+                    // Duplicate of pull/10 — should not increment count
+                    { repo: "org/repo", url: "https://github.com/org/repo/pull/10", state: "open" },
+                    // New unique draft PR
+                    { repo: "org/repo", url: "https://github.com/org/repo/pull/20", state: "draft" },
+                ]
+            })
+        ];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        expect(data.stats.openPrs).toBe(2); // pull/10 and pull/11 (pull/10 deduplicated)
+        expect(data.stats.draftPrs).toBe(1); // only pull/20
+    });
 });
 
 describe("dashboard HTML - PR stat cards", () => {
