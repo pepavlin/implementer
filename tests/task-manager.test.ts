@@ -59,7 +59,7 @@ function makePersistedTask(overrides: Partial<any> = {}): PersistedTask {
     branch,
     prompt: "Add a button",
     status: "completed",
-    startedAt: "2025-01-01T00:00:00.000Z",
+    createdAt: "2025-01-01T00:00:00.000Z",
     completedAt: "2025-01-01T01:00:00.000Z",
     output: "Done",
     workspaceId: 0,
@@ -1209,7 +1209,7 @@ describe("TaskManager", () => {
       expect(tm.getTask(task.id)?.data.status).toBe("starting");
     });
 
-    it("sets runStartedAt when task transitions to starting", async () => {
+    it("sets startedAt when task transitions to starting", async () => {
       const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const { Executor } = await import("../src/executor.js");
       const config = makeConfig();
@@ -1232,16 +1232,16 @@ describe("TaskManager", () => {
       const taskData = tm.getTask(task.id)?.data;
       expect(taskData?.status).toBe("starting");
 
-      // runStartedAt must be set once the task transitions to starting
-      expect(taskData?.runStartedAt).toBeDefined();
+      // startedAt must be set once the task transitions to starting
+      expect(taskData?.startedAt).toBeDefined();
 
-      // runStartedAt must be >= task creation time
-      const runStartedAt = new Date(taskData!.runStartedAt!);
-      expect(runStartedAt.getTime()).toBeGreaterThanOrEqual(beforeCreate.getTime());
+      // startedAt must be >= task creation time
+      const startedAt = new Date(taskData!.startedAt!);
+      expect(startedAt.getTime()).toBeGreaterThanOrEqual(beforeCreate.getTime());
 
-      // runStartedAt must be >= startedAt (queue entry time)
-      expect(runStartedAt.getTime()).toBeGreaterThanOrEqual(
-        new Date(taskData!.startedAt).getTime()
+      // startedAt must be >= createdAt (queue entry time)
+      expect(startedAt.getTime()).toBeGreaterThanOrEqual(
+        new Date(taskData!.createdAt).getTime()
       );
     });
 

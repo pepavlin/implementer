@@ -97,10 +97,10 @@ Tasks carry two distinct timestamp fields for tracking when work began:
 
 | Field | Set when | Purpose |
 |---|---|---|
-| `startedAt` | Task created / enters queue | Queue entry time; used for FIFO ordering |
-| `runStartedAt` | Task transitions to `starting` | Execution start time; used for duration calculation |
+| `createdAt` | Task created / enters queue | Queue entry time; used for FIFO ordering |
+| `startedAt` | Task transitions to `starting` | Execution start time; used for duration calculation |
 
-`durationSeconds` (in both dashboard and REST API responses) is calculated from `runStartedAt` when available, falling back to `startedAt` for backward compatibility with tasks that pre-date this field. This means the reported duration reflects actual execution time, excluding any time spent waiting in the queue.
+`durationSeconds` (in both dashboard and REST API responses) is calculated from `startedAt` when available, falling back to `createdAt` for backward compatibility with tasks that pre-date this field. This means the reported duration reflects actual execution time, excluding any time spent waiting in the queue.
 
 If estimation fails (Docker error, non-numeric response), the system defaults to **600 seconds**.
 

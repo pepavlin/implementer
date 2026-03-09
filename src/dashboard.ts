@@ -48,7 +48,7 @@ export function buildDashboardData(
     paused: boolean;
 } {
     const allTasks = taskManager.listAllTasks();
-    // Sort: active tasks first by status priority, then by newest startedAt within each group
+    // Sort: active tasks first by status priority, then by newest createdAt within each group
     // Status priority: running (0) > starting (1) > queued (2) > retrying (3) > rest (4)
     const statusPriority: Record<string, number> = {
         running: 0,
@@ -63,8 +63,8 @@ export function buildDashboardData(
         const bPriority = getStatusPriority(b.data.status);
         if (aPriority !== bPriority) return aPriority - bPriority;
         return (
-            new Date(b.data.startedAt).getTime() -
-            new Date(a.data.startedAt).getTime()
+            new Date(b.data.createdAt).getTime() -
+            new Date(a.data.createdAt).getTime()
         );
     });
     const tasks = sortedTasks.slice(0, 200).map((task) => ({
@@ -73,8 +73,8 @@ export function buildDashboardData(
         title: task.title ?? null,
         prompt: task.data.prompt,
         status: task.data.status,
-        startedAt: task.data.startedAt,
-        runStartedAt: task.data.runStartedAt ?? null,
+        createdAt: task.data.createdAt,
+        startedAt: task.data.startedAt ?? null,
         completedAt: task.data.completedAt,
         durationSeconds:
             task.data.status === "queued"
@@ -84,7 +84,7 @@ export function buildDashboardData(
                           ? new Date(task.data.completedAt).getTime()
                           : Date.now()) -
                           new Date(
-                              task.data.runStartedAt ?? task.data.startedAt
+                              task.data.startedAt ?? task.data.createdAt
                           ).getTime()) /
                           1000
                   ),
@@ -1068,7 +1068,7 @@ export function dashboardHtml(hasPassword: boolean): string {
           +'<td class="td-taskid"><span class="mono">'+esc(t.taskId)+'</span></td>'
           +'<td>'+(t.title?'<div class="ttitle">'+prioStar+esc(t.title)+prioBadge+'</div>':'')+'<div class="tprompt">'+prioStar+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+(t.title?'':prioBadge)+'</div>'+progressHtml+'</td>'
           +'<td class="td-dur mono">'+dur(t.durationSeconds)+'</td>'
-          +'<td class="td-started mono">'+fmtDate(t.startedAt)+'</td>'
+          +'<td class="td-started mono">'+fmtDate(t.createdAt)+'</td>'
           +'<td class="td-pr">'+(prBtns||'')+'</td>'
           +'</tr>';
       }).join('');
@@ -1245,11 +1245,11 @@ export function dashboardHtml(hasPassword: boolean): string {
               +'<span class="muted" style="font-size:.8em">)</span>';
           }
           html+='<div class="det-row"><div class="det-lbl">Duration</div><div class="det-val mono">'+durationHtml+'</div></div>';
-          if(t.runStartedAt&&t.runStartedAt!==t.startedAt){
-            html+='<div class="det-row"><div class="det-lbl">Queued</div><div class="det-val mono">'+fmtDate(t.startedAt)+'</div></div>';
-            html+='<div class="det-row"><div class="det-lbl">Started</div><div class="det-val mono">'+fmtDate(t.runStartedAt)+'</div></div>';
-          }else{
+          if(t.startedAt){
+            html+='<div class="det-row"><div class="det-lbl">Queued</div><div class="det-val mono">'+fmtDate(t.createdAt)+'</div></div>';
             html+='<div class="det-row"><div class="det-lbl">Started</div><div class="det-val mono">'+fmtDate(t.startedAt)+'</div></div>';
+          }else{
+            html+='<div class="det-row"><div class="det-lbl">Queued</div><div class="det-val mono">'+fmtDate(t.createdAt)+'</div></div>';
           }
           if(t.completedAt)html+='<div class="det-row"><div class="det-lbl">Completed</div><div class="det-val mono">'+fmtDate(t.completedAt)+'</div></div>';
           html+='<div class="det-row"><div class="det-lbl">Pull Requests</div><div class="det-val">'+prsHtml+'</div></div>';
@@ -1640,8 +1640,8 @@ export function registerDashboardRoutes(
             maxAttempts:
                 task.project.data.errorRetry?.maxAttempts ?? null,
             nextRetryAt: task.data.nextRetryAt ?? null,
-            startedAt: task.data.startedAt,
-            runStartedAt: task.data.runStartedAt ?? null,
+            createdAt: task.data.createdAt,
+            startedAt: task.data.startedAt ?? null,
             completedAt: task.data.completedAt,
             durationSeconds:
                 task.data.status === "queued"
@@ -1651,7 +1651,7 @@ export function registerDashboardRoutes(
                               ? new Date(task.data.completedAt).getTime()
                               : Date.now()) -
                               new Date(
-                                  task.data.runStartedAt ?? task.data.startedAt
+                                  task.data.startedAt ?? task.data.createdAt
                               ).getTime()) /
                               1000
                       ),

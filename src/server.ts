@@ -48,7 +48,7 @@ const MAX_LOG_SIZE = 1024 * 1024; // 1MB
 
 function getDurationSeconds(task: Task): number {
     const start = new Date(
-        task.data.runStartedAt ?? task.data.startedAt
+        task.data.startedAt ?? task.data.createdAt
     ).getTime();
     const end = task.data.completedAt
         ? new Date(task.data.completedAt).getTime()
@@ -158,8 +158,8 @@ export function createServer(
                 parentTaskId: task.data.parentTaskId ?? null,
                 chainId: task.data.chainId ?? null,
                 status: task.data.status,
-                startedAt: task.data.startedAt,
-                runStartedAt: task.data.runStartedAt ?? null,
+                createdAt: task.data.createdAt,
+                startedAt: task.data.startedAt ?? null,
                 completedAt: task.data.completedAt,
                 durationSeconds: getDurationSeconds(task),
                 pullRequests: task.data.pullRequests ?? null
@@ -181,8 +181,8 @@ export function createServer(
             chainId: task.data.chainId ?? null,
             status: task.data.status,
             attempt: task.data.attempt,
-            startedAt: task.data.startedAt,
-            runStartedAt: task.data.runStartedAt ?? null,
+            createdAt: task.data.createdAt,
+            startedAt: task.data.startedAt ?? null,
             completedAt: task.data.completedAt,
             durationSeconds: getDurationSeconds(task),
             output:
