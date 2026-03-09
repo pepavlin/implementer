@@ -43,7 +43,11 @@ export class TaskManager {
             {
                 listAllTasks: () => this.listAllPollableTasks(),
                 updatePrState: (taskId, prUrl, state) =>
-                    this.updatePrState(taskId, prUrl, state)
+                    this.updatePrState(taskId, prUrl, state),
+                completePipelineTask: (taskId) =>
+                    this.completePipelineTask(taskId),
+                failPipelineTask: (taskId, error) =>
+                    this.failPipelineTask(taskId, error)
             },
             config
         );
@@ -207,7 +211,8 @@ export class TaskManager {
         return Array.from(this.tasks.values()).map((task) => ({
             taskId: task.id as string,
             projectId: task.data.projectId as string,
-            pullRequests: task.data.pullRequests
+            pullRequests: task.data.pullRequests,
+            status: task.data.status
         }));
     }
 
@@ -224,6 +229,28 @@ export class TaskManager {
         pr.state = state;
         pr.lastCheckedAt = new Date().toISOString();
         task.tickUpdate();
+    }
+
+    /**
+     * Complete a task that was waiting for pipeline checks.
+     * Called by PrPoller when all CI/CD checks on the PR have passed.
+     */
+    completePipelineTask(taskId: string): void {
+        const task = this.tasks.get(taskId as TaskId);
+        if (!task) return;
+        if (task.data.status !== "waiting_for_pipeline") return;
+        task.completePipeline();
+    }
+
+    /**
+     * Fail a task that was waiting for pipeline checks.
+     * Called by PrPoller when a CI/CD check on the PR has failed.
+     */
+    failPipelineTask(taskId: string, error: string): void {
+        const task = this.tasks.get(taskId as TaskId);
+        if (!task) return;
+        if (task.data.status !== "waiting_for_pipeline") return;
+        task.failPipeline(error);
     }
 
     /** Walk parentTaskId links to find the leaf (latest) task in a chain. */

@@ -80,13 +80,19 @@ GitHub                PrPoller (every 5 min)
   │                      Browser renders updated state
 ```
 
+## Pipeline Check Polling
+
+In addition to tracking PR state, the `PrPoller` also monitors CI/CD pipeline checks for tasks in `waiting_for_pipeline` status. See [pipeline-checks.md](./pipeline-checks.md) for details.
+
 ## Architecture
 
 | Component | File | Responsibility |
 |-----------|------|----------------|
 | `PullRequest` type | `src/types.ts` | Holds `state` and `lastCheckedAt` fields |
-| `PrPoller` | `src/pr-poller.ts` | Background polling, state normalization |
+| `PrPoller` | `src/pr-poller.ts` | Background polling, state normalization, pipeline check evaluation |
 | `TaskAccessor` interface | `src/pr-poller.ts` | Decouples poller from TaskManager for testing |
 | `TaskManager.updatePrState()` | `src/task-manager/task-manager.ts` | Writes new state to task and persists to disk |
+| `TaskManager.completePipelineTask()` | `src/task-manager/task-manager.ts` | Completes a waiting_for_pipeline task when checks pass |
+| `TaskManager.failPipelineTask()` | `src/task-manager/task-manager.ts` | Fails a waiting_for_pipeline task when a check fails |
 | `GitManager.createPullRequestAll()` | `src/git-manager.ts` | Sets initial state on PR creation |
 | `buildDashboardData()` | `src/dashboard.ts` | Includes PR state + `openPrs` count in SSE data |

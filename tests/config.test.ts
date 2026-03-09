@@ -382,6 +382,56 @@ projects:
         expect(config.projects["my-project"].data.protectedPaths).toBeUndefined();
     });
 
+    it("loads waitForPipeline: true when set", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+    waitForPipeline: true
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.projects["my-project"].data.waitForPipeline).toBe(true);
+    });
+
+    it("loads waitForPipeline: false when explicitly set to false", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+    waitForPipeline: false
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.projects["my-project"].data.waitForPipeline).toBe(false);
+    });
+
+    it("sets waitForPipeline to undefined when not provided", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.projects["my-project"].data.waitForPipeline).toBeUndefined();
+    });
+
 });
 
 describe("defaults merging", () => {

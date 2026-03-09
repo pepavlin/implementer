@@ -1,22 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { PrPoller, normalizeGhState, type TaskAccessor, type GhQueryFn } from "../src/pr-poller.js";
-import type { PullRequestState, Task } from "../src/types.js";
+import {
+    PrPoller,
+    normalizeGhState,
+    analyzePipelineChecks,
+    type TaskAccessor,
+    type GhQueryFn,
+    type GhChecksQueryFn,
+    type GhCheckRun,
+    type PollableTask
+} from "../src/pr-poller.js";
+import type { PullRequestState } from "../src/types.js";
 import type { Config } from "../src/config/config.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeTask(overrides: Partial<Task> = {}): Task {
+function makeTask(overrides: Partial<PollableTask> = {}): PollableTask {
     return {
-        taskId: "task1234" as Task["taskId"],
-        projectId: "proj" as Task["projectId"],
-        chainId: "chain111" as Task["chainId"],
-        branch: "impl/task1234",
-        prompt: "Do something",
+        taskId: "task1234",
+        projectId: "proj",
         status: "completed",
-        startedAt: "2025-01-01T00:00:00Z",
-        completedAt: "2025-01-01T01:00:00Z",
-        output: "",
-        attempt: 1,
         ...overrides,
     };
 }
@@ -38,16 +40,28 @@ function makeConfig(githubToken?: string): Config {
     } as unknown as Config;
 }
 
-function makeAccessor(tasks: Task[]): TaskAccessor & {
+function makeAccessor(tasks: PollableTask[]): TaskAccessor & {
     updates: Array<{ taskId: string; prUrl: string; state: PullRequestState }>;
+    pipelineCompleted: string[];
+    pipelineFailed: Array<{ taskId: string; error: string }>;
 } {
     const updates: Array<{ taskId: string; prUrl: string; state: PullRequestState }> = [];
+    const pipelineCompleted: string[] = [];
+    const pipelineFailed: Array<{ taskId: string; error: string }> = [];
     return {
         listAllTasks: () => tasks,
         updatePrState(taskId, prUrl, state) {
             updates.push({ taskId, prUrl, state });
         },
+        completePipelineTask(taskId) {
+            pipelineCompleted.push(taskId);
+        },
+        failPipelineTask(taskId, error) {
+            pipelineFailed.push({ taskId, error });
+        },
         updates,
+        pipelineCompleted,
+        pipelineFailed,
     };
 }
 
@@ -58,6 +72,16 @@ function fakeQuery(state: "OPEN" | "CLOSED" | "MERGED", isDraft = false): GhQuer
 
 /** Creates a GhQueryFn that always rejects with an error. */
 function failingQuery(message = "gh: command not found"): GhQueryFn {
+    return async () => { throw new Error(message); };
+}
+
+/** Creates a GhChecksQueryFn that always returns the given checks. */
+function fakeChecksQuery(checks: GhCheckRun[]): GhChecksQueryFn {
+    return async () => checks;
+}
+
+/** Creates a GhChecksQueryFn that always rejects with an error. */
+function failingChecksQuery(message = "gh: command not found"): GhChecksQueryFn {
     return async () => { throw new Error(message); };
 }
 
@@ -78,6 +102,109 @@ describe("normalizeGhState", () => {
 
     it("maps MERGED to merged", () => {
         expect(normalizeGhState({ state: "MERGED", isDraft: false })).toBe("merged");
+    });
+});
+
+// ── analyzePipelineChecks ─────────────────────────────────────────────────────
+
+describe("analyzePipelineChecks", () => {
+    it("returns passing when no checks are present (no CI configured)", () => {
+        expect(analyzePipelineChecks([])).toEqual({ status: "passing" });
+    });
+
+    it("returns passing when all checks are SUCCESS", () => {
+        const checks: GhCheckRun[] = [
+            { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+            { name: "lint", state: "SUCCESS", conclusion: "SUCCESS" },
+        ];
+        expect(analyzePipelineChecks(checks)).toEqual({ status: "passing" });
+    });
+
+    it("returns passing for NEUTRAL and SKIPPED checks", () => {
+        const checks: GhCheckRun[] = [
+            { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+            { name: "optional", state: "NEUTRAL", conclusion: "NEUTRAL" },
+            { name: "skipped", state: "SKIPPED", conclusion: "SKIPPED" },
+        ];
+        expect(analyzePipelineChecks(checks)).toEqual({ status: "passing" });
+    });
+
+    it("returns failing when any check is FAILURE", () => {
+        const checks: GhCheckRun[] = [
+            { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+            { name: "test", state: "FAILURE", conclusion: "FAILURE" },
+        ];
+        const result = analyzePipelineChecks(checks);
+        expect(result.status).toBe("failing");
+        expect(result.failedCheck).toBe("test");
+    });
+
+    it("returns failing when a check is TIMED_OUT", () => {
+        const checks: GhCheckRun[] = [
+            { name: "slow-test", state: "TIMED_OUT", conclusion: "TIMED_OUT" },
+        ];
+        const result = analyzePipelineChecks(checks);
+        expect(result.status).toBe("failing");
+        expect(result.failedCheck).toBe("slow-test");
+    });
+
+    it("returns failing when a check is ACTION_REQUIRED", () => {
+        const checks: GhCheckRun[] = [
+            { name: "review", state: "ACTION_REQUIRED", conclusion: "ACTION_REQUIRED" },
+        ];
+        const result = analyzePipelineChecks(checks);
+        expect(result.status).toBe("failing");
+        expect(result.failedCheck).toBe("review");
+    });
+
+    it("returns failing for ERROR state", () => {
+        const checks: GhCheckRun[] = [
+            { name: "deploy", state: "ERROR", conclusion: "" },
+        ];
+        const result = analyzePipelineChecks(checks);
+        expect(result.status).toBe("failing");
+    });
+
+    it("returns failing for CANCELLED state", () => {
+        const checks: GhCheckRun[] = [
+            { name: "ci", state: "CANCELLED", conclusion: "CANCELLED" },
+        ];
+        const result = analyzePipelineChecks(checks);
+        expect(result.status).toBe("failing");
+    });
+
+    it("returns pending when any check has empty state (in-progress)", () => {
+        const checks: GhCheckRun[] = [
+            { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+            { name: "test", state: "", conclusion: "" },
+        ];
+        expect(analyzePipelineChecks(checks)).toEqual({ status: "pending" });
+    });
+
+    it("returns pending when any check is PENDING", () => {
+        const checks: GhCheckRun[] = [
+            { name: "build", state: "PENDING", conclusion: "" },
+        ];
+        expect(analyzePipelineChecks(checks)).toEqual({ status: "pending" });
+    });
+
+    it("prioritizes failing over pending", () => {
+        const checks: GhCheckRun[] = [
+            { name: "build", state: "PENDING", conclusion: "" },
+            { name: "test", state: "FAILURE", conclusion: "FAILURE" },
+            { name: "lint", state: "SUCCESS", conclusion: "SUCCESS" },
+        ];
+        const result = analyzePipelineChecks(checks);
+        // failing check comes after pending in array, but failing wins
+        expect(result.status).toBe("failing");
+        expect(result.failedCheck).toBe("test");
+    });
+
+    it("is case-insensitive for state values", () => {
+        const checks: GhCheckRun[] = [
+            { name: "build", state: "success", conclusion: "success" },
+        ];
+        expect(analyzePipelineChecks(checks)).toEqual({ status: "passing" });
     });
 });
 
@@ -215,13 +342,13 @@ describe("PrPoller", () => {
     it("polls multiple PRs across multiple tasks", async () => {
         const tasks = [
             makeTask({
-                taskId: "aaa" as Task["taskId"],
+                taskId: "aaa",
                 pullRequests: [
                     { repo: "r1", url: "https://github.com/o/r1/pull/1", state: "open" },
                 ],
             }),
             makeTask({
-                taskId: "bbb" as Task["taskId"],
+                taskId: "bbb",
                 pullRequests: [
                     { repo: "r2", url: "https://github.com/o/r2/pull/2", state: "draft" },
                     { repo: "r2", url: "https://github.com/o/r2/pull/3", state: "merged" }, // skipped
@@ -386,5 +513,247 @@ describe("PrPoller", () => {
         // updatePrState must still be called to refresh lastCheckedAt
         expect(accessor.updates).toHaveLength(1);
         expect(accessor.updates[0].state).toBe("open");
+    });
+
+    // ── Pipeline checks for waiting_for_pipeline tasks ────────────────────────
+
+    describe("pipeline check polling", () => {
+        it("does not check pipeline for tasks not in waiting_for_pipeline status", async () => {
+            const task = makeTask({
+                status: "completed",
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/1", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const checksQuery = vi.fn(fakeChecksQuery([]));
+            const poller = new PrPoller(
+                accessor, makeConfig(), 60_000, fakeQuery("OPEN"), 1, checksQuery
+            );
+
+            await poller.pollAll();
+
+            expect(checksQuery).not.toHaveBeenCalled();
+            expect(accessor.pipelineCompleted).toHaveLength(0);
+            expect(accessor.pipelineFailed).toHaveLength(0);
+        });
+
+        it("completes task when all pipeline checks pass", async () => {
+            const task = makeTask({
+                taskId: "pipe-task",
+                status: "waiting_for_pipeline",
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/10", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const successChecks: GhCheckRun[] = [
+                { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+                { name: "test", state: "SUCCESS", conclusion: "SUCCESS" },
+            ];
+            const poller = new PrPoller(
+                accessor, makeConfig("token"), 60_000,
+                fakeQuery("OPEN"), 1,
+                fakeChecksQuery(successChecks)
+            );
+
+            await poller.pollAll();
+
+            expect(accessor.pipelineCompleted).toContain("pipe-task");
+            expect(accessor.pipelineFailed).toHaveLength(0);
+        });
+
+        it("completes task when no checks are configured (empty checks array)", async () => {
+            const task = makeTask({
+                taskId: "no-ci-task",
+                status: "waiting_for_pipeline",
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/20", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const poller = new PrPoller(
+                accessor, makeConfig("token"), 60_000,
+                fakeQuery("OPEN"), 1,
+                fakeChecksQuery([]) // no checks
+            );
+
+            await poller.pollAll();
+
+            expect(accessor.pipelineCompleted).toContain("no-ci-task");
+            expect(accessor.pipelineFailed).toHaveLength(0);
+        });
+
+        it("fails task when a pipeline check fails", async () => {
+            const task = makeTask({
+                taskId: "fail-task",
+                status: "waiting_for_pipeline",
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/30", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const failedChecks: GhCheckRun[] = [
+                { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+                { name: "test", state: "FAILURE", conclusion: "FAILURE" },
+            ];
+            const poller = new PrPoller(
+                accessor, makeConfig("token"), 60_000,
+                fakeQuery("OPEN"), 1,
+                fakeChecksQuery(failedChecks)
+            );
+
+            await poller.pollAll();
+
+            expect(accessor.pipelineFailed).toHaveLength(1);
+            expect(accessor.pipelineFailed[0].taskId).toBe("fail-task");
+            expect(accessor.pipelineFailed[0].error).toContain("test");
+            expect(accessor.pipelineCompleted).toHaveLength(0);
+        });
+
+        it("keeps waiting when pipeline checks are still pending", async () => {
+            const task = makeTask({
+                taskId: "pending-task",
+                status: "waiting_for_pipeline",
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/40", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const pendingChecks: GhCheckRun[] = [
+                { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+                { name: "test", state: "PENDING", conclusion: "" },
+            ];
+            const poller = new PrPoller(
+                accessor, makeConfig("token"), 60_000,
+                fakeQuery("OPEN"), 1,
+                fakeChecksQuery(pendingChecks)
+            );
+
+            await poller.pollAll();
+
+            expect(accessor.pipelineCompleted).toHaveLength(0);
+            expect(accessor.pipelineFailed).toHaveLength(0);
+        });
+
+        it("keeps waiting and does not fail if checks query throws (transient error)", async () => {
+            const task = makeTask({
+                taskId: "error-task",
+                status: "waiting_for_pipeline",
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/50", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const poller = new PrPoller(
+                accessor, makeConfig("token"), 60_000,
+                fakeQuery("OPEN"), 1,
+                failingChecksQuery("network error")
+            );
+
+            // Should not throw
+            await expect(poller.pollAll()).resolves.toBeUndefined();
+
+            // Should not complete or fail the task on transient error
+            expect(accessor.pipelineCompleted).toHaveLength(0);
+            expect(accessor.pipelineFailed).toHaveLength(0);
+        });
+
+        it("checks pipeline for all PRs on a task — fails if any PR has a failing check", async () => {
+            const task = makeTask({
+                taskId: "multi-pr-task",
+                status: "waiting_for_pipeline",
+                pullRequests: [
+                    { repo: "r1", url: "https://github.com/o/r1/pull/1", state: "open" },
+                    { repo: "r2", url: "https://github.com/o/r2/pull/2", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+
+            let callCount = 0;
+            const mixedChecksQuery: GhChecksQueryFn = async () => {
+                callCount++;
+                if (callCount === 1) {
+                    return [{ name: "build", state: "SUCCESS", conclusion: "SUCCESS" }];
+                }
+                return [{ name: "test", state: "FAILURE", conclusion: "FAILURE" }];
+            };
+
+            const poller = new PrPoller(
+                accessor, makeConfig("token"), 60_000,
+                fakeQuery("OPEN"), 1,
+                mixedChecksQuery
+            );
+
+            await poller.pollAll();
+
+            expect(accessor.pipelineFailed).toHaveLength(1);
+            expect(accessor.pipelineFailed[0].taskId).toBe("multi-pr-task");
+        });
+
+        it("skips merged/closed PRs when checking pipeline status", async () => {
+            const task = makeTask({
+                taskId: "merged-pr-task",
+                status: "waiting_for_pipeline",
+                pullRequests: [
+                    // merged PR — should be skipped for pipeline check
+                    { repo: "r", url: "https://github.com/o/r/pull/1", state: "merged" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const checksQuery = vi.fn(fakeChecksQuery([]));
+            const poller = new PrPoller(
+                accessor, makeConfig("token"), 60_000,
+                fakeQuery("MERGED"), 1,
+                checksQuery
+            );
+
+            await poller.pollAll();
+
+            // All PRs are merged/closed — skips pipeline check → task completed with no pending PRs
+            expect(checksQuery).not.toHaveBeenCalled();
+            // With no non-terminal PRs to check, overallStatus stays "passing" → task completed
+            expect(accessor.pipelineCompleted).toContain("merged-pr-task");
+        });
+
+        it("handles multiple waiting_for_pipeline tasks independently", async () => {
+            const tasks = [
+                makeTask({
+                    taskId: "task-pass",
+                    status: "waiting_for_pipeline",
+                    pullRequests: [
+                        { repo: "r", url: "https://github.com/o/r/pull/1", state: "open" },
+                    ],
+                }),
+                makeTask({
+                    taskId: "task-fail",
+                    status: "waiting_for_pipeline",
+                    pullRequests: [
+                        { repo: "r", url: "https://github.com/o/r/pull/2", state: "open" },
+                    ],
+                }),
+            ];
+            const accessor = makeAccessor(tasks);
+
+            let callCount = 0;
+            const mixedChecksQuery: GhChecksQueryFn = async () => {
+                callCount++;
+                if (callCount === 1) {
+                    return [{ name: "build", state: "SUCCESS", conclusion: "SUCCESS" }];
+                }
+                return [{ name: "test", state: "FAILURE", conclusion: "FAILURE" }];
+            };
+
+            const poller = new PrPoller(
+                accessor, makeConfig("token"), 60_000,
+                fakeQuery("OPEN"), 1,
+                mixedChecksQuery
+            );
+
+            await poller.pollAll();
+
+            expect(accessor.pipelineCompleted).toContain("task-pass");
+            expect(accessor.pipelineFailed.map((f) => f.taskId)).toContain("task-fail");
+        });
     });
 });

@@ -51,6 +51,8 @@ export class Task {
                 break;
             // "retrying" tasks stay as-is — dequeueAvailableTasks will
             // re-queue them when their nextRetryAt has passed.
+            // "waiting_for_pipeline" tasks stay as-is — the PR poller will
+            // monitor their pipeline checks and complete/fail them.
         }
     }
 
@@ -76,6 +78,7 @@ export class Task {
     /**
      * Cancel the task. Stops any running executor and waits for executeTask
      * to finish its cleanup (release workspace, chain lock, etc.) before returning.
+     * Also cancels tasks in "waiting_for_pipeline" state (passive wait, no cleanup needed).
      */
     async cancel(): Promise<void> {
         // Remove from queue if queued
@@ -106,8 +109,14 @@ export class Task {
         return ["starting", "running"].includes(this.data.status);
     }
 
+    /** Whether this task is currently waiting for pipeline checks to pass. */
+    isWaitingForPipeline(): boolean {
+        return this.data.status === "waiting_for_pipeline";
+    }
+
     /**
-     * Retry a task from a terminal or retrying state (completed, failed, cancelled, retrying).
+     * Retry a task from a terminal or retrying state (completed, failed, cancelled, retrying,
+     * waiting_for_pipeline).
      * Increments attempt counter and pushes to front of queue.
      */
     retry(): void {
@@ -143,6 +152,44 @@ export class Task {
         if (!this.data.completedAt) {
             this.data.completedAt = new Date().toISOString();
         }
+        this.tickUpdate();
+    }
+
+    /**
+     * Transition the task to "waiting_for_pipeline" status.
+     * The task has finished executing and a PR has been created, but we are
+     * waiting for all CI/CD pipeline checks on the PR to pass before completing.
+     * The workspace is already released at this point — this is a passive wait state.
+     */
+    waitForPipeline(): void {
+        this.data.status = "waiting_for_pipeline";
+        this.tickUpdate();
+    }
+
+    /**
+     * Complete a task that was waiting for pipeline checks.
+     * Called by the PR poller when all checks on the PR have passed.
+     */
+    completePipeline(): void {
+        this.data.status = "completed";
+        if (!this.data.completedAt) {
+            this.data.completedAt = new Date().toISOString();
+        }
+        console.log(`[${this.id}] Pipeline checks passed — task completed.`);
+        this.tickUpdate();
+    }
+
+    /**
+     * Fail a task that was waiting for pipeline checks.
+     * Called by the PR poller when a pipeline check has failed.
+     */
+    failPipeline(error: string): void {
+        this.data.error = error;
+        this.data.status = "failed";
+        if (!this.data.completedAt) {
+            this.data.completedAt = new Date().toISOString();
+        }
+        console.log(`[${this.id}] Pipeline check failed — task failed: ${error}`);
         this.tickUpdate();
     }
     /**

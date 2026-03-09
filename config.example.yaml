@@ -43,6 +43,11 @@ projects:
         #     - .github
         #     - Dockerfile
         #     - docker-compose.yml
+        # When true, tasks transition to "waiting_for_pipeline" after PR creation instead
+        # of completing immediately. The task completes only after all CI/CD pipeline checks
+        # on the PR pass. If any check fails, the task is marked as failed.
+        # Other tasks can start while this task is waiting. Defaults to false.
+        # waitForPipeline: true
         claudeCode:
             command: claude
             model: sonnet

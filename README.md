@@ -70,6 +70,21 @@ projects:
             - docker-compose*.yml  # glob pattern
 ```
 
+### Wait for pipeline checks
+
+Set `waitForPipeline: true` on a project to make tasks wait for all CI/CD pipeline checks to pass on the PR before being marked `completed`. The workspace is released immediately after the PR is created — other tasks can start while this task waits. If a check fails, the task is marked `failed`.
+
+```yaml
+projects:
+    my-project:
+        waitForPipeline: true   # default: false
+        repositories:
+            - name: my-repo
+              url: git@github.com:user/my-repo.git
+```
+
+The background PR poller (every 5 min) checks `gh pr checks` for tasks in `waiting_for_pipeline` status and completes or fails them based on the results. If no checks are configured, the task completes immediately.
+
 `apiKey` is configured per project (`projects.<projectId>.apiKey`), not as a single global top-level config field.
 
 Config is validated both at startup and via:
@@ -339,6 +354,7 @@ Task state is persisted to disk so the service survives restarts. On startup the
 | `running` | Resumed immediately on the same branch. If the resumed attempt fails, the retry fires with **no delay** (delay = 0 s) so the task gets back to work right away instead of waiting for the configured `errorRetry.delaySeconds`. Subsequent automatic retries use the normal configured delay. |
 | `retrying` (waiting for the delay timer) | Re-queued immediately — the remaining delay is dropped. |
 | `queued` | Stays queued and runs as soon as capacity is available. |
+| `waiting_for_pipeline` | Stays in `waiting_for_pipeline` — the PR poller will resume monitoring pipeline checks on the next poll cycle. |
 
 This means tasks that were in flight when the server stopped will restart automatically without getting stuck in a long retry wait.
 

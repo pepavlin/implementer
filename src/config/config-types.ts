@@ -70,6 +70,14 @@ export interface ProjectConfig {
     errorRetry?: ErrorRetryConfig;
     /** Paths (files or directories) that Claude must not modify. Changes to these paths are reverted before PR creation. Supports git pathspec patterns (e.g. ".github", "Dockerfile", "docker-compose*.yml"). */
     protectedPaths?: string[];
+    /**
+     * When true, tasks transition to "waiting_for_pipeline" after PR creation instead
+     * of completing immediately. The task completes only after all CI/CD pipeline checks
+     * on the PR pass. If any check fails, the task is marked as failed.
+     * Other tasks can start while this task is waiting.
+     * Defaults to false.
+     */
+    waitForPipeline?: boolean;
 }
 
 const ServerSchema = z
@@ -143,7 +151,8 @@ const ProjectSchema = z
         claudeCode: ClaudeCodeSchema.default({}),
         auth: ProjectAuthSchema.optional(),
         errorRetry: ErrorRetrySchema.optional(),
-        protectedPaths: z.array(z.string()).optional()
+        protectedPaths: z.array(z.string()).optional(),
+        waitForPipeline: z.boolean().optional()
     })
     .strict();
 

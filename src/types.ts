@@ -19,6 +19,7 @@ export type TaskStatus =
     | "starting"
     | "running"
     | "retrying"
+    | "waiting_for_pipeline"
     | "completed"
     | "failed"
     | "interrupted"
