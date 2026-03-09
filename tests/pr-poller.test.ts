@@ -192,6 +192,30 @@ describe("analyzePipelineChecks", () => {
         expect(result.status).toBe("passing");
     });
 
+    it("returns passing for STALE state (outdated check superseded by newer commit)", () => {
+        // GitHub marks a check run as STALE when the PR's commit was updated and
+        // the old check run is no longer relevant. A stale check is terminal —
+        // it will never complete — so waiting for it would block the task forever.
+        // Treat it as neutral (passing), the same as SKIPPED or CANCELLED.
+        const checks: GhCheckRun[] = [
+            { name: "ci", state: "STALE", conclusion: "" },
+        ];
+        const result = analyzePipelineChecks(checks);
+        expect(result.status).toBe("passing");
+    });
+
+    it("completes task when all current checks pass and old check is STALE", () => {
+        // Reproduces: task stuck in waiting_for_pipeline when all important
+        // checks pass but there is also a STALE check from a previous commit.
+        const checks: GhCheckRun[] = [
+            { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+            { name: "test", state: "SUCCESS", conclusion: "SUCCESS" },
+            // An outdated check run from a previous commit — STALE and never completing
+            { name: "old-deploy", state: "STALE", conclusion: "" },
+        ];
+        expect(analyzePipelineChecks(checks)).toEqual({ status: "passing" });
+    });
+
     it("returns pending when any check has empty state (in-progress)", () => {
         const checks: GhCheckRun[] = [
             { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
@@ -752,6 +776,38 @@ describe("PrPoller", () => {
             await poller.pollAll();
 
             expect(accessor.pipelineCompleted).toContain("queued-cancelled-task");
+            expect(accessor.pipelineFailures).toHaveLength(0);
+        });
+
+        it("completes task when all current checks pass and old check is STALE", async () => {
+            // Reproduces: task stuck in waiting_for_pipeline when pipelines have
+            // all finished but an old check run from a previous commit is STALE.
+            // A STALE check is terminal — it will never complete — so treating it
+            // as pending would block the task forever.
+            const task = makeTask({
+                taskId: "stale-check-task",
+                status: "waiting_for_pipeline",
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/37", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const checksWithStale: GhCheckRun[] = [
+                { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+                { name: "test", state: "SUCCESS", conclusion: "SUCCESS" },
+                // Outdated check from a previous commit — STALE with empty conclusion
+                { name: "old-ci", state: "STALE", conclusion: "" },
+            ];
+            const poller = new PrPoller(
+                accessor, makeConfig("token"), 60_000,
+                fakeQuery("OPEN"), 1,
+                fakeChecksQuery(checksWithStale)
+            );
+
+            await poller.pollAll();
+
+            // Task should complete — STALE is treated as neutral, not pending
+            expect(accessor.pipelineCompleted).toContain("stale-check-task");
             expect(accessor.pipelineFailures).toHaveLength(0);
         });
 
