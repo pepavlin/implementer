@@ -252,9 +252,22 @@ describe("analyzePipelineChecks", () => {
 
     // ── Pipeline name filtering ────────────────────────────────────────────────
 
-    it("returns pending when pipelineNames filter provided but no checks match yet", () => {
+    it("returns passing when pipelineNames filter provided, no checks match, and all existing checks are terminal", () => {
+        // All existing jobs are done but the configured pipeline names never appeared
+        // → they were never triggered (likely wrong name in config). Avoid blocking forever.
         const checks: GhCheckRun[] = [
             { name: "unrelated-job", state: "SUCCESS", conclusion: "SUCCESS" },
+        ];
+        expect(analyzePipelineChecks(checks, ["build", "test"])).toEqual({
+            status: "passing",
+        });
+    });
+
+    it("returns pending when pipelineNames filter provided, no checks match, but some existing checks still in-progress", () => {
+        // The watched pipeline hasn't appeared yet but another check is still running —
+        // the watched job might start after the in-progress one finishes.
+        const checks: GhCheckRun[] = [
+            { name: "unrelated-setup", state: "PENDING", conclusion: "" },
         ];
         expect(analyzePipelineChecks(checks, ["build", "test"])).toEqual({
             status: "pending",
@@ -262,6 +275,7 @@ describe("analyzePipelineChecks", () => {
     });
 
     it("returns pending when pipelineNames provided but checks array is empty", () => {
+        // No checks at all — CI hasn't started yet, keep waiting.
         expect(analyzePipelineChecks([], ["build"])).toEqual({ status: "pending" });
     });
 
@@ -481,6 +495,39 @@ describe("PrPoller", () => {
         poller.start();
         expect(setIntervalSpy).toHaveBeenCalledOnce();
         poller.stop();
+    });
+
+    it("start() triggers an immediate pollAll() so restarted tasks are resolved without waiting a full interval", async () => {
+        vi.useRealTimers();
+
+        // Task that was waiting for pipeline when the implementer restarted.
+        // All pipeline checks have since passed — the immediate poll should complete it.
+        const task = makeTask({
+            taskId: "restart-task",
+            status: "waiting_for_pipeline",
+            pullRequests: [
+                { repo: "r", url: "https://github.com/o/r/pull/99", state: "open" },
+            ],
+        });
+        const accessor = makeAccessor([task]);
+        const allPassChecks: GhCheckRun[] = [
+            { name: "build", state: "SUCCESS", conclusion: "SUCCESS" },
+        ];
+        const poller = new PrPoller(
+            accessor, makeConfig("token"), 60_000,
+            fakeQuery("OPEN"), 1,
+            fakeChecksQuery(allPassChecks)
+        );
+
+        poller.start();
+        // Wait a tick for the async immediate poll to complete
+        await new Promise((r) => setTimeout(r, 10));
+        poller.stop();
+
+        // The immediate poll should have resolved the task without waiting for the interval
+        expect(accessor.pipelineCompleted).toContain("restart-task");
+
+        vi.useFakeTimers();
     });
 
     it("start() is idempotent (calling twice creates only one interval)", () => {
@@ -958,19 +1005,21 @@ describe("PrPoller", () => {
 
         // ── handlePipelines name filtering in the poller ───────────────────────
 
-        it("keeps waiting when watched pipeline jobs have not appeared yet (pending filter)", async () => {
+        it("completes task when watched pipeline jobs never appeared but all other checks are done (non-existent pipeline name)", async () => {
+            // The configured pipeline names don't exist in the repo's workflow.
+            // Once all other checks finish, we should complete instead of blocking forever.
             const task = makeTask({
-                taskId: "filter-pending-task",
+                taskId: "filter-nonexistent-task",
                 status: "waiting_for_pipeline",
                 pullRequests: [
                     { repo: "r", url: "https://github.com/o/r/pull/60", state: "open" },
                 ],
             });
             const accessor = makeAccessor([task]);
-            // Config: only watching "build" and "test"
+            // Config: only watching "build" and "test" — but these don't exist in the repo
             const configWithPipelines = makeConfig("token", ["build", "test"]);
             const checks: GhCheckRun[] = [
-                // Only an unrelated job has run so far
+                // Only an unrelated job ran; "build" and "test" were never triggered
                 { name: "unrelated", state: "SUCCESS", conclusion: "SUCCESS" },
             ];
             const poller = new PrPoller(
@@ -981,7 +1030,35 @@ describe("PrPoller", () => {
 
             await poller.pollAll();
 
-            // None of the watched jobs appeared yet — should keep waiting
+            // All existing checks done and configured pipelines never appeared → complete
+            expect(accessor.pipelineCompleted).toContain("filter-nonexistent-task");
+            expect(accessor.pipelineFailures).toHaveLength(0);
+        });
+
+        it("keeps waiting when watched pipeline jobs have not appeared yet but other checks still in-progress", async () => {
+            // Another check is still running — the watched pipeline might start after it.
+            const task = makeTask({
+                taskId: "filter-pending-task",
+                status: "waiting_for_pipeline",
+                pullRequests: [
+                    { repo: "r", url: "https://github.com/o/r/pull/61", state: "open" },
+                ],
+            });
+            const accessor = makeAccessor([task]);
+            const configWithPipelines = makeConfig("token", ["build", "test"]);
+            const checks: GhCheckRun[] = [
+                // A prerequisite job is still running
+                { name: "setup", state: "PENDING", conclusion: "" },
+            ];
+            const poller = new PrPoller(
+                accessor, configWithPipelines, 60_000,
+                fakeQuery("OPEN"), 1,
+                fakeChecksQuery(checks)
+            );
+
+            await poller.pollAll();
+
+            // Some checks still pending — keep waiting
             expect(accessor.pipelineCompleted).toHaveLength(0);
             expect(accessor.pipelineFailures).toHaveLength(0);
         });

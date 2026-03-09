@@ -157,11 +157,26 @@ export function analyzePipelineChecks(
             : checks;
 
     if (relevant.length === 0) {
-        // No matching checks found yet — if we're waiting for specific pipelines,
-        // treat as pending until they appear. Otherwise treat as passing (no CI).
-        return pipelineNames && pipelineNames.length > 0
-            ? { status: "pending" }
-            : { status: "passing" };
+        if (pipelineNames && pipelineNames.length > 0) {
+            // None of the configured pipeline names appear in the check runs.
+            if (checks.length === 0) {
+                // No checks at all — CI hasn't started yet, keep waiting.
+                return { status: "pending" };
+            }
+            // Checks exist but none match the configured names.
+            // If some checks are still in-progress, the configured pipeline jobs
+            // might be triggered later (e.g. as downstream jobs) — keep waiting.
+            // If ALL existing checks are in a terminal state (passing or failing),
+            // the configured pipeline jobs were never triggered — they likely have
+            // wrong names in the config. Complete the task to avoid blocking forever.
+            const allTerminal = checks.every((c) => {
+                const state = resolveCheckState(c);
+                return PASSING_STATES.has(state) || FAILING_STATES.has(state);
+            });
+            return allTerminal ? { status: "passing" } : { status: "pending" };
+        }
+        // No filter — no checks means no CI configured; treat as passing.
+        return { status: "passing" };
     }
 
     for (const check of relevant) {
@@ -292,6 +307,11 @@ export class PrPoller {
     /** Start periodic polling. Safe to call multiple times (idempotent). */
     start(): void {
         if (this.intervalId) return;
+        // Run an immediate poll on startup so that tasks whose pipelines completed
+        // while the implementer was down are resolved without waiting a full interval.
+        this.pollAll().catch((err) =>
+            console.error("[pr-poller] Unhandled error during initial poll:", err)
+        );
         this.intervalId = setInterval(() => {
             this.pollAll().catch((err) =>
                 console.error("[pr-poller] Unhandled error during poll:", err)
@@ -448,6 +468,22 @@ export class PrPoller {
                     checks,
                     pipelineNames
                 );
+
+                // Warn when configured pipeline names never appeared despite other
+                // checks finishing — this usually means the names in the config are wrong.
+                if (
+                    status === "passing" &&
+                    pipelineNames.length > 0 &&
+                    checks.length > 0 &&
+                    !checks.some((c) => pipelineNames.includes(c.name))
+                ) {
+                    console.warn(
+                        `[pr-poller] Task ${task.taskId}: configured pipeline name(s) ` +
+                        `[${pipelineNames.join(", ")}] were not found in PR ${pr.url} checks. ` +
+                        `All other checks finished — completing task. ` +
+                        `Check handlePipelines.pipelines in your config for typos.`
+                    );
+                }
 
                 if (status === "failing") {
                     overallStatus = "failing";
