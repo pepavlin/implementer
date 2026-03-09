@@ -10,6 +10,13 @@ export interface ServerConfig {
     metaCpus: number;
     /** CPU limit for the main sandbox container running Claude Code. Defaults to 0.4. */
     sandboxCpus: number;
+    /**
+     * Maximum seconds a task may spend in the "starting" phase (metadata generation +
+     * workspace acquisition) before it is automatically failed and re-queued via the
+     * normal errorRetry / retry mechanism.
+     * Defaults to 300 seconds (5 minutes).
+     */
+    startingTimeoutSeconds?: number;
 }
 
 export interface RepositoryConfig {
@@ -102,7 +109,8 @@ const ServerSchema = z
         maxConcurrentTasks: z.number().int().min(1).optional(),
         adminPassword: z.string().optional(),
         metaCpus: z.number().positive().default(0.4),
-        sandboxCpus: z.number().positive().default(0.4)
+        sandboxCpus: z.number().positive().default(0.4),
+        startingTimeoutSeconds: z.number().int().min(30).default(300)
     })
     .strict();
 
