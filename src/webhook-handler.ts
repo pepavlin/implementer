@@ -93,6 +93,22 @@ export interface WebhookPayload {
     [key: string]: unknown;
 }
 
+// ── Payload helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Extract repository identification from a webhook payload.
+ * Returns `{ fullName, htmlUrl }` if present, or `null` if
+ * the payload contains no repository information.
+ */
+export function extractRepoInfo(
+    payload: WebhookPayload
+): { fullName?: string; htmlUrl?: string } | null {
+    const fullName = payload.repository?.full_name;
+    const htmlUrl = payload.repository?.html_url;
+    if (!fullName && !htmlUrl) return null;
+    return { fullName, htmlUrl };
+}
+
 // ── Event filtering ─────────────────────────────────────────────────────────
 
 export interface WebhookFilterResult {

@@ -670,3 +670,159 @@ projects:
         expect(b.mcpServers?.shared.command).toBe("shared-cmd");
     });
 });
+
+describe("Config.findProjectByRepo", () => {
+    it("finds a project by full_name", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: my-repo
+        url: https://github.com/my-org/my-repo.git
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.findProjectByRepo("my-org/my-repo")).toBe("my-project");
+    });
+
+    it("finds a project by html_url", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: my-repo
+        url: https://github.com/my-org/my-repo.git
+`
+        );
+
+        const config = Config.load(path);
+        expect(
+            config.findProjectByRepo(undefined, "https://github.com/my-org/my-repo")
+        ).toBe("my-project");
+    });
+
+    it("matches case-insensitively", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: my-repo
+        url: https://github.com/My-Org/My-Repo.git
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.findProjectByRepo("my-org/my-repo")).toBe("my-project");
+    });
+
+    it("returns null when no project matches", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: my-repo
+        url: https://github.com/my-org/my-repo.git
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.findProjectByRepo("other-org/other-repo")).toBeNull();
+    });
+
+    it("returns null when both args are undefined", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: my-repo
+        url: https://github.com/my-org/my-repo.git
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.findProjectByRepo(undefined, undefined)).toBeNull();
+    });
+
+    it("finds the correct project among multiple projects", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  project-a:
+    repositories:
+      - name: repo-a
+        url: https://github.com/org/repo-a.git
+  project-b:
+    repositories:
+      - name: repo-b
+        url: https://github.com/org/repo-b.git
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.findProjectByRepo("org/repo-b")).toBe("project-b");
+    });
+
+    it("finds a project when it has multiple repositories", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: frontend
+        url: https://github.com/org/frontend.git
+      - name: backend
+        url: https://github.com/org/backend.git
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.findProjectByRepo("org/backend")).toBe("my-project");
+    });
+
+    it("handles SSH-style URLs with full_name matching", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: my-repo
+        url: git@github.com:my-org/my-repo.git
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.findProjectByRepo("my-org/my-repo")).toBe("my-project");
+    });
+
+    it("loads server-level webhookSecret", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+server:
+  webhookSecret: global-secret-123
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.server.webhookSecret).toBe("global-secret-123");
+    });
+});

@@ -17,6 +17,14 @@ export interface ServerConfig {
      * Defaults to 300 seconds (5 minutes).
      */
     startingTimeoutSeconds?: number;
+    /**
+     * Global webhook secret for the unified webhook endpoint (`POST /webhook/github`).
+     * When set, all GitHub repositories can use a single webhook URL and the handler
+     * automatically routes events to the correct project based on the repository name
+     * in the payload. All GitHub webhooks pointing to this URL must be configured with
+     * the same secret.
+     */
+    webhookSecret?: string;
 }
 
 export interface RepositoryConfig {
@@ -125,7 +133,8 @@ const ServerSchema = z
         adminPassword: z.string().optional(),
         metaCpus: z.number().positive().default(0.4),
         sandboxCpus: z.number().positive().default(0.4),
-        startingTimeoutSeconds: z.number().int().min(30).default(300)
+        startingTimeoutSeconds: z.number().int().min(30).default(300),
+        webhookSecret: z.string().min(1).optional()
     })
     .strict();
 
