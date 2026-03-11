@@ -43,6 +43,13 @@ projects:
         #     - .github
         #     - Dockerfile
         #     - docker-compose.yml
+        # GitHub webhook secret for real-time PR/pipeline event notifications (optional).
+        # When configured, the project accepts webhook events at:
+        #   POST /webhook/github/<projectId>
+        # Configure the same secret in your GitHub repo → Settings → Webhooks.
+        # Events to enable: Pull requests, Check runs, Check suites, Workflow runs.
+        # Supports ${ENV_VAR} substitution.
+        # webhookSecret: ${GITHUB_WEBHOOK_SECRET}
         # Monitor specific CI/CD pipeline jobs on the PR and auto-retry on failure (optional).
         # When configured, tasks wait in "waiting_for_pipeline" status after PR creation.
         # Only the listed pipeline job names are checked — all others are ignored.

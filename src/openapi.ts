@@ -382,6 +382,107 @@ export const openApiSpec = {
                     }
                 }
             }
+        },
+        "/webhook/github/{projectId}": {
+            post: {
+                summary: "Receive GitHub webhook events",
+                description:
+                    "Receives GitHub webhook events and triggers an immediate PR/pipeline poll for the project. " +
+                    "Authenticated via HMAC SHA-256 signature verification (X-Hub-Signature-256 header). " +
+                    "Responds to pull_request (state changes), check_run, check_suite, and workflow_run (completed) events. " +
+                    "Configure this URL as the webhook Payload URL in your GitHub repository settings.",
+                security: [],
+                parameters: [
+                    {
+                        name: "projectId",
+                        in: "path",
+                        required: true,
+                        description: "The project ID as defined in config.yaml",
+                        schema: { type: "string" }
+                    },
+                    {
+                        name: "X-GitHub-Event",
+                        in: "header",
+                        required: true,
+                        description: "GitHub event type (e.g. pull_request, check_run)",
+                        schema: { type: "string" }
+                    },
+                    {
+                        name: "X-Hub-Signature-256",
+                        in: "header",
+                        required: true,
+                        description: "HMAC SHA-256 signature of the payload body",
+                        schema: { type: "string" }
+                    },
+                    {
+                        name: "X-GitHub-Delivery",
+                        in: "header",
+                        required: false,
+                        description: "Unique delivery ID for this webhook event",
+                        schema: { type: "string" }
+                    }
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                description: "GitHub webhook event payload"
+                            }
+                        }
+                    }
+                },
+                responses: {
+                    "200": {
+                        description: "Webhook processed",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        accepted: {
+                                            type: "boolean",
+                                            description:
+                                                "Whether the event triggered a poll"
+                                        },
+                                        reason: {
+                                            type: "string",
+                                            description:
+                                                "Description of the event or reason for skipping"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        description:
+                            "Invalid request (missing headers, body, or webhooks not configured)",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/Error" }
+                            }
+                        }
+                    },
+                    "401": {
+                        description: "Invalid webhook signature",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/Error" }
+                            }
+                        }
+                    },
+                    "404": {
+                        description: "Project not found",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/Error" }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 };
