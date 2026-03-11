@@ -109,6 +109,13 @@ export interface ProjectConfig {
      * Other tasks can start while this task is in waiting_for_pipeline.
      */
     handlePipelines?: HandlePipelinesConfig;
+    /**
+     * Secret token used to verify incoming GitHub webhook deliveries (HMAC SHA-256).
+     * When set, the project accepts webhook events at POST /webhook/github/:projectId.
+     * Webhook events for PR status changes and CI/CD pipeline updates trigger an
+     * immediate re-poll of the project's tasks, avoiding the default 5-minute interval.
+     */
+    webhookSecret?: string;
 }
 
 const ServerSchema = z
@@ -194,7 +201,8 @@ const ProjectSchema = z
         auth: ProjectAuthSchema.optional(),
         errorRetry: ErrorRetrySchema.optional(),
         protectedPaths: z.array(z.string()).optional(),
-        handlePipelines: HandlePipelinesSchema.optional()
+        handlePipelines: HandlePipelinesSchema.optional(),
+        webhookSecret: z.string().min(1).optional()
     })
     .strict();
 

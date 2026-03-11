@@ -90,6 +90,34 @@ projects:
 
 The background PR poller (every 5 min) checks `gh pr checks` for tasks in `waiting_for_pipeline` status, filtering results to only the listed job names. When all listed jobs pass, the task completes. When a listed job fails and retries remain, a new continuation task is automatically queued on the same branch with a prompt to fix the failing pipeline. If the retry limit is reached, the task is marked `failed`.
 
+### GitHub webhooks (real-time PR/pipeline updates)
+
+By default, the PR poller checks GitHub every 5 minutes. To get instant updates when a PR status or CI pipeline changes, configure a GitHub webhook that points to the implementer:
+
+```yaml
+projects:
+    my-project:
+        webhookSecret: your-webhook-secret   # same secret configured in GitHub
+        repositories:
+            - name: my-repo
+              url: git@github.com:user/my-repo.git
+```
+
+Then in your GitHub repository settings (Settings > Webhooks > Add webhook):
+
+- **Payload URL:** `https://your-implementer-host/webhook/github/my-project`
+- **Content type:** `application/json`
+- **Secret:** same value as `webhookSecret` in config
+- **Events:** Select "Let me select individual events" and enable:
+  - Pull requests
+  - Check runs
+  - Check suites
+  - Workflow runs
+
+When a relevant event arrives (PR opened/closed/synchronized, CI check completed, workflow finished), the implementer immediately re-polls that project's tasks instead of waiting for the next 5-minute cycle. Irrelevant events (labels, assignments, etc.) are acknowledged but ignored.
+
+The webhook endpoint uses HMAC SHA-256 signature verification — no Bearer token is needed. The regular 5-minute polling continues as a fallback in case webhook delivery fails.
+
 `apiKey` is configured per project (`projects.<projectId>.apiKey`), not as a single global top-level config field.
 
 Config is validated both at startup and via:

@@ -452,6 +452,14 @@ export class TaskManager {
     }
 
     /**
+     * Trigger an immediate PR/pipeline poll for a specific project.
+     * Used by the webhook handler to bypass the 5-minute polling interval.
+     */
+    triggerProjectPoll(projectId: ProjectId): Promise<void> {
+        return this.prPoller.pollProject(projectId as string);
+    }
+
+    /**
      * Check if any OTHER task in the given chain is currently blocking.
      * Excludes the calling task (by excludeTaskId) so a queued task
      * doesn't block itself from starting.

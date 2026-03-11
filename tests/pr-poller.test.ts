@@ -1326,3 +1326,133 @@ describe("PrPoller", () => {
         });
     });
 });
+
+// ── pollProject (webhook-triggered polling) ─────────────────────────────────
+
+describe("PrPoller.pollProject", () => {
+    it("only polls tasks for the specified project", async () => {
+        const projATask = makeTask({
+            taskId: "taskA",
+            projectId: "projA",
+            pullRequests: [{ repo: "repoA", url: "https://github.com/org/repoA/pull/1", state: "open" }],
+        });
+        const projBTask = makeTask({
+            taskId: "taskB",
+            projectId: "projB",
+            pullRequests: [{ repo: "repoB", url: "https://github.com/org/repoB/pull/2", state: "open" }],
+        });
+        const accessor = makeAccessor([projATask, projBTask]);
+        const queryFn = fakeQuery("OPEN");
+        const config = {
+            server: { workspaceDir: "/tmp", maxConcurrentTasks: 3, adminPassword: "pw", metaCpus: 0.4, sandboxCpus: 0.4 },
+            projects: {
+                projA: {
+                    data: {
+                        apiKey: "keyA",
+                        repositories: [],
+                        claudeCode: { command: "claude", timeoutSeconds: 3600, mcpServers: {} },
+                        auth: { githubToken: "tokenA" },
+                    },
+                },
+                projB: {
+                    data: {
+                        apiKey: "keyB",
+                        repositories: [],
+                        claudeCode: { command: "claude", timeoutSeconds: 3600, mcpServers: {} },
+                        auth: { githubToken: "tokenB" },
+                    },
+                },
+            },
+        } as unknown as Config;
+
+        const poller = new PrPoller(accessor, config, 60_000, queryFn);
+        await poller.pollProject("projA");
+
+        // Only projA's PR should be updated
+        expect(accessor.updates).toHaveLength(1);
+        expect(accessor.updates[0].taskId).toBe("taskA");
+        expect(accessor.updates[0].prUrl).toBe("https://github.com/org/repoA/pull/1");
+    });
+
+    it("checks pipeline for waiting_for_pipeline tasks in the project", async () => {
+        const task = makeTask({
+            taskId: "taskPipe",
+            projectId: "proj",
+            status: "waiting_for_pipeline",
+            pullRequests: [{ repo: "repo", url: "https://github.com/org/repo/pull/5", state: "open" }],
+            pipelineWaitingSince: new Date(Date.now() - 60_000).toISOString(),
+        });
+        const accessor = makeAccessor([task]);
+        const passingChecks: GhCheckRun[] = [
+            { name: "build", state: "SUCCESS" },
+        ];
+        const config = makeConfig("token", ["build"]);
+        const poller = new PrPoller(
+            accessor, config, 60_000,
+            fakeQuery("OPEN"), 1,
+            fakeChecksQuery(passingChecks)
+        );
+
+        await poller.pollProject("proj");
+
+        expect(accessor.pipelineCompleted).toContain("taskPipe");
+    });
+
+    it("does nothing when project has no pollable tasks", async () => {
+        const accessor = makeAccessor([]);
+        const queryFn = vi.fn().mockResolvedValue({ state: "OPEN", isDraft: false });
+        const config = makeConfig("token");
+        const poller = new PrPoller(accessor, config, 60_000, queryFn as GhQueryFn);
+
+        await poller.pollProject("proj");
+
+        expect(queryFn).not.toHaveBeenCalled();
+        expect(accessor.updates).toHaveLength(0);
+    });
+
+    it("skips terminal PR states (merged/closed)", async () => {
+        const task = makeTask({
+            taskId: "taskTerm",
+            projectId: "proj",
+            pullRequests: [
+                { repo: "repo", url: "https://github.com/org/repo/pull/10", state: "merged" },
+                { repo: "repo", url: "https://github.com/org/repo/pull/11", state: "closed" },
+            ],
+        });
+        const accessor = makeAccessor([task]);
+        const queryFn = vi.fn().mockResolvedValue({ state: "OPEN", isDraft: false });
+        const config = makeConfig("token");
+        const poller = new PrPoller(accessor, config, 60_000, queryFn as GhQueryFn);
+
+        await poller.pollProject("proj");
+
+        expect(queryFn).not.toHaveBeenCalled();
+        expect(accessor.updates).toHaveLength(0);
+    });
+
+    it("deduplicates concurrent pollProject calls for the same project", async () => {
+        const task = makeTask({
+            taskId: "taskDedup",
+            projectId: "proj",
+            pullRequests: [{ repo: "repo", url: "https://github.com/org/repo/pull/20", state: "open" }],
+        });
+        const accessor = makeAccessor([task]);
+
+        let queryCallCount = 0;
+        const slowQuery: GhQueryFn = async () => {
+            queryCallCount++;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            return { state: "OPEN", isDraft: false };
+        };
+
+        const config = makeConfig("token");
+        const poller = new PrPoller(accessor, config, 60_000, slowQuery);
+
+        // Fire two polls simultaneously
+        const [p1, p2] = [poller.pollProject("proj"), poller.pollProject("proj")];
+        await Promise.all([p1, p2]);
+
+        // Only one should actually execute the query
+        expect(queryCallCount).toBe(1);
+    });
+});

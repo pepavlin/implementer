@@ -387,6 +387,107 @@ export class PrPoller {
     }
 
     /**
+     * Trigger an immediate poll for a specific project's tasks only.
+     * Used by the webhook handler to avoid waiting for the next polling cycle.
+     *
+     * Debounced: if called multiple times in rapid succession for the same project,
+     * only one poll executes (subsequent calls within the debounce window are no-ops).
+     */
+    private _projectPollInFlight = new Set<string>();
+
+    async pollProject(projectId: string): Promise<void> {
+        // Simple deduplication: skip if a poll for this project is already running
+        if (this._projectPollInFlight.has(projectId)) {
+            console.log(
+                `[pr-poller] Poll already in progress for project "${projectId}" — skipping duplicate`
+            );
+            return;
+        }
+
+        this._projectPollInFlight.add(projectId);
+        try {
+            console.log(
+                `[pr-poller] Webhook-triggered poll for project "${projectId}"`
+            );
+            const allTasks = this.accessor.listAllTasks();
+            const projectTasks = allTasks.filter(
+                (t) => t.projectId === projectId
+            );
+
+            if (projectTasks.length === 0) {
+                console.log(
+                    `[pr-poller] No pollable tasks for project "${projectId}"`
+                );
+                return;
+            }
+
+            // Part 1: PR state polling for this project
+            const toCheck: Array<{
+                taskId: string;
+                pr: PullRequest;
+                token: string | undefined;
+            }> = [];
+
+            for (const task of projectTasks) {
+                if (!task.pullRequests?.length) continue;
+                const projectConfig =
+                    this.config.projects[task.projectId as ProjectId];
+                const token = projectConfig?.data.auth?.githubToken;
+
+                for (const pr of task.pullRequests) {
+                    if (pr.state === "merged" || pr.state === "closed") continue;
+                    toCheck.push({ taskId: task.taskId, pr, token });
+                }
+            }
+
+            if (toCheck.length > 0) {
+                console.log(
+                    `[pr-poller] [webhook] Checking ${toCheck.length} open PR(s) for project "${projectId}"`
+                );
+                for (const item of toCheck) {
+                    try {
+                        const raw = await this.queryFn(item.pr.url, item.token);
+                        const newState = normalizeGhState(raw);
+                        if (newState !== item.pr.state) {
+                            console.log(
+                                `[pr-poller] [webhook] PR ${item.pr.url} state changed: ${item.pr.state ?? "unknown"} → ${newState}`
+                            );
+                        }
+                        this.accessor.updatePrState(
+                            item.taskId,
+                            item.pr.url,
+                            newState
+                        );
+                    } catch (err) {
+                        console.warn(
+                            "[pr-poller] [webhook] Failed to check PR:",
+                            err instanceof Error ? err.message : String(err)
+                        );
+                    }
+                }
+            }
+
+            // Part 2: Pipeline checks for waiting_for_pipeline tasks in this project
+            const pipelineTasks = projectTasks.filter(
+                (t) =>
+                    t.status === "waiting_for_pipeline" &&
+                    t.pullRequests?.length
+            );
+
+            if (pipelineTasks.length > 0) {
+                console.log(
+                    `[pr-poller] [webhook] Checking pipeline status for ${pipelineTasks.length} waiting task(s) in project "${projectId}"`
+                );
+                for (const task of pipelineTasks) {
+                    await this.checkPipelineForTask(task);
+                }
+            }
+        } finally {
+            this._projectPollInFlight.delete(projectId);
+        }
+    }
+
+    /**
      * Run a single polling cycle: check all open/draft PRs across all tasks
      * and update their state if it changed.
      *
