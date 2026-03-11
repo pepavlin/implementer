@@ -19,6 +19,7 @@ import type { Task } from "./task-manager/task.js";
 import {
     verifyWebhookSignature,
     shouldTriggerPoll,
+    extractRepoInfo,
     SUPPORTED_EVENTS,
     type WebhookPayload
 } from "./webhook-handler.js";
@@ -268,7 +269,118 @@ export function createServer(
         });
     });
 
-    // POST /webhook/github/:projectId - Receive GitHub webhook events
+    // POST /webhook/github - Unified GitHub webhook endpoint (auto-routes by repo)
+    app.post(
+        "/webhook/github",
+        asyncRoute(async (req, res) => {
+            const webhookSecret = config.server.webhookSecret;
+            if (!webhookSecret) {
+                throw new BadRequestError(
+                    "Unified webhook is not configured (no server.webhookSecret)"
+                );
+            }
+
+            // Verify HMAC SHA-256 signature using the global secret
+            const signatureHeader = req.headers["x-hub-signature-256"] as
+                | string
+                | undefined;
+            const rawBody = (req as any).rawBody as Buffer | undefined;
+
+            if (!rawBody) {
+                throw new BadRequestError("Missing request body");
+            }
+
+            if (
+                !verifyWebhookSignature(rawBody, webhookSecret, signatureHeader)
+            ) {
+                throw new UnauthorizedError("Invalid webhook signature");
+            }
+
+            // Determine event type
+            const event = req.headers["x-github-event"] as string | undefined;
+            if (!event) {
+                throw new BadRequestError("Missing X-GitHub-Event header");
+            }
+
+            const deliveryId = req.headers["x-github-delivery"] as
+                | string
+                | undefined;
+
+            const payload = req.body as WebhookPayload;
+
+            // Extract repo info and find matching project
+            const repoInfo = extractRepoInfo(payload);
+            if (!repoInfo) {
+                res.status(200).json({
+                    accepted: false,
+                    reason: "No repository information in payload"
+                });
+                return;
+            }
+
+            const projectId = config.findProjectByRepo(
+                repoInfo.fullName,
+                repoInfo.htmlUrl
+            );
+            if (!projectId) {
+                const repoLabel =
+                    repoInfo.fullName ?? repoInfo.htmlUrl ?? "unknown";
+                console.log(
+                    `[webhook] No project found for repository "${repoLabel}"` +
+                        (deliveryId ? ` (delivery: ${deliveryId})` : "")
+                );
+                res.status(200).json({
+                    accepted: false,
+                    reason: `No project configured for repository ${repoLabel}`
+                });
+                return;
+            }
+
+            const project = config.projects[projectId];
+            const projectRepoUrls = project.data.repositories.map(
+                (r) => r.url
+            );
+            const filterResult = shouldTriggerPoll(
+                event,
+                payload,
+                projectRepoUrls
+            );
+
+            if (!filterResult.shouldPoll) {
+                console.log(
+                    `[webhook] Ignored event for project "${projectId}": ${filterResult.reason}` +
+                        (deliveryId ? ` (delivery: ${deliveryId})` : "")
+                );
+                res.status(200).json({
+                    accepted: false,
+                    projectId,
+                    reason: filterResult.reason
+                });
+                return;
+            }
+
+            console.log(
+                `[webhook] Accepted event for project "${projectId}": ${filterResult.reason}` +
+                    (deliveryId ? ` (delivery: ${deliveryId})` : "")
+            );
+
+            // Trigger immediate poll in the background (don't block the response)
+            taskManager.triggerProjectPoll(projectId).catch((err) => {
+                console.error(
+                    `[webhook] Error during triggered poll for project "${projectId}":`,
+                    err instanceof Error ? err.message : String(err)
+                );
+            });
+
+            res.status(200).json({
+                accepted: true,
+                projectId,
+                reason: filterResult.reason
+            });
+        })
+    );
+
+    // POST /webhook/github/:projectId - Receive GitHub webhook events (per-project)
     app.post(
         "/webhook/github/:projectId",
         asyncRoute(async (req, res) => {

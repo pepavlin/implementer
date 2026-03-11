@@ -383,6 +383,99 @@ export const openApiSpec = {
                 }
             }
         },
+        "/webhook/github": {
+            post: {
+                summary: "Unified GitHub webhook (auto-routes by repo)",
+                description:
+                    "Receives GitHub webhook events for any project. The handler automatically determines " +
+                    "which project the event belongs to based on the repository name in the payload. " +
+                    "Authenticated via HMAC SHA-256 signature using the global server.webhookSecret. " +
+                    "This allows all GitHub repositories to share a single webhook URL. " +
+                    "Configure this URL as the webhook Payload URL in your GitHub repository settings.",
+                security: [],
+                parameters: [
+                    {
+                        name: "X-GitHub-Event",
+                        in: "header",
+                        required: true,
+                        description: "GitHub event type (e.g. pull_request, check_run)",
+                        schema: { type: "string" }
+                    },
+                    {
+                        name: "X-Hub-Signature-256",
+                        in: "header",
+                        required: true,
+                        description: "HMAC SHA-256 signature of the payload body (uses server.webhookSecret)",
+                        schema: { type: "string" }
+                    },
+                    {
+                        name: "X-GitHub-Delivery",
+                        in: "header",
+                        required: false,
+                        description: "Unique delivery ID for this webhook event",
+                        schema: { type: "string" }
+                    }
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                description: "GitHub webhook event payload"
+                            }
+                        }
+                    }
+                },
+                responses: {
+                    "200": {
+                        description: "Webhook processed",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        accepted: {
+                                            type: "boolean",
+                                            description:
+                                                "Whether the event triggered a poll"
+                                        },
+                                        projectId: {
+                                            type: "string",
+                                            nullable: true,
+                                            description:
+                                                "The auto-detected project ID (null if no project matched)"
+                                        },
+                                        reason: {
+                                            type: "string",
+                                            description:
+                                                "Description of the event or reason for skipping"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        description:
+                            "Invalid request (missing headers, body, or server.webhookSecret not configured)",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/Error" }
+                            }
+                        }
+                    },
+                    "401": {
+                        description: "Invalid webhook signature",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/Error" }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/webhook/github/{projectId}": {
             post: {
                 summary: "Receive GitHub webhook events",

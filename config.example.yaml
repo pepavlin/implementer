@@ -6,6 +6,13 @@ server:
     # If not set, the dashboard is accessible without authentication.
     # Supports ${ENV_VAR} substitution.
     # adminPassword: ${DASHBOARD_PASSWORD}
+    # Global webhook secret for the unified webhook endpoint (optional).
+    # When set, all GitHub repositories can use a single webhook URL:
+    #   POST /webhook/github
+    # The handler auto-detects the project from the repository name in the payload.
+    # All GitHub webhooks pointing to this URL must use the same secret.
+    # Supports ${ENV_VAR} substitution.
+    # webhookSecret: ${GITHUB_WEBHOOK_SECRET}
 
 # Global defaults merged into every project's claudeCode (optional).
 # systemPrompt is concatenated (global + project); mcpServers are shallow-merged (project overrides global).

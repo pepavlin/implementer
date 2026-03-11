@@ -4,6 +4,32 @@ The implementer supports receiving GitHub webhook events for real-time PR and pi
 
 ## Architecture
 
+Two webhook modes are available:
+
+### Unified webhook (recommended)
+
+All repositories share a **single webhook URL**. The handler automatically determines which project an event belongs to based on the repository name in the payload.
+
+```
+GitHub Repository A ─┐
+GitHub Repository B ─┤   POST /webhook/github
+GitHub Repository C ─┼──────────────────────────►  Webhook Handler
+                     │                                   │
+                     │                                   ├─ Verify HMAC SHA-256 (server.webhookSecret)
+                     │                                   ├─ Extract repo name from payload
+                     │                                   ├─ Look up matching project
+                     │                                   ├─ Filter: is event relevant?
+                     │                                   └─ Trigger PrPoller.pollProject()
+                     │                                           │
+                     │                                           ▼
+                     │                                   PR state + pipeline checks
+                     │                                   updated in real-time
+```
+
+### Per-project webhook (legacy)
+
+Each project has its own webhook URL with its own secret. Useful when different projects need different webhook secrets.
+
 ```
 GitHub Repository
     │
@@ -12,19 +38,38 @@ GitHub Repository
     ├─ check_suite event ───────┤   POST /webhook/github/:projectId
     └─ workflow_run event ──────┼──────────────────────────────────►  Webhook Handler
                                 │                                        │
-                                │                                        ├─ Verify HMAC SHA-256 signature
+                                │                                        ├─ Verify HMAC SHA-256 (project webhookSecret)
                                 │                                        ├─ Filter: is event relevant?
                                 │                                        ├─ Filter: does repo belong to project?
-                                │                                        └─ Trigger immediate PrPoller.pollProject()
-                                │                                                │
-                                │                                                ▼
-                                │                                        PR state + pipeline checks
-                                │                                        updated in real-time
+                                │                                        └─ Trigger PrPoller.pollProject()
 ```
 
 ## Configuration
 
-Add `webhookSecret` to any project in `config.yaml`:
+### Unified webhook (recommended)
+
+Add `webhookSecret` to the `server` section in `config.yaml`:
+
+```yaml
+server:
+    webhookSecret: ${GITHUB_WEBHOOK_SECRET}
+
+projects:
+    project-a:
+        repositories:
+            - name: repo-a
+              url: https://github.com/org/repo-a.git
+    project-b:
+        repositories:
+            - name: repo-b
+              url: https://github.com/org/repo-b.git
+```
+
+All GitHub repositories point to the same URL (`POST /webhook/github`) and use the same secret. The handler routes events to the correct project by matching the `repository.full_name` from the payload against each project's configured repository URLs.
+
+### Per-project webhook
+
+Add `webhookSecret` to individual projects in `config.yaml`:
 
 ```yaml
 projects:
@@ -35,13 +80,58 @@ projects:
 
 The secret must match the one configured in the GitHub repository webhook settings.
 
-## Endpoint
+## Endpoints
 
-```
-POST /webhook/github/:projectId
+### `POST /webhook/github` (unified)
+
+Single endpoint for all projects. Requires `server.webhookSecret` to be configured.
+
+The response includes the auto-detected `projectId`:
+
+```json
+{
+    "accepted": true,
+    "projectId": "my-project",
+    "reason": "pull_request opened"
+}
 ```
 
-### Headers
+When no project matches the repository:
+
+```json
+{
+    "accepted": false,
+    "reason": "No project configured for repository org/unknown-repo"
+}
+```
+
+#### Error responses
+
+| Status | Condition |
+|--------|-----------|
+| 400 | Missing body, missing `X-GitHub-Event` header, or `server.webhookSecret` not configured |
+| 401 | Invalid signature |
+
+### `POST /webhook/github/:projectId` (per-project)
+
+Project-specific endpoint. Requires the project's `webhookSecret` to be configured.
+
+```json
+{
+    "accepted": true,
+    "reason": "pull_request opened"
+}
+```
+
+#### Error responses
+
+| Status | Condition |
+|--------|-----------|
+| 400 | Missing body, missing `X-GitHub-Event` header, or project `webhookSecret` not configured |
+| 401 | Invalid signature |
+| 404 | Project not found |
+
+### Common headers
 
 | Header | Required | Description |
 |--------|----------|-------------|
@@ -52,35 +142,7 @@ POST /webhook/github/:projectId
 
 ### Authentication
 
-The endpoint does **not** use Bearer token authentication. Instead, it verifies the request using HMAC SHA-256 signature verification with the project's `webhookSecret`. This is the standard GitHub webhook authentication mechanism.
-
-### Response
-
-Always returns HTTP 200 with a JSON body:
-
-```json
-{
-    "accepted": true,
-    "reason": "pull_request opened"
-}
-```
-
-Or for ignored events:
-
-```json
-{
-    "accepted": false,
-    "reason": "pull_request action \"labeled\" is not a relevant state change"
-}
-```
-
-### Error responses
-
-| Status | Condition |
-|--------|-----------|
-| 400 | Missing body, missing `X-GitHub-Event` header, or `webhookSecret` not configured |
-| 401 | Invalid signature |
-| 404 | Project not found |
+Neither endpoint uses Bearer token authentication. Both verify requests using HMAC SHA-256 signature verification — the unified endpoint uses `server.webhookSecret`, while per-project endpoints use the project's `webhookSecret`.
 
 ## Supported Events
 
@@ -117,13 +179,16 @@ Triggers poll on:
 
 Ignored: `requested`, `in_progress`
 
-## Repository Validation
+## Repository Matching
 
-The webhook handler verifies that the repository in the event payload matches one of the project's configured repositories. Events from unrelated repositories are acknowledged (200) but not processed.
+The webhook handler matches the `repository.full_name` (e.g. `org/repo-name`) from the payload against each project's configured repository URLs.
 
 Matching is case-insensitive and handles both URL formats:
 - `https://github.com/org/repo.git` (configured)
 - `https://github.com/org/repo` (in webhook payload)
+- `git@github.com:org/repo.git` (SSH-style)
+
+For the unified endpoint, this matching determines which project receives the event. For per-project endpoints, it validates that the event belongs to the specified project.
 
 ## Deduplication
 
@@ -135,20 +200,33 @@ The regular 5-minute background polling continues regardless of webhook configur
 
 ## GitHub Webhook Setup
 
+### Unified webhook (recommended)
+
 1. Go to your GitHub repository → Settings → Webhooks → Add webhook
-2. Set **Payload URL** to: `https://your-host/webhook/github/<projectId>`
+2. Set **Payload URL** to: `https://your-host/webhook/github`
 3. Set **Content type** to: `application/json`
-4. Set **Secret** to: the same value as `webhookSecret` in your config
+4. Set **Secret** to: the same value as `server.webhookSecret` in your config
 5. Select **"Let me select individual events"** and check:
    - Pull requests
    - Check runs
    - Check suites
    - Workflow runs
 6. Save
+7. **Repeat for each repository** — all use the same URL and secret
+
+### Per-project webhook
+
+1. Go to your GitHub repository → Settings → Webhooks → Add webhook
+2. Set **Payload URL** to: `https://your-host/webhook/github/<projectId>`
+3. Set **Content type** to: `application/json`
+4. Set **Secret** to: the same value as the project's `webhookSecret` in your config
+5. Select the same events as above
+6. Save
 
 ## Source Files
 
-- `src/webhook-handler.ts` — Signature verification, event filtering logic
-- `src/server.ts` — Webhook route registration
+- `src/webhook-handler.ts` — Signature verification, event filtering, payload extraction
+- `src/server.ts` — Webhook route registration (unified + per-project)
+- `src/config/config.ts` — `findProjectByRepo()` for auto-routing
 - `src/pr-poller.ts` — `pollProject()` method for targeted polling
 - `src/task-manager/task-manager.ts` — `triggerProjectPoll()` bridge method

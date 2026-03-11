@@ -87,6 +87,36 @@ export class Config {
         }
     }
 
+    /**
+     * Find the project that owns a given repository by matching the GitHub
+     * `full_name` (e.g. "my-org/my-repo") or `html_url` against each
+     * project's configured repository URLs. Returns the first matching
+     * project ID, or null if no project owns this repository.
+     */
+    findProjectByRepo(
+        repoFullName?: string,
+        repoHtmlUrl?: string
+    ): ProjectId | null {
+        if (!repoFullName && !repoHtmlUrl) return null;
+
+        for (const [projectId, project] of Object.entries(this.projects)) {
+            const matches = project.data.repositories.some((repo) => {
+                const normalized = repo.url.replace(/\.git$/, "").toLowerCase();
+                const lowerFullName = repoFullName?.toLowerCase();
+                return (
+                    (repoHtmlUrl &&
+                        normalized === repoHtmlUrl.toLowerCase()) ||
+                    (lowerFullName &&
+                        (normalized.endsWith(`/${lowerFullName}`) ||
+                            normalized.endsWith(`:${lowerFullName}`)))
+                );
+            });
+            if (matches) return projectId as ProjectId;
+        }
+
+        return null;
+    }
+
     getProjectIdByToken(projectToken: string): ProjectId | null {
         // Check explicit API key match first
         for (const [projectId, project] of Object.entries(this.projects)) {

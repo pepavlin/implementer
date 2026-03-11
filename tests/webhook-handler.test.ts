@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import {
     verifyWebhookSignature,
     shouldTriggerPoll,
+    extractRepoInfo,
     SUPPORTED_EVENTS,
     type WebhookPayload
 } from "../src/webhook-handler.js";
@@ -31,6 +32,34 @@ const PROJECT_REPO_URLS = [
     "https://github.com/my-org/my-repo.git",
     "https://github.com/my-org/other-repo.git"
 ];
+
+// ── extractRepoInfo ─────────────────────────────────────────────────────────
+
+describe("extractRepoInfo", () => {
+    it("returns full_name and html_url when present", () => {
+        const payload = makePayload();
+        const info = extractRepoInfo(payload);
+        expect(info).toEqual({
+            fullName: "my-org/my-repo",
+            htmlUrl: "https://github.com/my-org/my-repo"
+        });
+    });
+
+    it("returns null when repository is undefined", () => {
+        const payload = makePayload({ repository: undefined });
+        expect(extractRepoInfo(payload)).toBeNull();
+    });
+
+    it("returns partial info when only full_name is present", () => {
+        const payload = makePayload({
+            repository: { full_name: "my-org/my-repo", html_url: "" }
+        });
+        // html_url is empty string (falsy-ish but still a string)
+        const info = extractRepoInfo(payload);
+        expect(info).not.toBeNull();
+        expect(info!.fullName).toBe("my-org/my-repo");
+    });
+});
 
 // ── Signature verification ──────────────────────────────────────────────────
 
