@@ -4,6 +4,35 @@
 
 Tasks are executed by spawning a Docker container that runs Claude Code CLI against an isolated workspace. The `Executor` class manages this lifecycle.
 
+## Model Selection
+
+The `model` field in `claudeCode` config is **optional**. When omitted, the `--model` flag is not passed to the Claude Code CLI, allowing it to use its native model selection logic.
+
+### Benefits of omitting `model`
+
+- **Automatic fallback:** Claude Code can automatically switch models when one model's quota is exhausted (e.g., Sonnet → Opus or vice versa depending on your subscription tier).
+- **Tier-appropriate defaults:** Claude Code picks the best default model for your subscription plan.
+- **No config changes needed:** When Anthropic releases new models or changes defaults, your setup adapts automatically.
+
+### When to set `model` explicitly
+
+Set `model` only when you need to force a specific model:
+- When you want all tasks to use a specific model regardless of availability.
+- When cost control requires using a lighter model (e.g., `haiku`).
+
+```yaml
+claudeCode:
+  # Option 1: Omit model entirely — Claude Code chooses automatically (recommended)
+  # model:
+
+  # Option 2: Force a specific model
+  # model: sonnet
+  # model: opus
+  # model: claude-sonnet-4-6
+```
+
+**Note:** Metadata generation (branch slug, title, duration estimate) always uses `haiku` regardless of this setting, as it only needs lightweight processing.
+
 ## Execution Timeout
 
 **Problem addressed:** Without a timeout, a task that hangs (e.g., Claude Code waiting for a tool response that never arrives, an infinite loop, or a network stall) would remain in `running` status indefinitely. The workspace slot would be occupied forever, and no retry or failure would ever trigger.

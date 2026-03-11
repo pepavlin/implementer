@@ -44,6 +44,13 @@ export interface McpServerConfig {
 
 export interface ClaudeCodeConfig {
     command: string;
+    /**
+     * Optional model override (e.g., "sonnet", "opus", "haiku", or full model IDs like "claude-sonnet-4-6").
+     * When omitted, the `--model` flag is NOT passed to the Claude Code CLI, allowing it to use
+     * its native model selection based on subscription tier and availability. This enables
+     * automatic fallback — e.g., if one model's quota is exhausted, Claude Code can switch
+     * to another available model.
+     */
     model?: string;
     systemPrompt?: string;
     mcpServers?: Record<string, McpServerConfig>;

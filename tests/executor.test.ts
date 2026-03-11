@@ -144,6 +144,26 @@ describe("Executor", () => {
       expect(args).toContain("opus");
     });
 
+    it("does NOT pass --model flag when model is not configured (allows Claude Code native selection)", async () => {
+      spawnMock.mockReturnValue(makeFakeProc(0));
+
+      const executor = new Executor(makeConfig(), makeTokenManager());
+      await executor.run("test prompt", "vol:/workspace", "/workspace", "task-no-model");
+
+      const args = spawnMock.mock.calls[0][1] as string[];
+      expect(args).not.toContain("--model");
+    });
+
+    it("does NOT pass --model flag when model is explicitly undefined", async () => {
+      spawnMock.mockReturnValue(makeFakeProc(0));
+
+      const executor = new Executor(makeConfig({ model: undefined }), makeTokenManager());
+      await executor.run("test prompt", "vol:/workspace", "/workspace", "task-undef-model");
+
+      const args = spawnMock.mock.calls[0][1] as string[];
+      expect(args).not.toContain("--model");
+    });
+
     it("returns exit code and captured output", async () => {
       const proc = makeFakeProc(0, false);
       spawnMock.mockReturnValue(proc);

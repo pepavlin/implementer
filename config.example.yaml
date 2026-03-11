@@ -73,7 +73,12 @@ projects:
         #     retryCount: 1
         claudeCode:
             command: claude
-            model: sonnet
+            # Model selection (optional). When omitted, Claude Code CLI uses its native
+            # model selection — typically the best available model for your subscription tier.
+            # This also enables automatic fallback (e.g., if Sonnet quota is exhausted,
+            # Claude Code may fall back to another available model).
+            # Supported values: "sonnet", "opus", "haiku", or full model IDs like "claude-sonnet-4-6".
+            # model: sonnet
             # systemPrompt: |
             #   Custom instructions applied to every task.
             #   e.g. "Always write tests. Follow existing code style."

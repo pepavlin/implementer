@@ -95,6 +95,58 @@ projects:
         expect(() => Config.load(path)).toThrow();
     });
 
+    it("sets model to undefined when not specified (enables Claude Code native selection)", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: my-repo
+        url: https://github.com/test/repo.git
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.projects["my-project"].data.claudeCode.model).toBeUndefined();
+    });
+
+    it("preserves explicit model when specified", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: my-repo
+        url: https://github.com/test/repo.git
+    claudeCode:
+      model: opus
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.projects["my-project"].data.claudeCode.model).toBe("opus");
+    });
+
+    it("accepts full model IDs as model value", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: my-repo
+        url: https://github.com/test/repo.git
+    claudeCode:
+      model: claude-sonnet-4-6
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.projects["my-project"].data.claudeCode.model).toBe("claude-sonnet-4-6");
+    });
+
     it("loads maxConcurrentTasks per project", () => {
         const path = writeYaml(
             "config.yaml",
