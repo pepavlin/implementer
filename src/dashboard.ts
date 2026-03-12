@@ -146,7 +146,8 @@ export function buildDashboardData(
             waiting_for_pipeline: 0,
             completed: 0,
             failed: 0,
-            interrupted: 0
+            interrupted: 0,
+            cancelled: 0
         };
     }
     for (const task of allTasks) {
@@ -154,12 +155,14 @@ export function buildDashboardData(
         if (!projects[pid]) {
             projects[pid] = {
                 running: 0,
+                starting: 0,
                 queued: 0,
                 retrying: 0,
                 waiting_for_pipeline: 0,
                 completed: 0,
                 failed: 0,
-                interrupted: 0
+                interrupted: 0,
+                cancelled: 0
             };
         }
         const s = task.data.status as string;
@@ -1074,21 +1077,54 @@ export function dashboardHtml(hasPassword: boolean): string {
         card.addEventListener('click',function(){toggleProject(this.dataset.proj);});
       });
     }
-    function recomputeFilteredStats(tasks){
-      // Filter by project only (not by status) — stat counts reflect project selection
-      var projTasks=selectedProjects.size===0?tasks:tasks.filter(function(t){return selectedProjects.has(t.projectId);});
-      var counts={running:0,starting:0,queued:0,retrying:0,completed:0,failed:0,interrupted:0,cancelled:0};
-      projTasks.forEach(function(t){if(counts.hasOwnProperty(t.status))counts[t.status]++;});
+    function recomputeFilteredStats(){
+      // Use backend-provided stats (computed from ALL tasks, not the 200-limited tasks array).
+      // When project filter is active, sum per-project counts from backend projects data.
+      if(!lastData)return;
+      var counts;
+      if(selectedProjects.size===0){
+        // No project filter — use global stats from backend (accurate across all tasks)
+        counts={
+          running:lastData.stats.running||0,
+          starting:lastData.stats.starting||0,
+          queued:lastData.stats.queued||0,
+          retrying:lastData.stats.retrying||0,
+          waiting_for_pipeline:lastData.stats.waiting_for_pipeline||0,
+          completed:lastData.stats.completed||0,
+          failed:lastData.stats.failed||0,
+          interrupted:lastData.stats.interrupted||0,
+          cancelled:lastData.stats.cancelled||0
+        };
+      }else{
+        // Project filter active — sum per-project stats from backend projects data
+        counts={running:0,starting:0,queued:0,retrying:0,waiting_for_pipeline:0,completed:0,failed:0,interrupted:0,cancelled:0};
+        selectedProjects.forEach(function(pid){
+          var p=lastData.projects[pid];
+          if(!p)return;
+          counts.running+=(p.running||0);
+          counts.starting+=(p.starting||0);
+          counts.queued+=(p.queued||0);
+          counts.retrying+=(p.retrying||0);
+          counts.waiting_for_pipeline+=(p.waiting_for_pipeline||0);
+          counts.completed+=(p.completed||0);
+          counts.failed+=(p.failed||0);
+          counts.interrupted+=(p.interrupted||0);
+          counts.cancelled+=(p.cancelled||0);
+        });
+      }
       // Update status count DOM elements
       document.getElementById('sr').textContent=counts.running;
       document.getElementById('sst').textContent=counts.starting;
       document.getElementById('sq').textContent=counts.queued;
       document.getElementById('st').textContent=counts.retrying;
+      document.getElementById('swfp').textContent=counts.waiting_for_pipeline;
       document.getElementById('sc').textContent=counts.completed;
       document.getElementById('sf').textContent=counts.failed;
       document.getElementById('sint').textContent=counts.interrupted;
       document.getElementById('scan').textContent=counts.cancelled;
-      // Compute unique PR counts across filtered tasks
+      // Compute unique PR counts across filtered tasks (use tasks array for PR dedup)
+      var tasks=lastData.tasks||[];
+      var projTasks=selectedProjects.size===0?tasks:tasks.filter(function(t){return selectedProjects.has(t.projectId);});
       var openUrls={},draftUrls={};
       projTasks.forEach(function(t){
         (t.pullRequests||[]).forEach(function(pr){
@@ -1109,15 +1145,20 @@ export function dashboardHtml(hasPassword: boolean): string {
       if(sdprCard)sdprCard.classList.toggle('stat-has-draft-prs',draftPrs>0);
       var srCard=document.getElementById('stat-running');
       var sqCard=document.getElementById('stat-queued');
+      var swfpCard=document.getElementById('stat-waiting-for-pipeline');
       var srLbl=document.getElementById('sr-lbl');
       var sqLbl=document.getElementById('sq-lbl');
+      var swfpLbl=document.getElementById('swfp-lbl');
       if(srCard){srCard.classList.toggle('stat-has-running',counts.running>0);}
       if(srLbl){srLbl.innerHTML=counts.running>0?'<span class="stat-active-dot cr"></span>Running':'Running';}
       if(sqCard){sqCard.classList.toggle('stat-has-queued',counts.queued>0);}
       if(sqLbl){sqLbl.innerHTML=counts.queued>0?'<span class="stat-active-dot cq"></span>Queued':'Queued';}
+      var wfpCount=counts.waiting_for_pipeline||0;
+      if(swfpCard){swfpCard.classList.toggle('stat-has-pipeline',wfpCount>0);}
+      if(swfpLbl){swfpLbl.innerHTML=wfpCount>0?'<span class="stat-active-dot cp"></span>Pipeline':'Pipeline';}
     }
     function renderTasks(tasks){
-      recomputeFilteredStats(tasks);
+      recomputeFilteredStats();
       var filtered=getVisibleTasks(tasks);
       var tb=document.getElementById('tb');
       if(!filtered.length){
@@ -1536,39 +1577,6 @@ export function dashboardHtml(hasPassword: boolean): string {
         else if(selectionMode)exitSelectionMode();
       }
     });
-    function updateStats(stats){
-      document.getElementById('sr').textContent=stats.running;
-      document.getElementById('sst').textContent=stats.starting||0;
-      document.getElementById('sq').textContent=stats.queued;
-      document.getElementById('st').textContent=stats.retrying;
-      document.getElementById('swfp').textContent=stats.waiting_for_pipeline||0;
-      document.getElementById('sc').textContent=stats.completed;
-      document.getElementById('sf').textContent=stats.failed;
-      document.getElementById('sint').textContent=stats.interrupted||0;
-      document.getElementById('scan').textContent=stats.cancelled||0;
-      var openPrs=stats.openPrs||0;
-      var draftPrs=stats.draftPrs||0;
-      document.getElementById('spr').textContent=openPrs;
-      document.getElementById('sdpr').textContent=draftPrs;
-      // Highlight Open PRs card when there are open PRs (using classList to preserve stat-selected)
-      var sprCard=document.getElementById('stat-open-prs');
-      if(sprCard)sprCard.classList.toggle('stat-has-open-prs',openPrs>0);
-      var sdprCard=document.getElementById('stat-draft-prs');
-      if(sdprCard)sdprCard.classList.toggle('stat-has-draft-prs',draftPrs>0);
-      var srCard=document.getElementById('stat-running');
-      var sqCard=document.getElementById('stat-queued');
-      var swfpCard=document.getElementById('stat-waiting-for-pipeline');
-      var srLbl=document.getElementById('sr-lbl');
-      var sqLbl=document.getElementById('sq-lbl');
-      var swfpLbl=document.getElementById('swfp-lbl');
-      if(srCard){srCard.classList.toggle('stat-has-running',stats.running>0);}
-      if(srLbl){srLbl.innerHTML=stats.running>0?'<span class="stat-active-dot cr"></span>Running':'Running';}
-      if(sqCard){sqCard.classList.toggle('stat-has-queued',stats.queued>0);}
-      if(sqLbl){sqLbl.innerHTML=stats.queued>0?'<span class="stat-active-dot cq"></span>Queued':'Queued';}
-      var wfpCount=stats.waiting_for_pipeline||0;
-      if(swfpCard){swfpCard.classList.toggle('stat-has-pipeline',wfpCount>0);}
-      if(swfpLbl){swfpLbl.innerHTML=wfpCount>0?'<span class="stat-active-dot cp"></span>Pipeline':'Pipeline';}
-    }
     function refreshData(){
       var btn=document.getElementById('refresh-btn');
       if(btn.disabled)return;
@@ -1578,7 +1586,6 @@ export function dashboardHtml(hasPassword: boolean): string {
         .then(function(r){return r.json();})
         .then(function(d){
           lastData=d;
-          updateStats(d.stats);
           updatePauseUI(!!d.paused);
           renderProjects(d.projects);
           renderTasks(d.tasks);
@@ -1592,7 +1599,6 @@ export function dashboardHtml(hasPassword: boolean): string {
     es.onmessage=function(e){
       var d=JSON.parse(e.data);
       lastData=d;
-      updateStats(d.stats);
       updatePauseUI(!!d.paused);
       renderProjects(d.projects);
       renderTasks(d.tasks);
