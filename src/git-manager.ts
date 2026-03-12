@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { PullRequest } from "./types.js";
 import type { RepositoryConfig } from "./config/config-types.js";
@@ -56,8 +56,23 @@ export class GitManager {
       const repoDir = this.getRepoDir(baseDir, repo.name);
 
       if (existsSync(join(repoDir, ".git"))) {
-        await git(["fetch", "origin"], repoDir, githubToken);
+        try {
+          await git(["fetch", "origin"], repoDir, githubToken);
+        } catch (err) {
+          // Repository is corrupted (e.g. incomplete clone, Claude ran git init).
+          // Delete and re-clone from scratch.
+          console.warn(
+            `[git-manager] Fetch failed in ${repo.name}, re-cloning: ${err instanceof Error ? err.message : String(err)}`
+          );
+          rmSync(repoDir, { recursive: true, force: true });
+          mkdirSync(repoDir, { recursive: true });
+          await git(["clone", repo.url, repoDir], baseDir, githubToken);
+        }
       } else {
+        // Clean up any leftover non-git directory before cloning
+        if (existsSync(repoDir)) {
+          rmSync(repoDir, { recursive: true, force: true });
+        }
         mkdirSync(repoDir, { recursive: true });
         await git(["clone", repo.url, repoDir], baseDir, githubToken);
       }

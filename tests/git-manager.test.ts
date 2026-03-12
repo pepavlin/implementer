@@ -45,6 +45,75 @@ describe("GitManager", () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  describe("ensureAllRepos", () => {
+    it("re-clones when .git exists but repo is corrupted", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Corrupt the repo by wiping .git contents (directory still exists but is invalid)
+      rmSync(join(repoDir, ".git"), { recursive: true });
+      mkdirSync(join(repoDir, ".git"), { recursive: true });
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      // Should recover by re-cloning instead of throwing
+      await gm.ensureAllRepos(workDir, repos);
+
+      // Verify the repo is now valid and functional
+      const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
+      expect(branch).toBe("main");
+
+      // Verify fetch works on the recovered repo
+      await expect(shell("git fetch origin", repoDir)).resolves.not.toThrow();
+    });
+
+    it("re-clones when directory exists but .git is missing", async () => {
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+      const bareDir = join(TMP, "bare-repo");
+
+      await createBareRepo(bareDir);
+      // Create a temporary clone to push initial commit
+      const tmpClone = join(TMP, "tmp-init");
+      mkdirSync(tmpClone, { recursive: true });
+      await shell(`git clone ${bareDir} .`, tmpClone);
+      await shell('git config user.email "test@test.com"', tmpClone);
+      await shell('git config user.name "Test"', tmpClone);
+      await shell("echo init > file.txt && git add . && git commit -m 'init' && git push origin main", tmpClone);
+
+      // Create a non-git directory with leftover files (simulates partial clone failure)
+      mkdirSync(repoDir, { recursive: true });
+      await shell("echo leftover > leftover.txt", repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      // Should clean up and clone successfully
+      await gm.ensureAllRepos(workDir, repos);
+
+      // Verify the repo is valid
+      const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
+      expect(branch).toBe("main");
+    });
+
+    it("fetches normally when repo is healthy", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      const repos = [{ name: "my-repo", url: bareDir, defaultBranch: "main" }];
+      // Should succeed without re-cloning
+      await gm.ensureAllRepos(workDir, repos);
+
+      const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
+      expect(branch).toBe("main");
+    });
+  });
+
   describe("prepareNewBranchAll", () => {
     it("succeeds when there are uncommitted changes in the working tree", async () => {
       const bareDir = join(TMP, "bare-repo");
