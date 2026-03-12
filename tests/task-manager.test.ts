@@ -828,13 +828,13 @@ describe("TaskManager", () => {
       ).toThrow("Task not found: task-other");
     });
 
-    it("rejects continueTaskId that is not the chain tip (error mentions the actual tip)", async () => {
+    it("continueTaskId that is not the chain tip resolves to the tip automatically", async () => {
       const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const { Executor } = await import("../src/executor.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
-      store.save(makePersistedTask({ taskId: "chain-a", status: "completed", branch: "impl/chain-a" }));
+      store.save(makePersistedTask({ taskId: "chain-a", status: "completed", branch: "impl/chain-a", chainId: "chain-a" }));
       store.save(makePersistedTask({ taskId: "chain-b", status: "completed", branch: "impl/chain-a", parentTaskId: "chain-a", chainId: "chain-a" }));
 
       const tm = new TaskManager(config);
@@ -842,12 +842,19 @@ describe("TaskManager", () => {
 
       vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test", estimatedDurationSeconds: 600 });
 
-      expect(() =>
-        tm.createNewTask(PROJECT_ID as any, { prompt: "Continue", continueTaskId: "chain-a" as any })
-      ).toThrow("Continue from chain-b instead");
+      const project = tm.config.projects[PROJECT_ID as any];
+      project.initialize();
+      vi.spyOn(project, 'initialize').mockImplementation(() => {});
+      vi.spyOn(project.pool, "acquire").mockRejectedValue(new Error("no capacity"));
+
+      // Continuing from chain-a (not the tip) should resolve to chain-b (the tip)
+      const task = tm.createNewTask(PROJECT_ID as any, { prompt: "Continue", continueTaskId: "chain-a" as any });
+      expect(task.data.parentTaskId).toBe("chain-b");
+      expect(task.data.chainId).toBe("chain-a");
+      expect(task.branch?.name).toBe("impl/chain-a");
     });
 
-    it("rejects continueTaskId for task with no branch", async () => {
+    it("rejects continueTaskId when chain tip has no branch", async () => {
       const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
@@ -859,6 +866,23 @@ describe("TaskManager", () => {
 
       expect(() =>
         tm.createNewTask(PROJECT_ID as any, { prompt: "Continue", continueTaskId: "no-branch" as any })
+      ).toThrow("has no branch to continue from");
+    });
+
+    it("rejects when chain tip has no branch even if reference task has a branch", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      // Reference task has a branch, but the chain tip (child) does not
+      store.save(makePersistedTask({ taskId: "has-branch", status: "completed", branch: "impl/has-branch" }));
+      store.save(makePersistedTask({ taskId: "tip-no-branch", status: "completed", branch: null, parentTaskId: "has-branch", chainId: "has-branch" }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      expect(() =>
+        tm.createNewTask(PROJECT_ID as any, { prompt: "Continue", continueTaskId: "has-branch" as any })
       ).toThrow("has no branch to continue from");
     });
 
@@ -930,13 +954,13 @@ describe("TaskManager", () => {
       expect(task.data.chainId).toBe("chain-abc123");
     });
 
-    it("multi-task chain: A->B->C, continuing from C works, from A/B rejected", async () => {
+    it("multi-task chain: A->B->C, continuing from any task resolves to chain tip", async () => {
       const { TaskManager } = await import("../src/task-manager/task-manager.js");
       const { Executor } = await import("../src/executor.js");
       const config = makeConfig();
       const store = new TaskStore(TMP);
 
-      store.save(makePersistedTask({ taskId: "mt-a", status: "completed", branch: "impl/mt-a" }));
+      store.save(makePersistedTask({ taskId: "mt-a", status: "completed", branch: "impl/mt-a", chainId: "mt-a" }));
       store.save(makePersistedTask({ taskId: "mt-b", status: "completed", branch: "impl/mt-a", parentTaskId: "mt-a", chainId: "mt-a" }));
       store.save(makePersistedTask({ taskId: "mt-c", status: "completed", branch: "impl/mt-a", parentTaskId: "mt-b", chainId: "mt-a" }));
 
@@ -950,20 +974,67 @@ describe("TaskManager", () => {
       vi.spyOn(project, 'initialize').mockImplementation(() => {});
       vi.spyOn(project.pool, "acquire").mockRejectedValue(new Error("no capacity"));
 
-      // Continuing from C (tip) should work
+      // Continuing from C (tip) should work, parentTaskId = C
       const taskD = tm.createNewTask(PROJECT_ID as any, { prompt: "Continue from C", continueTaskId: "mt-c" as any });
       expect(taskD.data.parentTaskId).toBe("mt-c");
       expect(taskD.data.chainId).toBe("mt-a");
 
-      // Continuing from A (not tip) should fail
-      expect(() =>
-        tm.createNewTask(PROJECT_ID as any, { prompt: "Continue from A", continueTaskId: "mt-a" as any })
-      ).toThrow("not the latest in its chain");
+      // Continuing from A (not tip) should resolve to new tip (D)
+      const taskE = tm.createNewTask(PROJECT_ID as any, { prompt: "Continue from A", continueTaskId: "mt-a" as any });
+      expect(taskE.data.parentTaskId).toBe(taskD.id);
+      expect(taskE.data.chainId).toBe("mt-a");
+      expect(taskE.branch?.name).toBe("impl/mt-a");
 
-      // Continuing from B (not tip) should fail
-      expect(() =>
-        tm.createNewTask(PROJECT_ID as any, { prompt: "Continue from B", continueTaskId: "mt-b" as any })
-      ).toThrow("not the latest in its chain");
+      // Continuing from B (not tip) should resolve to new tip (E)
+      const taskF = tm.createNewTask(PROJECT_ID as any, { prompt: "Continue from B", continueTaskId: "mt-b" as any });
+      expect(taskF.data.parentTaskId).toBe(taskE.id);
+      expect(taskF.data.chainId).toBe("mt-a");
+      expect(taskF.branch?.name).toBe("impl/mt-a");
+    });
+
+    it("multiple queued tasks can exist in the same chain", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(makePersistedTask({ taskId: "q-root", status: "running", branch: "impl/q-root", completedAt: null }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({ slug: "test", title: "Test", estimatedDurationSeconds: 600 });
+
+      const project = tm.config.projects[PROJECT_ID as any];
+      project.initialize();
+      vi.spyOn(project, 'initialize').mockImplementation(() => {});
+      vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(true);
+      vi.spyOn(project.pool, "acquire").mockReturnValue(new Promise(() => {}));
+
+      // Create multiple queued chain tasks while root is running
+      const task1 = tm.createNewTask(PROJECT_ID as any, { prompt: "Task 1", continueTaskId: "q-root" as any });
+      const task2 = tm.createNewTask(PROJECT_ID as any, { prompt: "Task 2", continueTaskId: "q-root" as any });
+      const task3 = tm.createNewTask(PROJECT_ID as any, { prompt: "Task 3", continueTaskId: "q-root" as any });
+
+      // All should be queued (chain is active because q-root is running)
+      expect(task1.data.status).toBe("queued");
+      expect(task2.data.status).toBe("queued");
+      expect(task3.data.status).toBe("queued");
+
+      // They should form a linear chain: q-root -> task1 -> task2 -> task3
+      expect(task1.data.parentTaskId).toBe("q-root");
+      expect(task2.data.parentTaskId).toBe(task1.id);
+      expect(task3.data.parentTaskId).toBe(task2.id);
+
+      // All should share the same chainId
+      expect(task1.data.chainId).toBe("chain-abc123");
+      expect(task2.data.chainId).toBe("chain-abc123");
+      expect(task3.data.chainId).toBe("chain-abc123");
+
+      // All should inherit the same branch
+      expect(task1.branch?.name).toBe("impl/q-root");
+      expect(task2.branch?.name).toBe("impl/q-root");
+      expect(task3.branch?.name).toBe("impl/q-root");
     });
   });
 

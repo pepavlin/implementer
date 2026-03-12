@@ -355,28 +355,25 @@ export class TaskManager {
         let inheritedBranch: string | undefined;
 
         if (request.continueTaskId) {
-            const parent = this.tasks.get(request.continueTaskId);
-            if (!parent || parent.data.projectId !== projectId) {
+            const referenceTask = this.tasks.get(request.continueTaskId);
+            if (!referenceTask || referenceTask.data.projectId !== projectId) {
                 throw new BadRequestError(
                     `Task not found: ${request.continueTaskId}`
                 );
             }
-            // Validate it's the chain tip (no children)
-            const tip = this.findChainTip(request.continueTaskId);
-            if (tip !== request.continueTaskId) {
+            // Resolve to the chain tip — continueTaskId identifies the chain,
+            // and the new task is always appended after the current tip.
+            const tipId = this.findChainTip(request.continueTaskId);
+            const tipTask = this.tasks.get(tipId)!;
+            // Validate the chain tip has a branch to continue from
+            if (!tipTask.branch) {
                 throw new BadRequestError(
-                    `Task ${request.continueTaskId} is not the latest in its chain. Continue from ${tip} instead.`
+                    `Chain tip task ${tipId} has no branch to continue from`
                 );
             }
-            // Validate parent has a branch
-            if (!parent.branch) {
-                throw new BadRequestError(
-                    `Task ${request.continueTaskId} has no branch to continue from`
-                );
-            }
-            parentTaskId = request.continueTaskId;
-            chainId = parent.data.chainId;
-            inheritedBranch = parent.branch.name;
+            parentTaskId = tipId;
+            chainId = referenceTask.data.chainId;
+            inheritedBranch = tipTask.branch.name;
         }
 
         const task = new Task(
