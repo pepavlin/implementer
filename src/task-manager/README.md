@@ -108,6 +108,31 @@ Každá změna stavu tasku se okamžitě zapíše na disk přes `TaskStore` (JSO
 
 ---
 
+## 8. Chain tasky
+
+Tasky lze řetězit do **chainů** — lineárních sekvencí pracujících na stejné větvi. Každý chain je identifikován `chainId` (ID prvního tasku v chainu).
+
+### Vytvoření chain tasku
+
+Při vytváření tasku s `continueTaskId`:
+
+1. `continueTaskId` identifikuje **chain** (může být jakýkoliv task v chainu, nemusí být poslední)
+2. Systém automaticky najde **chain tip** (poslední task v chainu) pomocí `findChainTip()`
+3. Nový task se přidá na konec chainu — jeho `parentTaskId` = aktuální chain tip
+4. Branch se dědí z chain tipu
+
+Tím je možné přidávat více tasků do fronty najednou, i když předchozí tasky ještě běží.
+
+### Serializace v rámci chainu
+
+V jednom chainu může být aktivní (running/starting/waiting_for_pipeline) jen jeden task. Ostatní čekají ve frontě. `canBeStarted()` kontroluje `isChainActive()` a nedovolí spustit task, pokud je jiný task v chainu stále aktivní.
+
+### Chain context
+
+Před spuštěním task runneru se ze všech ancestor tasků v chainu postaví kontextová zpráva (`buildChainHistory()`), kterou Claude dostane jako prefix k promptu — díky tomu ví, co se na větvi dělo předtím.
+
+---
+
 ## Soubory
 
 | Soubor | Co obsahuje |
