@@ -163,7 +163,7 @@ projects:
         expect(() => Config.load(path)).toThrow();
     });
 
-    it("accepts server.anthropicAdminApiKey as optional string", () => {
+    it("rejects unknown server fields", () => {
         const path = writeYaml(
             "config.yaml",
             `
@@ -177,24 +177,7 @@ projects:
 `
         );
 
-        const config = Config.load(path);
-        expect(config.server.anthropicAdminApiKey).toBe("sk-ant-admin-test-key-123");
-    });
-
-    it("allows config without anthropicAdminApiKey", () => {
-        const path = writeYaml(
-            "config.yaml",
-            `
-projects:
-  my-project:
-    repositories:
-      - name: repo
-        url: https://github.com/test/repo.git
-`
-        );
-
-        const config = Config.load(path);
-        expect(config.server.anthropicAdminApiKey).toBeUndefined();
+        expect(() => Config.load(path)).toThrow();
     });
 
     it("loads a full config with all fields", () => {

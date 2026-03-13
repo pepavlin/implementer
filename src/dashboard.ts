@@ -7,7 +7,6 @@ import {
 import { extractLastAssistantMessage } from "./executor.js";
 import type { Config } from "./config/config.js";
 import type { ProjectId, TaskId } from "./types.js";
-import { fetchUsageData, fetchMonthlyBudget } from "./usage-api.js";
 import { fetchSubscriptionUsage } from "./subscription-api.js";
 
 // ── Auth helpers ─────────────────────────────────────────────────────────────
@@ -753,32 +752,10 @@ export function dashboardHtml(hasPassword: boolean): string {
       .voice-panel{padding:10px 14px}
       .voice-status{flex-wrap:wrap;gap:6px}
     }
-    /* ── Usage dialog ──────────────────────────────────────────────────────── */
-    .usage-loading{text-align:center;color:var(--text3);padding:40px 20px;font-size:.85rem}
-    .usage-error{background:var(--b-fail-bg);color:var(--b-fail-fg);padding:14px 18px;border-radius:8px;font-size:.82rem;word-break:break-word}
-    .usage-not-configured{background:var(--bg-code);color:var(--text2);padding:24px;border-radius:8px;font-size:.82rem;text-align:center;line-height:1.6}
-    .usage-not-configured code{background:var(--tag-bg);padding:2px 6px;border-radius:4px;font-family:ui-monospace,'SF Mono',monospace;font-size:.78rem}
-    .usage-summary{display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap}
-    .usage-stat{background:var(--bg-code);border-radius:8px;padding:12px 16px;flex:1;min-width:120px}
-    .usage-stat-lbl{font-size:.65rem;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
-    .usage-stat-val{font-size:1.3rem;font-weight:700;color:var(--text)}
-    .usage-stat-val.cost{color:#22c55e}
-    .usage-table{width:100%;border-collapse:collapse;font-size:.8rem;margin-top:10px}
-    .usage-table th{background:var(--bg-head);color:var(--text3);font-size:.65rem;text-transform:uppercase;letter-spacing:.04em;padding:8px 12px;text-align:left;font-weight:600;white-space:nowrap}
-    .usage-table td{padding:8px 12px;border-top:1px solid var(--border);color:var(--text);white-space:nowrap}
-    .usage-table tr:hover td{background:var(--hover-bg)}
-    .usage-table .right{text-align:right}
-    .usage-table .mono{font-family:ui-monospace,'SF Mono',monospace;font-size:.75rem}
-    .usage-table tfoot td{border-top:2px solid var(--border2);font-weight:700}
-    .usage-section{margin-top:18px}
-    .usage-section-title{font-size:.72rem;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
-    .usage-period-info{font-size:.7rem;color:var(--text4);margin-bottom:12px}
-    @media(max-width:540px){
-      .usage-summary{gap:6px}
-      .usage-stat{min-width:calc(50% - 3px);padding:8px 10px}
-      .usage-stat-val{font-size:1.1rem}
-      .usage-table th,.usage-table td{padding:6px 8px;font-size:.72rem}
-    }
+    /* ── Subscription limits dialog ──────────────────────────────────────── */
+    .sub-loading{text-align:center;color:var(--text3);padding:40px 20px;font-size:.85rem}
+    .sub-no-token{background:var(--bg-code);color:var(--text2);padding:24px;border-radius:8px;font-size:.82rem;text-align:center;line-height:1.6}
+    .sub-no-token code{background:var(--tag-bg);padding:2px 6px;border-radius:4px;font-family:ui-monospace,'SF Mono',monospace;font-size:.78rem}
     /* ── Subscription limits ─────────────────────────────────────────────── */
     .sub-section{background:var(--bg-code);border-radius:10px;padding:16px 18px;margin-bottom:18px}
     .sub-header{font-size:.72rem;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px;display:flex;align-items:center;gap:6px}
@@ -806,7 +783,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     <div class="header-actions" style="display:flex;align-items:center;gap:12px">
       <button class="btn-new" onclick="openNewTask()">+ New Task</button>
       <button class="btn-pause" id="pause-btn" onclick="togglePause()" title="Pause/resume queue processing">&#x23F8; Pause</button>
-      <button class="theme-btn" id="usage-btn" onclick="openUsageDialog()" title="API Usage Statistics">&#x1F4CA;</button>
+      <button class="theme-btn" id="usage-btn" onclick="openUsageDialog()" title="Subscription Limits">&#x1F4CA;</button>
       <button class="theme-btn" id="voice-btn" onclick="toggleVoiceMode()" title="Voice Mode">&#x1F3A4;</button>
       <button class="theme-btn" id="fullscreen-btn" onclick="toggleFullscreen()" title="Enter fullscreen">&#x26F6;</button>
       <button class="theme-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">&#x2600;</button>
@@ -877,23 +854,15 @@ export function dashboardHtml(hasPassword: boolean): string {
     </div>
   </div>
 
-  <!-- Usage Statistics Dialog -->
+  <!-- Subscription Limits Dialog -->
   <div id="usage-overlay" class="overlay" style="display:none" onclick="if(event.target===this)closeUsageDialog()">
-    <div class="modal" style="max-width:800px">
+    <div class="modal" style="max-width:600px">
       <div class="modal-hd">
-        <span class="modal-ttl">API Usage Statistics</span>
-        <div style="display:flex;align-items:center;gap:6px">
-          <select id="usage-period" class="form-inp" style="width:auto;padding:5px 10px;font-size:.78rem" onchange="loadUsageData()">
-            <option value="24h">Last 24 hours</option>
-            <option value="7d" selected>Last 7 days</option>
-            <option value="30d">Last 30 days</option>
-          </select>
-          <button class="modal-x" onclick="closeUsageDialog()">&times;</button>
-        </div>
+        <span class="modal-ttl">Subscription Limits</span>
+        <button class="modal-x" onclick="closeUsageDialog()">&times;</button>
       </div>
-      <div id="sub-container"></div>
-      <div class="modal-bd" id="usage-body">
-        <div class="usage-loading">Loading usage data&hellip;</div>
+      <div class="modal-bd" id="sub-container">
+        <div class="sub-loading">Loading subscription data&hellip;</div>
       </div>
     </div>
   </div>
@@ -1688,68 +1657,30 @@ export function dashboardHtml(hasPassword: boolean): string {
       btn.title=document.fullscreenElement?'Exit fullscreen':'Enter fullscreen';
     }
     document.addEventListener('fullscreenchange',updateFullscreenBtn);
-    /* ── Usage dialog ──────────────────────────────────────────────────── */
-    var usageLoading=false;
+    /* ── Subscription limits dialog ────────────────────────────────────── */
+    var subLoaded=false;
     function openUsageDialog(){
       document.getElementById('usage-overlay').style.display='';
       loadSubscriptionData();
-      loadUsageData();
     }
     function closeUsageDialog(){
       document.getElementById('usage-overlay').style.display='none';
       subLoaded=false;
     }
-    function formatTokens(n){
-      if(n>=1e9)return (n/1e9).toFixed(2)+'B';
-      if(n>=1e6)return (n/1e6).toFixed(2)+'M';
-      if(n>=1e3)return (n/1e3).toFixed(1)+'K';
-      return n.toString();
-    }
-    function formatCost(cents){
-      return '$'+(cents/100).toFixed(2);
-    }
-    function loadUsageData(){
-      if(usageLoading)return;
-      usageLoading=true;
-      var body=document.getElementById('usage-body');
-      body.innerHTML='<div class="usage-loading">Loading usage data&hellip;</div>';
-      var period=document.getElementById('usage-period').value;
-      fetch('/dashboard/api/usage?period='+period)
-        .then(function(r){return r.json();})
-        .then(function(d){
-          usageLoading=false;
-          if(d.error){
-            if(d.error.indexOf('not configured')!==-1){
-              body.innerHTML='<div class="usage-not-configured">'+
-                'Usage tracking is not configured.<br><br>'+
-                'Add <code>anthropicAdminApiKey</code> to the <code>server</code> section in your config.yaml.<br>'+
-                'Get an Admin API key from <a href="https://console.anthropic.com/settings/admin-keys" target="_blank" rel="noopener" style="color:var(--link)">Claude Console &rarr; Settings &rarr; Admin Keys</a>.</div>';
-            }else{
-              body.innerHTML='<div class="usage-error">'+escapeHtml(d.error)+'</div>';
-            }
-            return;
-          }
-          renderUsageData(d);
-        })
-        .catch(function(err){
-          usageLoading=false;
-          body.innerHTML='<div class="usage-error">Failed to load usage data: '+escapeHtml(err.message)+'</div>';
-        });
-    }
-    /* ── Subscription limits ─────────────────────────────────────────── */
-    var subLoaded=false;
     function loadSubscriptionData(){
       var el=document.getElementById('sub-container');
       if(!el)return;
       if(subLoaded){return;}
-      el.innerHTML='<div class="sub-section"><div class="sub-header">Subscription Limits</div><div style="text-align:center;color:var(--text4);font-size:.78rem;padding:8px 0">Loading&hellip;</div></div>';
+      el.innerHTML='<div class="sub-loading">Loading subscription data&hellip;</div>';
       fetch('/dashboard/api/subscription')
         .then(function(r){return r.json();})
         .then(function(d){
           subLoaded=true;
           if(d.error){
             if(d.error.indexOf('No OAuth')!==-1){
-              el.innerHTML='';
+              el.innerHTML='<div class="sub-no-token">'+
+                'No OAuth token available.<br><br>'+
+                'Configure <code>claudeOauthRefreshToken</code> in a project\'s <code>auth</code> section to see subscription limits.</div>';
             }else{
               el.innerHTML='<div class="sub-section"><div class="sub-header">Subscription Limits</div><div class="sub-error">'+escapeHtml(d.error)+'</div></div>';
             }
@@ -1757,8 +1688,8 @@ export function dashboardHtml(hasPassword: boolean): string {
           }
           el.innerHTML=renderSubscriptionSection(d);
         })
-        .catch(function(){
-          el.innerHTML='';
+        .catch(function(err){
+          el.innerHTML='<div class="sub-section"><div class="sub-header">Subscription Limits</div><div class="sub-error">'+escapeHtml(err.message||'Failed to load')+'</div></div>';
         });
     }
     function subBarColor(pct){
@@ -1807,100 +1738,6 @@ export function dashboardHtml(hasPassword: boolean): string {
       }
       h+='</div>';
       return h;
-    }
-    function renderBudgetSection(b){
-      if(!b)return '';
-      var h='<div class="budget-section">';
-      var monthName=new Date(b.monthStart).toLocaleDateString(undefined,{month:'long',year:'numeric'});
-      h+='<div class="budget-header">Monthly Budget &mdash; '+escapeHtml(monthName)+'</div>';
-      var spentUsd=(b.currentMonthSpendCents/100).toFixed(2);
-      if(b.monthlyLimitUsd!=null){
-        var limitUsd=b.monthlyLimitUsd.toFixed(2);
-        var remainUsd=(b.remainingCents/100).toFixed(2);
-        var pct=Math.min(b.usagePercent,100);
-        var barColor=pct<60?'var(--ok,#22c55e)':pct<85?'var(--warn,#eab308)':'var(--fail,#ef4444)';
-        h+='<div class="budget-bar-wrap">';
-        h+='<div class="budget-bar"><div class="budget-bar-fill" style="width:'+pct.toFixed(1)+'%;background:'+barColor+'"></div></div>';
-        h+='<div class="budget-pct">'+b.usagePercent.toFixed(1)+'%</div>';
-        h+='</div>';
-        h+='<div class="budget-stats">';
-        h+='<div class="budget-stat"><span class="budget-stat-lbl">Spent</span><span class="budget-stat-val">$'+spentUsd+'</span></div>';
-        h+='<div class="budget-stat"><span class="budget-stat-lbl">Limit</span><span class="budget-stat-val">$'+limitUsd+'</span></div>';
-        h+='<div class="budget-stat"><span class="budget-stat-lbl">Remaining</span><span class="budget-stat-val" style="color:'+(b.remainingCents>=0?'var(--ok,#22c55e)':'var(--fail,#ef4444)')+'">$'+remainUsd+'</span></div>';
-        h+='</div>';
-      }else{
-        h+='<div class="budget-stats">';
-        h+='<div class="budget-stat"><span class="budget-stat-lbl">Spent this month</span><span class="budget-stat-val" style="color:var(--ok,#22c55e)">$'+spentUsd+'</span></div>';
-        h+='<div class="budget-stat-hint">Set <code>server.anthropicMonthlySpendLimitUsd</code> in config.yaml to track remaining budget.</div>';
-        h+='</div>';
-      }
-      h+='</div>';
-      return h;
-    }
-    function renderUsageData(d){
-      var body=document.getElementById('usage-body');
-      var h='';
-      // Budget section (always at top)
-      h+=renderBudgetSection(d.budget);
-      // Period info
-      var start=new Date(d.startingAt).toLocaleDateString();
-      var end=new Date(d.endingAt).toLocaleDateString();
-      h+='<div class="usage-period-info">'+start+' &mdash; '+end+' (fetched '+new Date(d.fetchedAt).toLocaleTimeString()+')</div>';
-      // Summary cards
-      h+='<div class="usage-summary">';
-      h+='<div class="usage-stat"><div class="usage-stat-lbl">Total Cost</div><div class="usage-stat-val cost">'+formatCost(d.totalCostCents)+'</div></div>';
-      h+='<div class="usage-stat"><div class="usage-stat-lbl">Input Tokens</div><div class="usage-stat-val">'+formatTokens(d.totalInputTokens)+'</div></div>';
-      h+='<div class="usage-stat"><div class="usage-stat-lbl">Output Tokens</div><div class="usage-stat-val">'+formatTokens(d.totalOutputTokens)+'</div></div>';
-      h+='<div class="usage-stat"><div class="usage-stat-lbl">Cache Read</div><div class="usage-stat-val">'+formatTokens(d.totalCacheReadTokens)+'</div></div>';
-      h+='</div>';
-      // Models table
-      if(d.models&&d.models.length>0){
-        h+='<div class="usage-section"><div class="usage-section-title">Usage by Model</div>';
-        h+='<div class="table-wrap"><table class="usage-table"><thead><tr>';
-        h+='<th>Model</th><th class="right">Input</th><th class="right">Output</th><th class="right">Cache Write</th><th class="right">Cache Read</th><th class="right">Total</th>';
-        h+='</tr></thead><tbody>';
-        for(var i=0;i<d.models.length;i++){
-          var m=d.models[i];
-          h+='<tr>';
-          h+='<td class="mono">'+escapeHtml(m.model)+'</td>';
-          h+='<td class="right mono">'+formatTokens(m.inputTokens)+'</td>';
-          h+='<td class="right mono">'+formatTokens(m.outputTokens)+'</td>';
-          h+='<td class="right mono">'+formatTokens(m.cacheCreationTokens)+'</td>';
-          h+='<td class="right mono">'+formatTokens(m.cacheReadTokens)+'</td>';
-          h+='<td class="right mono" style="font-weight:600">'+formatTokens(m.totalTokens)+'</td>';
-          h+='</tr>';
-        }
-        h+='</tbody><tfoot><tr>';
-        h+='<td>Total</td>';
-        h+='<td class="right mono">'+formatTokens(d.totalInputTokens)+'</td>';
-        h+='<td class="right mono">'+formatTokens(d.totalOutputTokens)+'</td>';
-        h+='<td class="right mono">'+formatTokens(d.totalCacheCreationTokens)+'</td>';
-        h+='<td class="right mono">'+formatTokens(d.totalCacheReadTokens)+'</td>';
-        h+='<td class="right mono">'+formatTokens(d.totalTokens)+'</td>';
-        h+='</tr></tfoot></table></div></div>';
-      }
-      // Cost breakdown
-      if(d.costs&&d.costs.length>0){
-        h+='<div class="usage-section"><div class="usage-section-title">Cost Breakdown</div>';
-        h+='<div class="table-wrap"><table class="usage-table"><thead><tr>';
-        h+='<th>Description</th><th class="right">Amount</th>';
-        h+='</tr></thead><tbody>';
-        for(var j=0;j<d.costs.length;j++){
-          var c=d.costs[j];
-          h+='<tr>';
-          h+='<td>'+escapeHtml(c.description)+'</td>';
-          h+='<td class="right mono" style="color:#22c55e">'+formatCost(c.amountCents)+'</td>';
-          h+='</tr>';
-        }
-        h+='</tbody><tfoot><tr>';
-        h+='<td style="font-weight:700">Total</td>';
-        h+='<td class="right mono" style="font-weight:700;color:#22c55e">'+formatCost(d.totalCostCents)+'</td>';
-        h+='</tr></tfoot></table></div></div>';
-      }
-      if((!d.models||d.models.length===0)&&(!d.costs||d.costs.length===0)){
-        h+='<div class="usage-loading" style="color:var(--text4)">No usage data available for this period.</div>';
-      }
-      body.innerHTML=h;
     }
     ${VOICE_MODE_JS}
     ${THEME_TOGGLE_JS}
@@ -2343,45 +2180,6 @@ export function registerDashboardRoutes(
             res.json({ taskId: task.id, priority: task.data.priority });
         } catch {
             res.status(404).json({ error: "Task not found" });
-        }
-    });
-
-    // GET /dashboard/api/usage — fetch Anthropic usage & cost statistics
-    app.get("/dashboard/api/usage", async (req, res) => {
-        if (!adminPassword) {
-            res.status(404).send("Not Found");
-            return;
-        }
-        if (!isDashboardAuthenticated(req, adminPassword)) {
-            res.status(401).json({ error: "Unauthorized" });
-            return;
-        }
-        const apiKey = config.server.anthropicAdminApiKey;
-        if (!apiKey) {
-            res.status(501).json({
-                error: "Usage tracking is not configured. Set server.anthropicAdminApiKey in config.yaml."
-            });
-            return;
-        }
-        const period =
-            typeof req.query.period === "string" &&
-            ["24h", "7d", "30d"].includes(req.query.period)
-                ? req.query.period
-                : "7d";
-        try {
-            const [data, budget] = await Promise.all([
-                fetchUsageData(apiKey, period),
-                fetchMonthlyBudget(apiKey, config.server.anthropicMonthlySpendLimitUsd)
-            ]);
-            res.json({ ...data, budget });
-        } catch (err) {
-            console.error("Failed to fetch usage data:", err);
-            res.status(502).json({
-                error:
-                    err instanceof Error
-                        ? err.message
-                        : "Failed to fetch usage data from Anthropic API"
-            });
         }
     });
 

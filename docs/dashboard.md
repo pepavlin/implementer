@@ -95,66 +95,9 @@ Click the 🎤 button in the header to toggle Voice Mode. A fixed bottom panel a
 | `voiceCancel()` | Discard transcript and stop recording |
 | `updateVoicePanel()` | Sync UI state (status text, send/cancel button visibility) |
 
-## API Usage Statistics
+## Subscription Limits
 
-The dashboard can display organization-level Anthropic API usage and cost data via the [Usage & Cost Admin API](https://platform.claude.com/docs/en/build-with-claude/usage-cost-api).
-
-### Configuration
-
-Add an Anthropic Admin API key to the server config:
-
-```yaml
-server:
-    adminPassword: your-password
-    anthropicAdminApiKey: sk-ant-admin-your-key-here
-    anthropicMonthlySpendLimitUsd: 100  # optional — your monthly spend limit from Claude Console
-```
-
-Admin API keys are separate from regular API keys and can be provisioned at [Claude Console → Settings → Admin Keys](https://console.anthropic.com/settings/admin-keys). Only organization admins can create these keys.
-
-The optional `anthropicMonthlySpendLimitUsd` field should match the monthly spend limit shown in your [Claude Console → Settings → Limits](https://console.anthropic.com/settings/limits). This value is not available via the API, so it must be set manually. When configured, the usage dialog shows a budget section with a progress bar indicating how much of the monthly limit has been consumed.
-
-### UI
-
-A chart icon button appears in the dashboard header. Clicking it opens a modal dialog showing:
-
-- **Monthly budget** (at top) — progress bar with spent / limit / remaining. Color-coded: green (<60%), yellow (60-85%), red (>85%). If `anthropicMonthlySpendLimitUsd` is not set, only the current month's spend is shown with a hint to configure the limit.
-- **Summary cards** — total cost, input tokens, output tokens, and cache read tokens
-- **Usage by model** — table with per-model token breakdown (input, output, cache write, cache read, total)
-- **Cost breakdown** — table with per-line-item costs in USD
-- **Period selector** — dropdown to switch between last 24 hours, 7 days, or 30 days
-
-If `anthropicAdminApiKey` is not configured, the dialog shows a configuration hint with a link to the Claude Console.
-
-### API
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/dashboard/api/usage?period=7d` | `GET` | Fetch aggregated usage & cost data. `period` can be `24h`, `7d`, or `30d`. |
-
-### Caching
-
-Results are cached in-memory for 5 minutes to avoid excessive Anthropic API calls. The cache is keyed by period, so switching periods fetches fresh data on first access.
-
-### Architecture
-
-The usage data flow:
-
-1. Dashboard frontend calls `GET /dashboard/api/usage?period=7d`
-2. Backend (`src/usage-api.ts`) checks in-memory cache
-3. If cache miss, fetches from two Anthropic endpoints in parallel:
-   - `GET /v1/organizations/usage_report/messages` — token usage grouped by model
-   - `GET /v1/organizations/cost_report` — cost breakdown grouped by description
-4. Simultaneously, fetches current calendar month's cost for budget tracking:
-   - `GET /v1/organizations/cost_report` — with `starting_at` set to the 1st of the current month
-5. Aggregates data by model and description, computes totals
-6. If `anthropicMonthlySpendLimitUsd` is configured, calculates remaining budget and usage percentage
-7. Caches result for 5 minutes and returns to frontend
-8. Frontend renders budget section (with progress bar), summary cards, and tables
-
-## Subscription Limits (OAuth-based)
-
-In addition to Admin API usage stats, the dashboard can show **subscription-level utilization** for Pro/Max plans. This uses a reverse-engineered, undocumented endpoint (`GET /api/oauth/usage`) that Claude Code itself uses internally. No extra API key is required — it works with the OAuth tokens already configured per project.
+The dashboard shows **subscription-level utilization** for Pro/Max plans. This uses a reverse-engineered, undocumented endpoint (`GET /api/oauth/usage`) that Claude Code itself uses internally. No extra API key is required — it works with the OAuth tokens already configured per project.
 
 ### How it works
 
@@ -170,11 +113,11 @@ Each window includes a `resets_at` timestamp showing when the window resets (dis
 
 ### Configuration
 
-No extra configuration is needed. The feature automatically activates when any project has an OAuth token configured (`claudeOauthRefreshToken` or `claudeOauthToken` in the project `auth` section). If only API keys are used and no OAuth tokens are available, the subscription section is silently hidden.
+No extra configuration is needed. The feature automatically activates when any project has an OAuth token configured (`claudeOauthRefreshToken` or `claudeOauthToken` in the project `auth` section). If no OAuth tokens are available, the dialog shows a configuration hint.
 
 ### UI
 
-The subscription limits section appears at the **top** of the usage dialog, above the budget and Admin API sections. Each utilization window is rendered as a color-coded horizontal bar:
+A chart icon button appears in the dashboard header. Clicking it opens a dialog showing subscription utilization bars. Each bar is color-coded:
 
 - Green (<50% utilization)
 - Yellow (50–75%)
@@ -188,11 +131,11 @@ The subscription limits section appears at the **top** of the usage dialog, abov
 
 ### Caching
 
-Results are cached in-memory for **10 minutes** (more aggressive than the 5-minute Admin API cache) because the upstream endpoint is severely rate-limited (~5 requests per token before permanent 429). On 429 errors, stale cached data is returned transparently.
+Results are cached in-memory for **10 minutes** because the upstream endpoint is severely rate-limited (~5 requests per token before permanent 429). On 429 errors, stale cached data is returned transparently.
 
 ### Architecture
 
-1. Dashboard frontend calls `GET /dashboard/api/subscription` when the usage dialog opens
+1. Dashboard frontend calls `GET /dashboard/api/subscription` when the dialog opens
 2. Backend iterates through configured projects to find the first one with an OAuth token
 3. Uses the project's `TokenManager` to get a valid access token (auto-refreshes if needed)
 4. Calls `GET https://api.anthropic.com/api/oauth/usage` with OAuth bearer token and `anthropic-beta: oauth-2025-04-20` header

@@ -409,33 +409,7 @@ server:
 - **Create new task** — click **+ New Task** to open a form where you select a project, enter a prompt, and optionally link a pull request number
 - **Project filter** — click project cards to filter the task list to one or more projects; click again to deselect; the new-task form pre-selects the currently filtered project
 - **Status filter** — filter tasks by status: All, Running, Queued, Retrying, Completed, Failed, Interrupted
-- **API usage statistics & budget** — click the chart button in the header to view Anthropic API usage, cost data, and monthly budget status (requires `server.anthropicAdminApiKey`)
-- **Subscription limits** — the usage dialog also shows Pro/Max subscription utilization (5-hour, 7-day, Opus 7-day windows) with color-coded bars and reset times. Works automatically when projects have OAuth tokens configured — no extra API key needed.
-
-### API Usage Statistics & Budget
-
-The dashboard can display your Anthropic API usage, cost data, and monthly budget. To enable it, add an Admin API key to your config:
-
-```yaml
-server:
-    adminPassword: your-secure-password
-    anthropicAdminApiKey: sk-ant-admin-your-key-here
-    anthropicMonthlySpendLimitUsd: 100  # optional — your account's monthly limit
-```
-
-Get an Admin API key from [Claude Console → Settings → Admin Keys](https://console.anthropic.com/settings/admin-keys). Only organization admins can create these keys.
-
-The optional `anthropicMonthlySpendLimitUsd` should match the spend limit from [Claude Console → Settings → Limits](https://console.anthropic.com/settings/limits). The Anthropic API does not expose this value programmatically, so it must be set manually.
-
-Click the chart icon in the dashboard header to open the usage dialog. It shows:
-
-- **Subscription limits** (top section) — utilization bars for 5-hour, 7-day, and Opus 7-day rate-limit windows with reset countdowns. Automatically shown when any project has OAuth tokens (`claudeOauthRefreshToken` or `claudeOauthToken`). Cached for 10 minutes due to aggressive upstream rate limiting.
-- **Monthly budget** — progress bar showing spent vs. limit with remaining amount (green/yellow/red color coding). Without `anthropicMonthlySpendLimitUsd`, shows current month's spend only.
-- **Token usage by model** — input, output, cache creation, and cache read tokens
-- **Cost breakdown** — per-line-item costs in USD
-- **Period selector** — last 24 hours, 7 days, or 30 days
-
-Data is cached for 5–10 minutes to avoid excessive API calls.
+- **Subscription limits** — click the chart button in the header to see Pro/Max subscription utilization (5-hour, 7-day, Opus 7-day windows) with color-coded bars and reset times. Works automatically when projects have OAuth tokens configured — no extra API key needed.
 
 ### Dashboard-only API routes (requires admin auth cookie)
 
@@ -444,7 +418,6 @@ Data is cached for 5–10 minutes to avoid excessive API calls.
 | `/dashboard/api/task/:taskId` | GET | Full task details (prompt, output, error, PRs) |
 | `/dashboard/api/task` | POST | Create a new task (`{ projectId, prompt, pullRequestNumber? }`) |
 | `/dashboard/api/task/:taskId/retry` | POST | Retry a task across all projects |
-| `/dashboard/api/usage?period=7d` | GET | Anthropic API usage & cost data (`period`: `24h`, `7d`, `30d`) |
 | `/dashboard/api/subscription` | GET | Subscription utilization (5h, 7d, Opus 7d windows) via OAuth |
 
 These routes are separate from the project Bearer-token API and use the same cookie-based auth as the dashboard UI.
