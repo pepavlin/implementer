@@ -768,16 +768,16 @@ export function dashboardHtml(hasPassword: boolean): string {
   </header>
   <div class="stats" id="stat-bar">
     <div class="stat stat-filter" id="stat-running" data-filter="running" onclick="toggleStatus('running')" title="Click to filter by Running tasks"><div class="stat-label cr" id="sr-lbl">Running</div><div class="stat-val cr" id="sr">\u2014</div></div>
-    <div class="stat stat-filter" id="stat-starting" data-filter="starting" onclick="toggleStatus('starting')" title="Click to filter by Starting tasks"><div class="stat-label" style="color:var(--b-start-fg)" id="sst-lbl">Starting</div><div class="stat-val" style="color:var(--b-start-fg)" id="sst">\u2014</div></div>
+
     <div class="stat stat-filter" id="stat-queued" data-filter="queued" onclick="toggleStatus('queued')" title="Click to filter by Queued tasks"><div class="stat-label cq" id="sq-lbl">Queued</div><div class="stat-val cq" id="sq">\u2014</div></div>
     <div class="stat stat-filter" id="stat-retrying" data-filter="retrying" onclick="toggleStatus('retrying')" title="Click to filter by Retrying tasks"><div class="stat-label ct">Retrying</div><div class="stat-val ct" id="st">\u2014</div></div>
     <div class="stat stat-filter" id="stat-waiting-for-pipeline" data-filter="waiting_for_pipeline" onclick="toggleStatus('waiting_for_pipeline')" title="Click to filter by tasks waiting for pipeline"><div class="stat-label cp" id="swfp-lbl">Pipeline</div><div class="stat-val cp" id="swfp">\u2014</div></div>
     <div class="stat stat-filter" id="stat-completed" data-filter="completed" onclick="toggleStatus('completed')" title="Click to filter by Completed tasks"><div class="stat-label">Completed</div><div class="stat-val cc" id="sc">\u2014</div></div>
     <div class="stat stat-filter" id="stat-failed" data-filter="failed" onclick="toggleStatus('failed')" title="Click to filter by Failed tasks"><div class="stat-label">Failed</div><div class="stat-val cf" id="sf">\u2014</div></div>
-    <div class="stat stat-filter" id="stat-interrupted" data-filter="interrupted" onclick="toggleStatus('interrupted')" title="Click to filter by Interrupted tasks"><div class="stat-label" style="color:var(--b-fail-fg)">Interrupted</div><div class="stat-val" style="color:var(--b-fail-fg)" id="sint">\u2014</div></div>
+
     <div class="stat stat-filter" id="stat-cancelled" data-filter="cancelled" onclick="toggleStatus('cancelled')" title="Click to filter by Cancelled tasks"><div class="stat-label" style="color:var(--text3)">Cancelled</div><div class="stat-val" style="color:var(--text3)" id="scan">\u2014</div></div>
     <div class="stat stat-filter" id="stat-open-prs" data-filter="open-prs" onclick="toggleStatus('open-prs')" title="Click to filter tasks with open PRs"><div class="stat-label" style="color:var(--b-pr-open-fg)" id="spr-lbl">Open PRs</div><div class="stat-val" style="color:var(--b-pr-open-fg)" id="spr">\u2014</div></div>
-    <div class="stat stat-filter" id="stat-draft-prs" data-filter="draft-prs" onclick="toggleStatus('draft-prs')" title="Click to filter tasks with draft PRs"><div class="stat-label" style="color:var(--b-pr-draft-fg)" id="sdpr-lbl">Draft PRs</div><div class="stat-val" style="color:var(--b-pr-draft-fg)" id="sdpr">\u2014</div></div>
+
   </div>
   <div id="paused-banner" class="paused-banner">&#x23F8; Queue is paused &mdash; running tasks will finish but no new tasks will start. <button class="btn" style="background:#22c55e;color:#fff;padding:4px 12px;font-size:.75rem;margin-left:auto" onclick="togglePause()">Resume Queue</button></div>
   <div class="section-title">Projects</div>
@@ -1015,7 +1015,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     function dur(s){if(s==null)return '—';if(s<60)return s+'s';var m=Math.floor(s/60),r=s%60;if(m<60)return m+'m '+r+'s';return Math.floor(m/60)+'h '+(m%60)+'m';}
     function fmtDate(d){if(d==null)return '—';try{var dt=new Date(d);return isNaN(dt.getTime())?'—':dt.toLocaleString();}catch(e){return String(d);}}
     function taskMatchesFilters(t){
-      var statusOk=selectedStatuses.size===0||selectedStatuses.has(t.status)||(selectedStatuses.has('open-prs')&&taskHasOpenPr(t))||(selectedStatuses.has('draft-prs')&&taskHasDraftPr(t));
+      var statusOk=selectedStatuses.size===0||selectedStatuses.has(t.status)||(selectedStatuses.has('running')&&t.status==='starting')||(selectedStatuses.has('open-prs')&&taskHasOpenPr(t));
       var projOk=selectedProjects.size===0||selectedProjects.has(t.projectId);
       return statusOk&&projOk;
     }
@@ -1113,44 +1113,39 @@ export function dashboardHtml(hasPassword: boolean): string {
         });
       }
       // Update status count DOM elements
-      document.getElementById('sr').textContent=counts.running;
-      document.getElementById('sst').textContent=counts.starting;
+      // Merge starting count into running for the stat bar display
+      var runningCombined=counts.running+counts.starting;
+      document.getElementById('sr').textContent=runningCombined;
       document.getElementById('sq').textContent=counts.queued;
       document.getElementById('st').textContent=counts.retrying;
       document.getElementById('swfp').textContent=counts.waiting_for_pipeline;
       document.getElementById('sc').textContent=counts.completed;
       document.getElementById('sf').textContent=counts.failed;
-      document.getElementById('sint').textContent=counts.interrupted;
       document.getElementById('scan').textContent=counts.cancelled;
       // Compute unique PR counts across filtered tasks (use tasks array for PR dedup)
       var tasks=lastData.tasks||[];
       var projTasks=selectedProjects.size===0?tasks:tasks.filter(function(t){return selectedProjects.has(t.projectId);});
-      var openUrls={},draftUrls={};
+      var openUrls={};
       projTasks.forEach(function(t){
         (t.pullRequests||[]).forEach(function(pr){
           if(pr.url){
             if(pr.state==='open')openUrls[pr.url]=true;
-            else if(pr.state==='draft')draftUrls[pr.url]=true;
           }
         });
       });
       var openPrs=Object.keys(openUrls).length;
-      var draftPrs=Object.keys(draftUrls).length;
       document.getElementById('spr').textContent=openPrs;
-      document.getElementById('sdpr').textContent=draftPrs;
       // Update visual state indicators
       var sprCard=document.getElementById('stat-open-prs');
       if(sprCard)sprCard.classList.toggle('stat-has-open-prs',openPrs>0);
-      var sdprCard=document.getElementById('stat-draft-prs');
-      if(sdprCard)sdprCard.classList.toggle('stat-has-draft-prs',draftPrs>0);
       var srCard=document.getElementById('stat-running');
       var sqCard=document.getElementById('stat-queued');
       var swfpCard=document.getElementById('stat-waiting-for-pipeline');
       var srLbl=document.getElementById('sr-lbl');
       var sqLbl=document.getElementById('sq-lbl');
       var swfpLbl=document.getElementById('swfp-lbl');
-      if(srCard){srCard.classList.toggle('stat-has-running',counts.running>0);}
-      if(srLbl){srLbl.innerHTML=counts.running>0?'<span class="stat-active-dot cr"></span>Running':'Running';}
+      if(srCard){srCard.classList.toggle('stat-has-running',runningCombined>0);}
+      if(srLbl){srLbl.innerHTML=runningCombined>0?'<span class="stat-active-dot cr"></span>Running':'Running';}
       if(sqCard){sqCard.classList.toggle('stat-has-queued',counts.queued>0);}
       if(sqLbl){sqLbl.innerHTML=counts.queued>0?'<span class="stat-active-dot cq"></span>Queued':'Queued';}
       var wfpCount=counts.waiting_for_pipeline||0;
