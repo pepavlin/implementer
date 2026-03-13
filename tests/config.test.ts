@@ -163,6 +163,23 @@ projects:
         expect(() => Config.load(path)).toThrow();
     });
 
+    it("rejects unknown server fields", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+server:
+  anthropicAdminApiKey: sk-ant-admin-test-key-123
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+`
+        );
+
+        expect(() => Config.load(path)).toThrow();
+    });
+
     it("loads a full config with all fields", () => {
         const path = writeYaml(
             "config.yaml",

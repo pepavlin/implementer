@@ -409,6 +409,7 @@ server:
 - **Create new task** — click **+ New Task** to open a form where you select a project, enter a prompt, and optionally link a pull request number
 - **Project filter** — click project cards to filter the task list to one or more projects; click again to deselect; the new-task form pre-selects the currently filtered project
 - **Status filter** — filter tasks by status: All, Running, Queued, Retrying, Completed, Failed, Interrupted
+- **Subscription limits** — click the chart button in the header to see Pro/Max subscription utilization (5-hour, 7-day, Opus 7-day windows) with color-coded bars and reset times. Works automatically when projects have OAuth tokens configured — no extra API key needed.
 
 ### Dashboard-only API routes (requires admin auth cookie)
 
@@ -417,6 +418,7 @@ server:
 | `/dashboard/api/task/:taskId` | GET | Full task details (prompt, output, error, PRs) |
 | `/dashboard/api/task` | POST | Create a new task (`{ projectId, prompt, pullRequestNumber? }`) |
 | `/dashboard/api/task/:taskId/retry` | POST | Retry a task across all projects |
+| `/dashboard/api/subscription` | GET | Subscription utilization (5h, 7d, Opus 7d windows) via OAuth |
 
 These routes are separate from the project Bearer-token API and use the same cookie-based auth as the dashboard UI.
 
