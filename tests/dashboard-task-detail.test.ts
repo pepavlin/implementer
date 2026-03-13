@@ -1013,7 +1013,7 @@ describe("dashboard HTML - PR stat cards", () => {
         expect(res.text).toContain('id="spr"');
     });
 
-    it("includes Draft PRs stat card in stats bar", async () => {
+    it("does not include Draft PRs stat card in stats bar (removed from UI)", async () => {
         const task = makeTask({ status: "completed" });
         const app = createApp([task]);
 
@@ -1022,22 +1022,53 @@ describe("dashboard HTML - PR stat cards", () => {
             .set("Cookie", AUTH_COOKIE);
 
         expect(res.status).toBe(200);
-        expect(res.text).toContain("stat-draft-prs");
-        expect(res.text).toContain("Draft PRs");
-        expect(res.text).toContain('id="sdpr"');
+        expect(res.text).not.toContain("stat-draft-prs");
+        expect(res.text).not.toContain('id="sdpr"');
+    });
+});
+
+describe("dashboard HTML - stat bar simplification", () => {
+    it("does not include Starting stat card (merged into Running)", async () => {
+        const app = createApp([makeTask({ status: "starting" })]);
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).not.toContain('id="stat-starting"');
+        expect(res.text).not.toContain('id="sst"');
     });
 
-    it("includes draft-prs filter button", async () => {
-        const task = makeTask({ status: "completed" });
-        const app = createApp([task]);
-
+    it("does not include Interrupted stat card (removed from UI)", async () => {
+        const app = createApp([makeTask({ status: "interrupted" })]);
         const res = await request(app)
             .get("/dashboard")
             .set("Cookie", AUTH_COOKIE);
 
         expect(res.status).toBe(200);
-        expect(res.text).toContain('data-filter="draft-prs"');
-        expect(res.text).toContain("Draft PRs");
+        expect(res.text).not.toContain('id="stat-interrupted"');
+        expect(res.text).not.toContain('id="sint"');
+    });
+
+    it("Running stat filter also matches starting tasks in taskMatchesFilters", async () => {
+        const app = createApp([makeTask({ status: "starting" })]);
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        // The filter function should include starting tasks when running filter is active
+        expect(res.text).toContain("selectedStatuses.has('running')&&t.status==='starting'");
+    });
+
+    it("Running stat value includes starting count in recomputeFilteredStats", async () => {
+        const app = createApp([makeTask({ status: "running" })]);
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("var runningCombined=counts.running+counts.starting");
     });
 });
 
