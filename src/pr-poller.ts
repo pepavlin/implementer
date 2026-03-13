@@ -300,6 +300,8 @@ export interface PollableTask {
     status: string;
     /** ISO timestamp of when the task first entered "waiting_for_pipeline" status. */
     pipelineWaitingSince?: string;
+    /** GitHub token override for dynamic (non-preconfigured) tasks. */
+    githubToken?: string;
 }
 
 export interface TaskAccessor {
@@ -432,7 +434,7 @@ export class PrPoller {
                 if (!task.pullRequests?.length) continue;
                 const projectConfig =
                     this.config.projects[task.projectId as ProjectId];
-                const token = projectConfig?.data.auth?.githubToken;
+                const token = task.githubToken ?? projectConfig?.data.auth?.githubToken;
 
                 for (const pr of task.pullRequests) {
                     if (pr.state === "merged" || pr.state === "closed") continue;
@@ -511,7 +513,7 @@ export class PrPoller {
             if (!task.pullRequests?.length) continue;
             const projectConfig =
                 this.config.projects[task.projectId as ProjectId];
-            const token = projectConfig?.data.auth?.githubToken;
+            const token = task.githubToken ?? projectConfig?.data.auth?.githubToken;
 
             for (const pr of task.pullRequests) {
                 if (pr.state === "merged" || pr.state === "closed") {
@@ -608,7 +610,7 @@ export class PrPoller {
     private async checkPipelineForTask(task: PollableTask): Promise<void> {
         const projectConfig =
             this.config.projects[task.projectId as ProjectId];
-        const token = projectConfig?.data.auth?.githubToken;
+        const token = task.githubToken ?? projectConfig?.data.auth?.githubToken;
         // Retrieve the configured pipeline job names to watch (if any)
         const pipelineNames =
             projectConfig?.data.handlePipelines?.pipelines ?? [];

@@ -205,7 +205,7 @@ const ProjectSchema = z
     .object({
         apiKey: z.string().optional(),
         maxConcurrentTasks: z.number().int().min(1).optional(),
-        repositories: z.array(RepositorySchema).min(1),
+        repositories: z.array(RepositorySchema).default([]),
         claudeCode: ClaudeCodeSchema.default({}),
         auth: ProjectAuthSchema.optional(),
         errorRetry: ErrorRetrySchema.optional(),

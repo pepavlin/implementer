@@ -1,4 +1,5 @@
 import { Project } from "../config/project";
+import type { RepositoryConfig } from "../config/config-types";
 import { Executor } from "../executor";
 import { Branch, PersistedTask, TaskData, TaskId } from "../types";
 import { WorkspaceId } from "../workspace-pool";
@@ -37,6 +38,37 @@ export class Task {
     /** Whether this task has been cancelled. Checked by executeTask to avoid overwriting status. */
     get cancelled(): boolean {
         return this.cancelledAt !== undefined;
+    }
+
+    /** Whether this task uses a dynamic (non-preconfigured) repository. */
+    get isDynamic(): boolean {
+        return this.data.repoUrl !== undefined;
+    }
+
+    /**
+     * Effective repository list for this task.
+     * For dynamic tasks, returns a single-repo list derived from repoUrl.
+     * For normal tasks, returns the project's configured repositories.
+     */
+    getRepositories(): RepositoryConfig[] {
+        if (this.data.repoUrl) {
+            const name = this.data.repoUrl
+                .replace(/\.git$/, "")
+                .split("/")
+                .pop()!;
+            return [
+                { name, url: this.data.repoUrl, defaultBranch: "main" }
+            ];
+        }
+        return this.project.data.repositories;
+    }
+
+    /**
+     * Effective GitHub token for this task.
+     * Dynamic tasks use their own token; normal tasks use the project auth config.
+     */
+    getGithubToken(): string | undefined {
+        return this.data.githubToken ?? this.project.data.auth?.githubToken;
     }
 
     initialize() {
@@ -382,8 +414,8 @@ export class Task {
             );
 
             const acquired = await this.project.pool.acquire(
-                this.project.data.repositories,
-                this.project.data.auth?.githubToken
+                this.getRepositories(),
+                this.getGithubToken()
             );
 
             // If the timeout fired while acquire() was in-flight, release the

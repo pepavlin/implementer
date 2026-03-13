@@ -18,10 +18,10 @@ export async function executeTask(task: Task): Promise<void> {
 
     const manager = task.manager;
     const project = task.project;
-    const repos = project.data.repositories;
+    const repos = task.getRepositories();
     const executor = task.executor!;
     const branchName = task.branch.name;
-    const githubToken = project.data.auth?.githubToken;
+    const githubToken = task.getGithubToken();
     const workspace = task.workspace!;
 
     // Determine whether to check out an existing branch or create a new one.

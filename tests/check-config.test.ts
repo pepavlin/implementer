@@ -57,9 +57,7 @@ projects:
         const path = writeYaml(
             "invalid.yaml",
             `
-projects:
-  my-project:
-    repositories: []
+projects: {}
 `
         );
 

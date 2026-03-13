@@ -30,7 +30,9 @@ const TaskCreateSchema = z.object({
     prompt: z.string().min(1),
     continueTaskId: z.string().min(1).optional(),
     callbackUrl: z.string().url().optional(),
-    priority: z.enum(TASK_PRIORITIES).optional()
+    priority: z.enum(TASK_PRIORITIES).optional(),
+    repoUrl: z.string().url().optional(),
+    githubToken: z.string().min(1).optional()
 });
 
 const TASK_STATUSES = [
@@ -136,7 +138,9 @@ export function createServer(
             const task = taskManager.createNewTask(getProjectId(res), {
                 ...parsed.data,
                 continueTaskId: parsed.data.continueTaskId as TaskId | undefined,
-                priority: parsed.data.priority
+                priority: parsed.data.priority,
+                repoUrl: parsed.data.repoUrl,
+                githubToken: parsed.data.githubToken
             });
             res.status(200).json({
                 taskId: task.id,

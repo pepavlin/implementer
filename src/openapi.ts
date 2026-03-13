@@ -37,6 +37,19 @@ export const openApiSpec = {
                         description:
                             "URL to POST to when the task finishes. Body: { taskId, status }",
                         example: "https://example.com/webhook/task-done"
+                    },
+                    repoUrl: {
+                        type: "string",
+                        format: "uri",
+                        description:
+                            "Repository URL for dynamic tasks. Use with a template project (no preconfigured repos).",
+                        example: "https://github.com/org/repo.git"
+                    },
+                    githubToken: {
+                        type: "string",
+                        description:
+                            "GitHub token for the dynamic repository. Used for clone, push, and PR operations.",
+                        example: "ghp_xxxxxxxxxxxx"
                     }
                 }
             },

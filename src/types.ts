@@ -84,6 +84,13 @@ export interface TaskData {
      * (e.g. EXPECTED legacy checks, WAITING environment-approval checks, etc.).
      */
     pipelineWaitingSince?: string;
+    /**
+     * Repository URL for dynamic (non-preconfigured) tasks.
+     * Persisted so that the task can be resumed after server restart.
+     */
+    repoUrl?: string;
+    /** GitHub token for the dynamic repository. Persisted for restart recovery. */
+    githubToken?: string;
 }
 
 export interface PersistedTask extends TaskData {
@@ -97,4 +104,12 @@ export interface TaskCreateRequest {
     callbackUrl?: string;
     /** Priority for queue ordering. Defaults to "normal" if omitted. */
     priority?: TaskPriority;
+    /**
+     * Repository URL for dynamic (non-preconfigured) tasks.
+     * When provided, the authenticated project must have no repositories configured
+     * (i.e. it acts as a template). The task will clone and work on this repo instead.
+     */
+    repoUrl?: string;
+    /** GitHub token for the dynamic repository. Used for clone, push, and PR operations. */
+    githubToken?: string;
 }

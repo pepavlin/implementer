@@ -93,7 +93,9 @@ export class TaskManager {
      */
     pause(): void {
         this._paused = true;
-        console.log("[task-manager] Queue paused — running tasks continue but no new tasks will start");
+        console.log(
+            "[task-manager] Queue paused — running tasks continue but no new tasks will start"
+        );
     }
 
     /**
@@ -143,7 +145,10 @@ export class TaskManager {
             const bPriority = PRIORITY_WEIGHT[b.data.priority ?? "normal"] ?? 1;
             if (bPriority !== aPriority) return bPriority - aPriority; // Higher priority first
             // Same priority — respect original queue order (FIFO via createdAt)
-            return new Date(a.data.createdAt).getTime() - new Date(b.data.createdAt).getTime();
+            return (
+                new Date(a.data.createdAt).getTime() -
+                new Date(b.data.createdAt).getTime()
+            );
         });
 
         // Start queued tasks that have capacity
@@ -213,7 +218,8 @@ export class TaskManager {
             projectId: task.data.projectId as string,
             pullRequests: task.data.pullRequests,
             status: task.data.status,
-            pipelineWaitingSince: task.data.pipelineWaitingSince
+            pipelineWaitingSince: task.data.pipelineWaitingSince,
+            githubToken: task.data.githubToken
         }));
     }
 
@@ -346,8 +352,30 @@ export class TaskManager {
      * task — branch slug generation and workspace acquisition happen in the background.
      */
     createNewTask(projectId: ProjectId, request: TaskCreateRequest): Task {
-        this.requireProject(projectId);
+        const project = this.requireProject(projectId);
         const taskId = nanoid(8) as TaskId;
+
+        // Resolve dynamic repository fields
+        let repoUrl = request.repoUrl;
+        let githubToken = request.githubToken;
+
+        // Validate: repoUrl requires a template project (no preconfigured repositories)
+        if (repoUrl && project.data.repositories.length > 0) {
+            throw new BadRequestError(
+                "Cannot use repoUrl with a project that has preconfigured repositories. Use a template project (e.g. 'default') with empty repositories."
+            );
+        }
+
+        // Validate: project with no repos requires repoUrl (unless continuing a chain)
+        if (
+            project.data.repositories.length === 0 &&
+            !repoUrl &&
+            !request.continueTaskId
+        ) {
+            throw new BadRequestError(
+                "This project has no preconfigured repositories. Provide a repoUrl in the request body."
+            );
+        }
 
         // Resolve chain continuation fields
         let parentTaskId: TaskId | undefined;
@@ -395,7 +423,9 @@ export class TaskManager {
                 output: "",
                 callbackUrl: request.callbackUrl,
                 attempt: 1,
-                priority: request.priority ?? "normal"
+                priority: request.priority ?? "normal",
+                repoUrl,
+                githubToken
             },
             this
         );
@@ -429,7 +459,10 @@ export class TaskManager {
      * Update the priority of a queued task.
      * Has no effect on tasks that are already running/completed.
      */
-    setTaskPriority(taskId: TaskId, priority: import("../types.js").TaskPriority): Task {
+    setTaskPriority(
+        taskId: TaskId,
+        priority: import("../types.js").TaskPriority
+    ): Task {
         const task = this.tasks.get(taskId);
         if (!task) throw new Error(`Task not found: ${taskId}`);
         task.data.priority = priority;

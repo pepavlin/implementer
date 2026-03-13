@@ -268,17 +268,19 @@ projects: {}
         expect(() => Config.load(path)).toThrow();
     });
 
-    it("rejects project with no repositories", () => {
+    it("accepts project with empty repositories (template project)", () => {
         const path = writeYaml(
             "config.yaml",
             `
 projects:
-  my-project:
+  default:
     repositories: []
 `
         );
 
-        expect(() => Config.load(path)).toThrow();
+        const config = Config.load(path);
+        expect(config.projects["default" as any]).toBeDefined();
+        expect(config.projects["default" as any].data.repositories).toEqual([]);
     });
 
     it("rejects project with missing repository name", () => {
