@@ -1754,3 +1754,95 @@ describe("dashboard - chain group UI", () => {
         expect(res.text).toContain("Waiting for Pipeline");
     });
 });
+
+describe("buildDashboardData - per-project cancelled and starting stats", () => {
+    it("includes cancelled tasks in per-project stats", () => {
+        const tasks: Task[] = [
+            makeTask({ status: "cancelled" }),
+            makeTask({ taskId: "bbb22222" as TaskId, status: "cancelled" }),
+            makeTask({ taskId: "ccc33333" as TaskId, status: "completed" })
+        ];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        expect(data.projects["my-project"]).toBeDefined();
+        expect(data.projects["my-project"].cancelled).toBe(2);
+        expect(data.projects["my-project"].completed).toBe(1);
+    });
+
+    it("includes starting tasks in dynamically-created project stats", () => {
+        const tasks: Task[] = [
+            makeTask({ projectId: "dynamic-proj" as ProjectId, status: "starting" }),
+            makeTask({ taskId: "bbb22222" as TaskId, projectId: "dynamic-proj" as ProjectId, status: "running" })
+        ];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        // Config has "my-project", not "dynamic-proj" — the project is created dynamically
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        expect(data.projects["dynamic-proj"]).toBeDefined();
+        expect(data.projects["dynamic-proj"].starting).toBe(1);
+        expect(data.projects["dynamic-proj"].running).toBe(1);
+    });
+
+    it("includes cancelled tasks in global stats", () => {
+        const tasks: Task[] = [
+            makeTask({ status: "cancelled" }),
+            makeTask({ taskId: "bbb22222" as TaskId, status: "cancelled" }),
+            makeTask({ taskId: "ccc33333" as TaskId, status: "completed" })
+        ];
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        expect(data.stats.cancelled).toBe(2);
+        expect(data.stats.completed).toBe(1);
+    });
+});
+
+describe("buildDashboardData - stats count all tasks beyond 200 limit", () => {
+    it("stats reflect total count even when tasks array is limited to 200", () => {
+        // Create 250 completed tasks - the tasks array should be limited to 200,
+        // but stats should count all 250
+        const tasks: Task[] = [];
+        for (let i = 0; i < 250; i++) {
+            tasks.push(makeTask({
+                taskId: `task${String(i).padStart(5, "0")}` as TaskId,
+                status: "completed",
+                createdAt: new Date(Date.now() - i * 60000).toISOString()
+            }));
+        }
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        // The tasks array should be limited to 200
+        expect(data.tasks.length).toBe(200);
+        // But stats should count ALL 250 tasks
+        expect(data.stats.completed).toBe(250);
+        expect(data.stats.total).toBe(250);
+    });
+
+    it("per-project stats reflect total count even when tasks array is limited", () => {
+        const tasks: Task[] = [];
+        for (let i = 0; i < 250; i++) {
+            tasks.push(makeTask({
+                taskId: `task${String(i).padStart(5, "0")}` as TaskId,
+                status: "completed",
+                createdAt: new Date(Date.now() - i * 60000).toISOString()
+            }));
+        }
+        const tm = makeTaskManager(tasks) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+
+        // Per-project stats should count ALL 250 tasks
+        expect(data.projects["my-project"].completed).toBe(250);
+    });
+});
