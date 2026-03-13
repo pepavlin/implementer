@@ -1680,7 +1680,7 @@ export function dashboardHtml(hasPassword: boolean): string {
             if(d.error.indexOf('No OAuth')!==-1){
               el.innerHTML='<div class="sub-no-token">'+
                 'No OAuth token available.<br><br>'+
-                'Configure <code>claudeOauthRefreshToken</code> in a project\'s <code>auth</code> section to see subscription limits.</div>';
+                'Configure <code>claudeOauthRefreshToken</code> in a project\\'s <code>auth</code> section to see subscription limits.</div>';
             }else{
               el.innerHTML='<div class="sub-section"><div class="sub-header">Subscription Limits</div><div class="sub-error">'+escapeHtml(d.error)+'</div></div>';
             }
