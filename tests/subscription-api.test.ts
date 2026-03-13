@@ -194,6 +194,65 @@ describe("subscription-api", () => {
             ).rejects.toThrow("rate-limited");
         });
 
+        it("throws descriptive error when API returns HTML instead of JSON", async () => {
+            const htmlPage = '<!DOCTYPE html><html><body>Service Unavailable</body></html>';
+            const fetchSpy = vi.spyOn(globalThis, "fetch");
+            fetchSpy.mockResolvedValue(
+                new Response(htmlPage, {
+                    status: 200,
+                    headers: { "Content-Type": "text/html" }
+                })
+            );
+
+            await expect(
+                fetchSubscriptionUsage("sk-ant-oat01-test")
+            ).rejects.toThrow("non-JSON response");
+        });
+
+        it("throws descriptive error when Content-Type header is missing", async () => {
+            const htmlPage = '<!DOCTYPE html><html><body>Error</body></html>';
+            const fetchSpy = vi.spyOn(globalThis, "fetch");
+            fetchSpy.mockResolvedValue(
+                new Response(htmlPage, {
+                    status: 200,
+                    headers: {}
+                })
+            );
+
+            await expect(
+                fetchSubscriptionUsage("sk-ant-oat01-test")
+            ).rejects.toThrow("non-JSON response");
+        });
+
+        it("throws descriptive error when JSON is invalid despite correct Content-Type", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch");
+            fetchSpy.mockResolvedValue(
+                new Response("not valid json {{{", {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" }
+                })
+            );
+
+            await expect(
+                fetchSubscriptionUsage("sk-ant-oat01-test")
+            ).rejects.toThrow("invalid JSON despite correct Content-Type");
+        });
+
+        it("includes body preview in non-JSON error message", async () => {
+            const htmlPage = '<!DOCTYPE html><html><body>Cloudflare Error 502</body></html>';
+            const fetchSpy = vi.spyOn(globalThis, "fetch");
+            fetchSpy.mockResolvedValue(
+                new Response(htmlPage, {
+                    status: 200,
+                    headers: { "Content-Type": "text/html; charset=utf-8" }
+                })
+            );
+
+            await expect(
+                fetchSubscriptionUsage("sk-ant-oat01-test")
+            ).rejects.toThrow("Body preview:");
+        });
+
         it("handles missing optional fields in response", async () => {
             const mockResponse = {
                 five_hour: {

@@ -1673,7 +1673,19 @@ export function dashboardHtml(hasPassword: boolean): string {
       if(subLoaded){return;}
       el.innerHTML='<div class="sub-loading">Loading subscription data&hellip;</div>';
       fetch('/dashboard/api/subscription')
-        .then(function(r){return r.json();})
+        .then(function(r){
+          var ct=r.headers.get('content-type')||'';
+          if(!r.ok||ct.indexOf('application/json')===-1){
+            return r.text().then(function(txt){
+              var msg=r.status===401?'Session expired. Please refresh and log in again.'
+                :r.status===404?'Subscription endpoint not available.'
+                :r.status===501?'No OAuth token configured.'
+                :'Server returned an unexpected response (HTTP '+r.status+').';
+              throw new Error(msg);
+            });
+          }
+          return r.json();
+        })
         .then(function(d){
           subLoaded=true;
           if(d.error){
@@ -1689,7 +1701,8 @@ export function dashboardHtml(hasPassword: boolean): string {
           el.innerHTML=renderSubscriptionSection(d);
         })
         .catch(function(err){
-          el.innerHTML='<div class="sub-section"><div class="sub-header">Subscription Limits</div><div class="sub-error">'+escapeHtml(err.message||'Failed to load')+'</div></div>';
+          subLoaded=false;
+          el.innerHTML='<div class="sub-section"><div class="sub-header">Subscription Limits</div><div class="sub-error">'+escapeHtml(err.message||'Failed to load subscription data.')+'</div></div>';
         });
     }
     function subBarColor(pct){
@@ -2185,50 +2198,53 @@ export function registerDashboardRoutes(
 
     // GET /dashboard/api/subscription — fetch subscription utilization via OAuth
     app.get("/dashboard/api/subscription", async (req, res) => {
-        if (!adminPassword) {
-            res.status(404).send("Not Found");
-            return;
-        }
-        if (!isDashboardAuthenticated(req, adminPassword)) {
-            res.status(401).json({ error: "Unauthorized" });
-            return;
-        }
+        try {
+            if (!adminPassword) {
+                res.status(404).json({ error: "Not Found" });
+                return;
+            }
+            if (!isDashboardAuthenticated(req, adminPassword)) {
+                res.status(401).json({ error: "Unauthorized" });
+                return;
+            }
 
-        // Find the first project with an OAuth token (refresh or static)
-        let oauthToken: string | null = null;
-        for (const project of Object.values(config.projects)) {
-            const auth = project.data.auth;
-            if (auth?.claudeOauthRefreshToken || auth?.claudeOauthToken) {
-                try {
-                    const creds = await project.tokenManager.getCredentials();
-                    if (creds.envName === "CLAUDE_CODE_OAUTH_TOKEN") {
-                        oauthToken = creds.value;
-                        break;
+            // Find the first project with an OAuth token (refresh or static)
+            let oauthToken: string | null = null;
+            for (const project of Object.values(config.projects)) {
+                const auth = project.data.auth;
+                if (auth?.claudeOauthRefreshToken || auth?.claudeOauthToken) {
+                    try {
+                        const creds =
+                            await project.tokenManager.getCredentials();
+                        if (creds.envName === "CLAUDE_CODE_OAUTH_TOKEN") {
+                            oauthToken = creds.value;
+                            break;
+                        }
+                    } catch {
+                        // This project's token failed, try next
                     }
-                } catch {
-                    // This project's token failed, try next
                 }
             }
-        }
 
-        if (!oauthToken) {
-            res.status(501).json({
-                error: "No OAuth token available. Configure claudeOauthRefreshToken in a project's auth section."
-            });
-            return;
-        }
+            if (!oauthToken) {
+                res.status(501).json({
+                    error: "No OAuth token available. Configure claudeOauthRefreshToken in a project's auth section."
+                });
+                return;
+            }
 
-        try {
             const data = await fetchSubscriptionUsage(oauthToken);
             res.json(data);
         } catch (err) {
             console.error("Failed to fetch subscription usage:", err);
-            res.status(502).json({
-                error:
-                    err instanceof Error
-                        ? err.message
-                        : "Failed to fetch subscription usage"
-            });
+            if (!res.headersSent) {
+                res.status(502).json({
+                    error:
+                        err instanceof Error
+                            ? err.message
+                            : "Failed to fetch subscription usage"
+                });
+            }
         }
     });
 
