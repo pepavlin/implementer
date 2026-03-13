@@ -1,4 +1,4 @@
-import { extractLastAssistantMessage } from "../executor.js";
+import { extractLastAssistantMessage, hasClaudeOutput } from "../executor.js";
 import { Executor } from "../executor.js";
 import { chownRecursive } from "../workspace-pool.js";
 import {
@@ -115,6 +115,18 @@ export async function executeTask(task: Task): Promise<void> {
         );
 
         task.data.output = result.output;
+
+        // Sanity check: verify Claude actually ran. When the sandbox container
+        // fails (e.g. Docker-in-Docker overlay errors), it may exit 0 without
+        // Claude ever producing stream-json output. Treat this as a failure so
+        // the task doesn't silently complete with no work done.
+        if (result.exitCode === 0 && !hasClaudeOutput(result.output)) {
+            throw new Error(
+                "Sandbox container exited successfully but Claude produced no output. " +
+                "This usually indicates the container failed to initialize properly. " +
+                "Raw output: " + result.output.slice(0, 500)
+            );
+        }
 
         // Step 5: Check for uncommitted changes and ask Claude to commit if needed
         const hasUncommitted = await manager.gitManager.hasUncommittedChanges(

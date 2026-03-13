@@ -3,7 +3,7 @@ import * as child_process from "node:child_process";
 import { EventEmitter } from "node:events";
 import type { ClaudeCodeConfig, ServerConfig } from "../src/config/config-types.js";
 import { TokenManager } from "../src/auth.js";
-import { Executor, extractLastAssistantMessage } from "../src/executor.js";
+import { Executor, extractLastAssistantMessage, hasClaudeOutput } from "../src/executor.js";
 
 // Mock child_process.spawn and execFileSync to capture docker args without running containers
 vi.mock("node:child_process", async () => {
@@ -92,6 +92,49 @@ describe("extractLastAssistantMessage", () => {
       '{"message":{"content":[{"type":"text","text":"Real message"}]}}',
     ].join("\n");
     expect(extractLastAssistantMessage(lines)).toBe("Real message");
+  });
+});
+
+describe("hasClaudeOutput", () => {
+  it("returns true for valid Claude stream-json with type field", () => {
+    const output = '{"type":"system","message":"initialized"}\n{"type":"assistant","message":"hello"}';
+    expect(hasClaudeOutput(output)).toBe(true);
+  });
+
+  it("returns true when Claude output is mixed with Docker daemon logs", () => {
+    const output = [
+      'time="2026-03-13T22:24:27Z" level=warning msg="Failed to find docker-init"',
+      '{"type":"system","subtype":"init","session_id":"abc"}',
+      '{"message":{"content":[{"type":"text","text":"Working on it..."}]}}',
+    ].join("\n");
+    expect(hasClaudeOutput(output)).toBe(true);
+  });
+
+  it("returns false for only Docker daemon error logs (no Claude output)", () => {
+    const output = [
+      'time="2026-03-13T22:24:27Z" level=error msg="failed to mount overlay: invalid argument" storage-driver=overlay2',
+      'time="2026-03-13T22:24:27Z" level=error msg="exec: \\"fuse-overlayfs\\": executable file not found in $PATH" storage-driver=fuse-overlayfs',
+      'time="2026-03-13T22:24:27Z" level=warning msg="Failed to find docker-init"',
+    ].join("\n");
+    expect(hasClaudeOutput(output)).toBe(false);
+  });
+
+  it("returns false for empty output", () => {
+    expect(hasClaudeOutput("")).toBe(false);
+  });
+
+  it("returns false for whitespace-only output", () => {
+    expect(hasClaudeOutput("  \n\n  ")).toBe(false);
+  });
+
+  it("returns false for JSON without type field", () => {
+    const output = '{"message":"hello"}\n{"data":123}';
+    expect(hasClaudeOutput(output)).toBe(false);
+  });
+
+  it("returns false for JSON with non-string type field", () => {
+    const output = '{"type":123}';
+    expect(hasClaudeOutput(output)).toBe(false);
   });
 });
 

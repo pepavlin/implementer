@@ -10,6 +10,26 @@ export interface ExecutorResult {
 }
 
 /**
+ * Check whether the executor output contains at least one valid Claude Code
+ * stream-json message. When the sandbox container fails to start properly
+ * (e.g. Docker-in-Docker errors), the output may contain only daemon logs
+ * and no actual Claude output. This helper lets callers distinguish a real
+ * successful run from a container that exited 0 without Claude ever running.
+ */
+export function hasClaudeOutput(streamOutput: string): boolean {
+  for (const line of streamOutput.split("\n")) {
+    try {
+      const obj = JSON.parse(line);
+      // Claude stream-json messages always have a "type" field at the top level
+      if (obj && typeof obj === "object" && typeof obj.type === "string") {
+        return true;
+      }
+    } catch { /* skip non-JSON lines */ }
+  }
+  return false;
+}
+
+/**
  * Extract the last assistant text message from Claude Code stream-json output.
  * Stream-json is NDJSON where assistant messages have: { message: { content: [{ type: "text", text: "..." }] } }
  */
