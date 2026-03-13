@@ -8,6 +8,7 @@ import { extractLastAssistantMessage } from "./executor.js";
 import type { Config } from "./config/config.js";
 import type { ProjectId, TaskId } from "./types.js";
 import { fetchUsageData, fetchMonthlyBudget } from "./usage-api.js";
+import { fetchSubscriptionUsage } from "./subscription-api.js";
 
 // ── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -778,6 +779,25 @@ export function dashboardHtml(hasPassword: boolean): string {
       .usage-stat-val{font-size:1.1rem}
       .usage-table th,.usage-table td{padding:6px 8px;font-size:.72rem}
     }
+    /* ── Subscription limits ─────────────────────────────────────────────── */
+    .sub-section{background:var(--bg-code);border-radius:10px;padding:16px 18px;margin-bottom:18px}
+    .sub-header{font-size:.72rem;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+    .sub-header .sub-fetched{font-weight:400;text-transform:none;letter-spacing:0;margin-left:auto;font-size:.65rem;color:var(--text4)}
+    .sub-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+    .sub-row:last-child{margin-bottom:0}
+    .sub-lbl{font-size:.75rem;color:var(--text2);width:90px;flex-shrink:0}
+    .sub-bar-wrap{flex:1;display:flex;align-items:center;gap:8px}
+    .sub-bar{flex:1;height:10px;background:var(--border);border-radius:5px;overflow:hidden}
+    .sub-bar-fill{height:100%;border-radius:5px;transition:width .3s ease}
+    .sub-pct{font-size:.78rem;font-weight:600;min-width:42px;text-align:right;font-family:ui-monospace,'SF Mono',monospace}
+    .sub-reset{font-size:.65rem;color:var(--text4);margin-left:4px}
+    .sub-not-configured{font-size:.78rem;color:var(--text3);text-align:center;padding:12px}
+    .sub-not-configured code{background:var(--tag-bg);padding:2px 6px;border-radius:4px;font-family:ui-monospace,'SF Mono',monospace;font-size:.74rem}
+    .sub-error{font-size:.78rem;color:var(--b-fail-fg);text-align:center;padding:8px}
+    @media(max-width:540px){
+      .sub-lbl{width:70px;font-size:.68rem}
+      .sub-pct{font-size:.72rem;min-width:36px}
+    }
   </style>
 </head>
 <body>
@@ -871,6 +891,7 @@ export function dashboardHtml(hasPassword: boolean): string {
           <button class="modal-x" onclick="closeUsageDialog()">&times;</button>
         </div>
       </div>
+      <div id="sub-container"></div>
       <div class="modal-bd" id="usage-body">
         <div class="usage-loading">Loading usage data&hellip;</div>
       </div>
@@ -1671,10 +1692,12 @@ export function dashboardHtml(hasPassword: boolean): string {
     var usageLoading=false;
     function openUsageDialog(){
       document.getElementById('usage-overlay').style.display='';
+      loadSubscriptionData();
       loadUsageData();
     }
     function closeUsageDialog(){
       document.getElementById('usage-overlay').style.display='none';
+      subLoaded=false;
     }
     function formatTokens(n){
       if(n>=1e9)return (n/1e9).toFixed(2)+'B';
@@ -1712,6 +1735,78 @@ export function dashboardHtml(hasPassword: boolean): string {
           usageLoading=false;
           body.innerHTML='<div class="usage-error">Failed to load usage data: '+escapeHtml(err.message)+'</div>';
         });
+    }
+    /* ── Subscription limits ─────────────────────────────────────────── */
+    var subLoaded=false;
+    function loadSubscriptionData(){
+      var el=document.getElementById('sub-container');
+      if(!el)return;
+      if(subLoaded){return;}
+      el.innerHTML='<div class="sub-section"><div class="sub-header">Subscription Limits</div><div style="text-align:center;color:var(--text4);font-size:.78rem;padding:8px 0">Loading&hellip;</div></div>';
+      fetch('/dashboard/api/subscription')
+        .then(function(r){return r.json();})
+        .then(function(d){
+          subLoaded=true;
+          if(d.error){
+            if(d.error.indexOf('No OAuth')!==-1){
+              el.innerHTML='';
+            }else{
+              el.innerHTML='<div class="sub-section"><div class="sub-header">Subscription Limits</div><div class="sub-error">'+escapeHtml(d.error)+'</div></div>';
+            }
+            return;
+          }
+          el.innerHTML=renderSubscriptionSection(d);
+        })
+        .catch(function(){
+          el.innerHTML='';
+        });
+    }
+    function subBarColor(pct){
+      if(pct<50)return 'var(--ok,#22c55e)';
+      if(pct<75)return 'var(--warn,#eab308)';
+      return 'var(--fail,#ef4444)';
+    }
+    function formatResetTime(iso){
+      if(!iso)return '';
+      var d=new Date(iso);
+      var now=Date.now();
+      var diff=d.getTime()-now;
+      if(diff<=0)return 'resetting\u2026';
+      var h=Math.floor(diff/3600000);
+      var m=Math.floor((diff%3600000)/60000);
+      if(h>24){
+        var days=Math.floor(h/24);
+        return 'resets in '+days+'d '+(h%24)+'h';
+      }
+      if(h>0)return 'resets in '+h+'h '+m+'m';
+      return 'resets in '+m+'m';
+    }
+    function renderSubRow(label,win){
+      if(!win)return '';
+      var pct=Math.min(win.utilization,100);
+      var color=subBarColor(win.utilization);
+      var h='<div class="sub-row">';
+      h+='<div class="sub-lbl">'+label+'</div>';
+      h+='<div class="sub-bar-wrap">';
+      h+='<div class="sub-bar"><div class="sub-bar-fill" style="width:'+pct.toFixed(1)+'%;background:'+color+'"></div></div>';
+      h+='<div class="sub-pct" style="color:'+color+'">'+win.utilization.toFixed(0)+'%</div>';
+      h+='</div>';
+      var reset=formatResetTime(win.resetsAt);
+      if(reset)h+='<div class="sub-reset">'+reset+'</div>';
+      h+='</div>';
+      return h;
+    }
+    function renderSubscriptionSection(d){
+      var h='<div class="sub-section">';
+      h+='<div class="sub-header">Subscription Limits<span class="sub-fetched">fetched '+new Date(d.fetchedAt).toLocaleTimeString()+'</span></div>';
+      h+=renderSubRow('5-Hour',d.fiveHour);
+      h+=renderSubRow('7-Day',d.sevenDay);
+      h+=renderSubRow('Opus (7d)',d.sevenDayOpus);
+      if(!d.fiveHour&&!d.sevenDay&&!d.sevenDayOpus){
+        h+='<div style="text-align:center;color:var(--text4);font-size:.78rem;padding:8px 0">No utilization data available.</div>';
+      }
+      h+='</div>';
+      return h;
     }
     function renderBudgetSection(b){
       if(!b)return '';
@@ -2286,6 +2381,55 @@ export function registerDashboardRoutes(
                     err instanceof Error
                         ? err.message
                         : "Failed to fetch usage data from Anthropic API"
+            });
+        }
+    });
+
+    // GET /dashboard/api/subscription — fetch subscription utilization via OAuth
+    app.get("/dashboard/api/subscription", async (req, res) => {
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+
+        // Find the first project with an OAuth token (refresh or static)
+        let oauthToken: string | null = null;
+        for (const project of Object.values(config.projects)) {
+            const auth = project.data.auth;
+            if (auth?.claudeOauthRefreshToken || auth?.claudeOauthToken) {
+                try {
+                    const creds = await project.tokenManager.getCredentials();
+                    if (creds.envName === "CLAUDE_CODE_OAUTH_TOKEN") {
+                        oauthToken = creds.value;
+                        break;
+                    }
+                } catch {
+                    // This project's token failed, try next
+                }
+            }
+        }
+
+        if (!oauthToken) {
+            res.status(501).json({
+                error: "No OAuth token available. Configure claudeOauthRefreshToken in a project's auth section."
+            });
+            return;
+        }
+
+        try {
+            const data = await fetchSubscriptionUsage(oauthToken);
+            res.json(data);
+        } catch (err) {
+            console.error("Failed to fetch subscription usage:", err);
+            res.status(502).json({
+                error:
+                    err instanceof Error
+                        ? err.message
+                        : "Failed to fetch subscription usage"
             });
         }
     });

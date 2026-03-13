@@ -152,6 +152,55 @@ The usage data flow:
 7. Caches result for 5 minutes and returns to frontend
 8. Frontend renders budget section (with progress bar), summary cards, and tables
 
+## Subscription Limits (OAuth-based)
+
+In addition to Admin API usage stats, the dashboard can show **subscription-level utilization** for Pro/Max plans. This uses a reverse-engineered, undocumented endpoint (`GET /api/oauth/usage`) that Claude Code itself uses internally. No extra API key is required — it works with the OAuth tokens already configured per project.
+
+### How it works
+
+The endpoint returns rolling rate-limit utilization percentages (0–100) for:
+
+| Window | Description |
+|---|---|
+| **5-Hour** | Rolling session utilization within the last 5 hours |
+| **7-Day** | Rolling weekly utilization cap |
+| **Opus (7d)** | Separate 7-day tracking for Opus model usage |
+
+Each window includes a `resets_at` timestamp showing when the window resets (displayed as relative time, e.g. "resets in 3h 20m").
+
+### Configuration
+
+No extra configuration is needed. The feature automatically activates when any project has an OAuth token configured (`claudeOauthRefreshToken` or `claudeOauthToken` in the project `auth` section). If only API keys are used and no OAuth tokens are available, the subscription section is silently hidden.
+
+### UI
+
+The subscription limits section appears at the **top** of the usage dialog, above the budget and Admin API sections. Each utilization window is rendered as a color-coded horizontal bar:
+
+- Green (<50% utilization)
+- Yellow (50–75%)
+- Red (>75%)
+
+### API
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/dashboard/api/subscription` | `GET` | Fetch subscription utilization data. Requires dashboard auth. |
+
+### Caching
+
+Results are cached in-memory for **10 minutes** (more aggressive than the 5-minute Admin API cache) because the upstream endpoint is severely rate-limited (~5 requests per token before permanent 429). On 429 errors, stale cached data is returned transparently.
+
+### Architecture
+
+1. Dashboard frontend calls `GET /dashboard/api/subscription` when the usage dialog opens
+2. Backend iterates through configured projects to find the first one with an OAuth token
+3. Uses the project's `TokenManager` to get a valid access token (auto-refreshes if needed)
+4. Calls `GET https://api.anthropic.com/api/oauth/usage` with OAuth bearer token and `anthropic-beta: oauth-2025-04-20` header
+5. Parses the utilization windows and caches the result for 10 minutes
+6. Frontend renders utilization bars with reset times
+
+Source module: `src/subscription-api.ts`
+
 ## Read/Unread Task Tracking
 
 Completed tasks display a pulsing indicator badge ("✓ Completed" with a green dot) until they are opened. Once a user opens the task detail modal, the task is marked as read.
