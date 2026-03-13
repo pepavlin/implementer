@@ -112,7 +112,30 @@ export async function fetchSubscriptionUsage(
         );
     }
 
-    const raw = (await response.json()) as OAuthUsageResponse;
+    // Validate that the response is actually JSON before parsing.
+    // CDN / proxy layers (e.g. Cloudflare) can return HTML error pages
+    // with a 200 status, which would cause response.json() to throw an
+    // opaque "Unexpected token '<'" SyntaxError.
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("application/json")) {
+        const bodyPreview = await response
+            .text()
+            .then((t) => t.slice(0, 200))
+            .catch(() => "");
+        throw new Error(
+            `Subscription usage API returned non-JSON response (Content-Type: ${contentType || "missing"}).` +
+                (bodyPreview ? ` Body preview: ${bodyPreview}` : "")
+        );
+    }
+
+    let raw: OAuthUsageResponse;
+    try {
+        raw = (await response.json()) as OAuthUsageResponse;
+    } catch {
+        throw new Error(
+            "Subscription usage API returned invalid JSON despite correct Content-Type header."
+        );
+    }
 
     const data: SubscriptionUsage = {
         fiveHour: raw.five_hour
