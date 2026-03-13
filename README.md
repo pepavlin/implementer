@@ -409,22 +409,26 @@ server:
 - **Create new task** — click **+ New Task** to open a form where you select a project, enter a prompt, and optionally link a pull request number
 - **Project filter** — click project cards to filter the task list to one or more projects; click again to deselect; the new-task form pre-selects the currently filtered project
 - **Status filter** — filter tasks by status: All, Running, Queued, Retrying, Completed, Failed, Interrupted
-- **API usage statistics** — click the chart button in the header to view Anthropic API usage and cost data (requires `server.anthropicAdminApiKey`)
+- **API usage statistics & budget** — click the chart button in the header to view Anthropic API usage, cost data, and monthly budget status (requires `server.anthropicAdminApiKey`)
 
-### API Usage Statistics
+### API Usage Statistics & Budget
 
-The dashboard can display your Anthropic API usage and cost data. To enable it, add an Admin API key to your config:
+The dashboard can display your Anthropic API usage, cost data, and monthly budget. To enable it, add an Admin API key to your config:
 
 ```yaml
 server:
     adminPassword: your-secure-password
     anthropicAdminApiKey: sk-ant-admin-your-key-here
+    anthropicMonthlySpendLimitUsd: 100  # optional — your account's monthly limit
 ```
 
 Get an Admin API key from [Claude Console → Settings → Admin Keys](https://console.anthropic.com/settings/admin-keys). Only organization admins can create these keys.
 
+The optional `anthropicMonthlySpendLimitUsd` should match the spend limit from [Claude Console → Settings → Limits](https://console.anthropic.com/settings/limits). The Anthropic API does not expose this value programmatically, so it must be set manually.
+
 Click the chart icon in the dashboard header to open the usage dialog. It shows:
 
+- **Monthly budget** — progress bar showing spent vs. limit with remaining amount (green/yellow/red color coding). Without `anthropicMonthlySpendLimitUsd`, shows current month's spend only.
 - **Token usage by model** — input, output, cache creation, and cache read tokens
 - **Cost breakdown** — per-line-item costs in USD
 - **Period selector** — last 24 hours, 7 days, or 30 days

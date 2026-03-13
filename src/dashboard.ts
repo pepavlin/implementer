@@ -7,7 +7,7 @@ import {
 import { extractLastAssistantMessage } from "./executor.js";
 import type { Config } from "./config/config.js";
 import type { ProjectId, TaskId } from "./types.js";
-import { fetchUsageData } from "./usage-api.js";
+import { fetchUsageData, fetchMonthlyBudget } from "./usage-api.js";
 
 // ── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -1713,9 +1713,40 @@ export function dashboardHtml(hasPassword: boolean): string {
           body.innerHTML='<div class="usage-error">Failed to load usage data: '+escapeHtml(err.message)+'</div>';
         });
     }
+    function renderBudgetSection(b){
+      if(!b)return '';
+      var h='<div class="budget-section">';
+      var monthName=new Date(b.monthStart).toLocaleDateString(undefined,{month:'long',year:'numeric'});
+      h+='<div class="budget-header">Monthly Budget &mdash; '+escapeHtml(monthName)+'</div>';
+      var spentUsd=(b.currentMonthSpendCents/100).toFixed(2);
+      if(b.monthlyLimitUsd!=null){
+        var limitUsd=b.monthlyLimitUsd.toFixed(2);
+        var remainUsd=(b.remainingCents/100).toFixed(2);
+        var pct=Math.min(b.usagePercent,100);
+        var barColor=pct<60?'var(--ok,#22c55e)':pct<85?'var(--warn,#eab308)':'var(--fail,#ef4444)';
+        h+='<div class="budget-bar-wrap">';
+        h+='<div class="budget-bar"><div class="budget-bar-fill" style="width:'+pct.toFixed(1)+'%;background:'+barColor+'"></div></div>';
+        h+='<div class="budget-pct">'+b.usagePercent.toFixed(1)+'%</div>';
+        h+='</div>';
+        h+='<div class="budget-stats">';
+        h+='<div class="budget-stat"><span class="budget-stat-lbl">Spent</span><span class="budget-stat-val">$'+spentUsd+'</span></div>';
+        h+='<div class="budget-stat"><span class="budget-stat-lbl">Limit</span><span class="budget-stat-val">$'+limitUsd+'</span></div>';
+        h+='<div class="budget-stat"><span class="budget-stat-lbl">Remaining</span><span class="budget-stat-val" style="color:'+(b.remainingCents>=0?'var(--ok,#22c55e)':'var(--fail,#ef4444)')+'">$'+remainUsd+'</span></div>';
+        h+='</div>';
+      }else{
+        h+='<div class="budget-stats">';
+        h+='<div class="budget-stat"><span class="budget-stat-lbl">Spent this month</span><span class="budget-stat-val" style="color:var(--ok,#22c55e)">$'+spentUsd+'</span></div>';
+        h+='<div class="budget-stat-hint">Set <code>server.anthropicMonthlySpendLimitUsd</code> in config.yaml to track remaining budget.</div>';
+        h+='</div>';
+      }
+      h+='</div>';
+      return h;
+    }
     function renderUsageData(d){
       var body=document.getElementById('usage-body');
       var h='';
+      // Budget section (always at top)
+      h+=renderBudgetSection(d.budget);
       // Period info
       var start=new Date(d.startingAt).toLocaleDateString();
       var end=new Date(d.endingAt).toLocaleDateString();
@@ -2243,8 +2274,11 @@ export function registerDashboardRoutes(
                 ? req.query.period
                 : "7d";
         try {
-            const data = await fetchUsageData(apiKey, period);
-            res.json(data);
+            const [data, budget] = await Promise.all([
+                fetchUsageData(apiKey, period),
+                fetchMonthlyBudget(apiKey, config.server.anthropicMonthlySpendLimitUsd)
+            ]);
+            res.json({ ...data, budget });
         } catch (err) {
             console.error("Failed to fetch usage data:", err);
             res.status(502).json({

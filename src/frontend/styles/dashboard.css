@@ -345,3 +345,23 @@ select.form-inp option{background:var(--bg-card)}
   .usage-stat-val{font-size:1.1rem}
   .usage-table th,.usage-table td{padding:6px 8px;font-size:.72rem}
 }
+
+/* ── Budget section ──────────────────────────────────────────────────────── */
+.budget-section{background:var(--bg-code);border-radius:10px;padding:16px 20px;margin-bottom:18px;border:1px solid var(--border2)}
+.budget-header{font-size:.78rem;font-weight:600;color:var(--text2);margin-bottom:12px;text-transform:uppercase;letter-spacing:.04em}
+.budget-bar-wrap{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.budget-bar{flex:1;height:10px;background:var(--border2);border-radius:5px;overflow:hidden}
+.budget-bar-fill{height:100%;border-radius:5px;transition:width .5s ease}
+.budget-pct{font-size:.82rem;font-weight:700;color:var(--text);min-width:50px;text-align:right}
+.budget-stats{display:flex;gap:16px;flex-wrap:wrap}
+.budget-stat{display:flex;flex-direction:column;gap:2px;min-width:80px}
+.budget-stat-lbl{font-size:.65rem;color:var(--text3);text-transform:uppercase;letter-spacing:.04em}
+.budget-stat-val{font-size:1.15rem;font-weight:700;font-family:ui-monospace,'SF Mono',monospace}
+.budget-stat-hint{font-size:.72rem;color:var(--text4);line-height:1.5}
+.budget-stat-hint code{background:var(--tag-bg);padding:1px 5px;border-radius:3px;font-family:ui-monospace,'SF Mono',monospace;font-size:.7rem}
+@media(max-width:540px){
+  .budget-section{padding:12px 14px}
+  .budget-stats{gap:10px}
+  .budget-stat-val{font-size:1rem}
+  .budget-pct{font-size:.75rem;min-width:40px}
+}

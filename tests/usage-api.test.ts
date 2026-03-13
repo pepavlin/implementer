@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchUsageData, clearUsageCache, getDateRange } from "../src/usage-api.js";
+import { fetchUsageData, fetchMonthlyBudget, clearUsageCache, getDateRange, getCurrentMonthStart } from "../src/usage-api.js";
 
 describe("usage-api", () => {
     beforeEach(() => {
@@ -360,6 +360,179 @@ describe("usage-api", () => {
 
             await fetchUsageData("sk-ant-admin-test", "7d");
             expect(fetchSpy).toHaveBeenCalledTimes(4);
+        });
+    });
+
+    describe("getCurrentMonthStart", () => {
+        it("returns the first day of the current month in UTC", () => {
+            const result = getCurrentMonthStart();
+            const date = new Date(result);
+            expect(date.getUTCDate()).toBe(1);
+            expect(date.getUTCHours()).toBe(0);
+            expect(date.getUTCMinutes()).toBe(0);
+            expect(date.getUTCSeconds()).toBe(0);
+            // Should be the current month/year
+            const now = new Date();
+            expect(date.getUTCMonth()).toBe(now.getUTCMonth());
+            expect(date.getUTCFullYear()).toBe(now.getUTCFullYear());
+        });
+    });
+
+    describe("fetchMonthlyBudget", () => {
+        it("returns budget with limit when monthlyLimitUsd is provided", async () => {
+            const mockCostResponse = {
+                data: [
+                    { snapshot_at: "2025-01-15T00:00:00Z", amount_cents: "5000.00" },
+                    { snapshot_at: "2025-01-20T00:00:00Z", amount_cents: "3000.00" }
+                ],
+                has_more: false
+            };
+
+            const fetchSpy = vi.spyOn(globalThis, "fetch");
+            fetchSpy.mockImplementation(async () =>
+                new Response(JSON.stringify(mockCostResponse), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" }
+                })
+            );
+
+            const result = await fetchMonthlyBudget("sk-ant-admin-test", 100);
+
+            expect(result.monthlyLimitUsd).toBe(100);
+            expect(result.currentMonthSpendCents).toBe(8000);
+            expect(result.remainingCents).toBe(2000); // 10000 - 8000
+            expect(result.usagePercent).toBeCloseTo(80);
+            expect(result.monthStart).toBeDefined();
+            expect(result.monthEnd).toBeDefined();
+        });
+
+        it("returns budget without limit when monthlyLimitUsd is not provided", async () => {
+            const mockCostResponse = {
+                data: [
+                    { snapshot_at: "2025-01-15T00:00:00Z", amount_cents: "2500.00" }
+                ],
+                has_more: false
+            };
+
+            const fetchSpy = vi.spyOn(globalThis, "fetch");
+            fetchSpy.mockImplementation(async () =>
+                new Response(JSON.stringify(mockCostResponse), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" }
+                })
+            );
+
+            const result = await fetchMonthlyBudget("sk-ant-admin-test");
+
+            expect(result.monthlyLimitUsd).toBeNull();
+            expect(result.currentMonthSpendCents).toBe(2500);
+            expect(result.remainingCents).toBeNull();
+            expect(result.usagePercent).toBeNull();
+        });
+
+        it("handles empty cost data", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch");
+            fetchSpy.mockImplementation(async () =>
+                new Response(JSON.stringify({ data: [], has_more: false }), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" }
+                })
+            );
+
+            const result = await fetchMonthlyBudget("sk-ant-admin-test", 500);
+
+            expect(result.currentMonthSpendCents).toBe(0);
+            expect(result.remainingCents).toBe(50000); // 500 * 100
+            expect(result.usagePercent).toBeCloseTo(0);
+        });
+
+        it("shows negative remaining when over budget", async () => {
+            const mockCostResponse = {
+                data: [
+                    { snapshot_at: "2025-01-15T00:00:00Z", amount_cents: "15000.00" }
+                ],
+                has_more: false
+            };
+
+            const fetchSpy = vi.spyOn(globalThis, "fetch");
+            fetchSpy.mockImplementation(async () =>
+                new Response(JSON.stringify(mockCostResponse), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" }
+                })
+            );
+
+            const result = await fetchMonthlyBudget("sk-ant-admin-test", 100);
+
+            expect(result.currentMonthSpendCents).toBe(15000);
+            expect(result.remainingCents).toBe(-5000); // 10000 - 15000
+            expect(result.usagePercent).toBeCloseTo(150);
+        });
+
+        it("caches budget data", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch");
+            fetchSpy.mockImplementation(async () =>
+                new Response(JSON.stringify({ data: [], has_more: false }), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" }
+                })
+            );
+
+            await fetchMonthlyBudget("sk-ant-admin-test", 100);
+            const callsAfterFirst = fetchSpy.mock.calls.length;
+
+            await fetchMonthlyBudget("sk-ant-admin-test", 100);
+            // Should not make additional API calls (cached)
+            expect(fetchSpy.mock.calls.length).toBe(callsAfterFirst);
+        });
+
+        it("re-applies config limit changes on cached data", async () => {
+            const mockCostResponse = {
+                data: [
+                    { snapshot_at: "2025-01-15T00:00:00Z", amount_cents: "5000.00" }
+                ],
+                has_more: false
+            };
+
+            const fetchSpy = vi.spyOn(globalThis, "fetch");
+            fetchSpy.mockImplementation(async () =>
+                new Response(JSON.stringify(mockCostResponse), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" }
+                })
+            );
+
+            // First call with $100 limit
+            const first = await fetchMonthlyBudget("sk-ant-admin-test", 100);
+            expect(first.monthlyLimitUsd).toBe(100);
+            expect(first.remainingCents).toBe(5000); // 10000 - 5000
+
+            // Second call with $200 limit (should update from cache)
+            const second = await fetchMonthlyBudget("sk-ant-admin-test", 200);
+            expect(second.monthlyLimitUsd).toBe(200);
+            expect(second.remainingCents).toBe(15000); // 20000 - 5000
+            expect(second.currentMonthSpendCents).toBe(5000); // Same spend
+
+            // Should only have fetched once
+            expect(fetchSpy).toHaveBeenCalledTimes(1);
+        });
+
+        it("sends correct date range for current month", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch");
+            fetchSpy.mockImplementation(async () =>
+                new Response(JSON.stringify({ data: [], has_more: false }), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" }
+                })
+            );
+
+            await fetchMonthlyBudget("sk-ant-admin-test");
+
+            const url = new URL(fetchSpy.mock.calls[0][0] as string);
+            const startingAt = url.searchParams.get("starting_at");
+            expect(startingAt).toBeDefined();
+            const startDate = new Date(startingAt!);
+            expect(startDate.getUTCDate()).toBe(1);
         });
     });
 });

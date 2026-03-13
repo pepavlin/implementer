@@ -66,6 +66,22 @@ export interface CostSummary {
     amountCents: number;
 }
 
+/** Monthly budget information for the dashboard. */
+export interface MonthlyBudget {
+    /** Monthly spend limit in USD (from config). Null if not configured. */
+    monthlyLimitUsd: number | null;
+    /** Current calendar month spend in cents (from cost_report). */
+    currentMonthSpendCents: number;
+    /** Remaining budget in cents. Null if limit not configured. */
+    remainingCents: number | null;
+    /** Usage percentage (0-100+). Null if limit not configured. */
+    usagePercent: number | null;
+    /** Start of the current calendar month (ISO string). */
+    monthStart: string;
+    /** Current time (ISO string). */
+    monthEnd: string;
+}
+
 /** Combined usage + cost response for the dashboard API. */
 export interface UsageDashboardData {
     period: string;
@@ -80,6 +96,8 @@ export interface UsageDashboardData {
     totalTokens: number;
     totalCostCents: number;
     fetchedAt: string;
+    /** Monthly budget data (always present when admin API key is configured). */
+    budget?: MonthlyBudget;
 }
 
 // ── Cache ────────────────────────────────────────────────────────────────────
@@ -187,6 +205,80 @@ function getDateRange(period: string): { startingAt: string; endingAt: string } 
     }
 
     return { startingAt: start.toISOString(), endingAt };
+}
+
+/**
+ * Get the start of the current calendar month in UTC.
+ */
+function getCurrentMonthStart(): string {
+    const now = new Date();
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+}
+
+/**
+ * Fetch the current calendar month's total spending from the Anthropic cost_report API.
+ *
+ * @param adminApiKey - Anthropic Admin API key
+ * @param monthlyLimitUsd - Optional monthly spend limit in USD (from config)
+ * @returns MonthlyBudget data
+ */
+export async function fetchMonthlyBudget(
+    adminApiKey: string,
+    monthlyLimitUsd?: number
+): Promise<MonthlyBudget> {
+    const cacheKey = "budget:monthly";
+    const cached = cache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+        // Re-apply the limit from config (may have changed) to cached spend data
+        const budget = (cached.data as unknown as { budget: MonthlyBudget }).budget;
+        const limitCents = monthlyLimitUsd != null ? monthlyLimitUsd * 100 : null;
+        return {
+            ...budget,
+            monthlyLimitUsd: monthlyLimitUsd ?? null,
+            remainingCents: limitCents != null ? limitCents - budget.currentMonthSpendCents : null,
+            usagePercent: limitCents != null && limitCents > 0
+                ? (budget.currentMonthSpendCents / limitCents) * 100
+                : null
+        };
+    }
+
+    const monthStart = getCurrentMonthStart();
+    const now = new Date().toISOString();
+
+    const costData = await fetchAllPages<CostReportResponse>(
+        adminApiKey,
+        "/v1/organizations/cost_report",
+        {
+            starting_at: monthStart,
+            ending_at: now
+        }
+    );
+
+    let totalCents = 0;
+    for (const bucket of costData as CostBucket[]) {
+        totalCents += parseFloat(bucket.amount_cents) || 0;
+    }
+
+    const limitCents = monthlyLimitUsd != null ? monthlyLimitUsd * 100 : null;
+
+    const budget: MonthlyBudget = {
+        monthlyLimitUsd: monthlyLimitUsd ?? null,
+        currentMonthSpendCents: totalCents,
+        remainingCents: limitCents != null ? limitCents - totalCents : null,
+        usagePercent: limitCents != null && limitCents > 0
+            ? (totalCents / limitCents) * 100
+            : null,
+        monthStart,
+        monthEnd: now
+    };
+
+    // Cache using a wrapper object so we can re-apply config changes
+    cache.set(cacheKey, {
+        data: { budget } as unknown as UsageDashboardData,
+        expiresAt: Date.now() + CACHE_TTL_MS
+    });
+
+    return budget;
 }
 
 /**
@@ -329,6 +421,6 @@ export function clearUsageCache(): void {
 }
 
 /**
- * Exported for testing: get date range for a period.
+ * Exported for testing.
  */
-export { getDateRange };
+export { getDateRange, getCurrentMonthStart };

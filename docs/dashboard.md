@@ -107,14 +107,18 @@ Add an Anthropic Admin API key to the server config:
 server:
     adminPassword: your-password
     anthropicAdminApiKey: sk-ant-admin-your-key-here
+    anthropicMonthlySpendLimitUsd: 100  # optional — your monthly spend limit from Claude Console
 ```
 
 Admin API keys are separate from regular API keys and can be provisioned at [Claude Console → Settings → Admin Keys](https://console.anthropic.com/settings/admin-keys). Only organization admins can create these keys.
+
+The optional `anthropicMonthlySpendLimitUsd` field should match the monthly spend limit shown in your [Claude Console → Settings → Limits](https://console.anthropic.com/settings/limits). This value is not available via the API, so it must be set manually. When configured, the usage dialog shows a budget section with a progress bar indicating how much of the monthly limit has been consumed.
 
 ### UI
 
 A chart icon button appears in the dashboard header. Clicking it opens a modal dialog showing:
 
+- **Monthly budget** (at top) — progress bar with spent / limit / remaining. Color-coded: green (<60%), yellow (60-85%), red (>85%). If `anthropicMonthlySpendLimitUsd` is not set, only the current month's spend is shown with a hint to configure the limit.
 - **Summary cards** — total cost, input tokens, output tokens, and cache read tokens
 - **Usage by model** — table with per-model token breakdown (input, output, cache write, cache read, total)
 - **Cost breakdown** — table with per-line-item costs in USD
@@ -138,12 +142,15 @@ The usage data flow:
 
 1. Dashboard frontend calls `GET /dashboard/api/usage?period=7d`
 2. Backend (`src/usage-api.ts`) checks in-memory cache
-3. If cache miss, fetches from two Anthropic endpoints:
+3. If cache miss, fetches from two Anthropic endpoints in parallel:
    - `GET /v1/organizations/usage_report/messages` — token usage grouped by model
    - `GET /v1/organizations/cost_report` — cost breakdown grouped by description
-4. Aggregates data by model and description, computes totals
-5. Caches result for 5 minutes and returns to frontend
-6. Frontend renders summary cards and tables
+4. Simultaneously, fetches current calendar month's cost for budget tracking:
+   - `GET /v1/organizations/cost_report` — with `starting_at` set to the 1st of the current month
+5. Aggregates data by model and description, computes totals
+6. If `anthropicMonthlySpendLimitUsd` is configured, calculates remaining budget and usage percentage
+7. Caches result for 5 minutes and returns to frontend
+8. Frontend renders budget section (with progress bar), summary cards, and tables
 
 ## Read/Unread Task Tracking
 
