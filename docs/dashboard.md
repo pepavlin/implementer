@@ -95,6 +95,56 @@ Click the 🎤 button in the header to toggle Voice Mode. A fixed bottom panel a
 | `voiceCancel()` | Discard transcript and stop recording |
 | `updateVoicePanel()` | Sync UI state (status text, send/cancel button visibility) |
 
+## API Usage Statistics
+
+The dashboard can display organization-level Anthropic API usage and cost data via the [Usage & Cost Admin API](https://platform.claude.com/docs/en/build-with-claude/usage-cost-api).
+
+### Configuration
+
+Add an Anthropic Admin API key to the server config:
+
+```yaml
+server:
+    adminPassword: your-password
+    anthropicAdminApiKey: sk-ant-admin-your-key-here
+```
+
+Admin API keys are separate from regular API keys and can be provisioned at [Claude Console → Settings → Admin Keys](https://console.anthropic.com/settings/admin-keys). Only organization admins can create these keys.
+
+### UI
+
+A chart icon button appears in the dashboard header. Clicking it opens a modal dialog showing:
+
+- **Summary cards** — total cost, input tokens, output tokens, and cache read tokens
+- **Usage by model** — table with per-model token breakdown (input, output, cache write, cache read, total)
+- **Cost breakdown** — table with per-line-item costs in USD
+- **Period selector** — dropdown to switch between last 24 hours, 7 days, or 30 days
+
+If `anthropicAdminApiKey` is not configured, the dialog shows a configuration hint with a link to the Claude Console.
+
+### API
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/dashboard/api/usage?period=7d` | `GET` | Fetch aggregated usage & cost data. `period` can be `24h`, `7d`, or `30d`. |
+
+### Caching
+
+Results are cached in-memory for 5 minutes to avoid excessive Anthropic API calls. The cache is keyed by period, so switching periods fetches fresh data on first access.
+
+### Architecture
+
+The usage data flow:
+
+1. Dashboard frontend calls `GET /dashboard/api/usage?period=7d`
+2. Backend (`src/usage-api.ts`) checks in-memory cache
+3. If cache miss, fetches from two Anthropic endpoints:
+   - `GET /v1/organizations/usage_report/messages` — token usage grouped by model
+   - `GET /v1/organizations/cost_report` — cost breakdown grouped by description
+4. Aggregates data by model and description, computes totals
+5. Caches result for 5 minutes and returns to frontend
+6. Frontend renders summary cards and tables
+
 ## Read/Unread Task Tracking
 
 Completed tasks display a pulsing indicator badge ("✓ Completed" with a green dot) until they are opened. Once a user opens the task detail modal, the task is marked as read.

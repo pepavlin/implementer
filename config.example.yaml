@@ -13,6 +13,10 @@ server:
     # All GitHub webhooks pointing to this URL must use the same secret.
     # Supports ${ENV_VAR} substitution.
     # webhookSecret: ${GITHUB_WEBHOOK_SECRET}
+    # Anthropic Admin API key for usage & cost tracking on the dashboard (optional).
+    # Get it from Claude Console → Settings → Admin Keys.
+    # When set, the dashboard shows a usage statistics button.
+    # anthropicAdminApiKey: ${ANTHROPIC_ADMIN_API_KEY}
 
 # Global defaults merged into every project's claudeCode (optional).
 # systemPrompt is concatenated (global + project); mcpServers are shallow-merged (project overrides global).

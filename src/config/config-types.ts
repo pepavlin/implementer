@@ -25,6 +25,13 @@ export interface ServerConfig {
      * the same secret.
      */
     webhookSecret?: string;
+    /**
+     * Anthropic Admin API key (starts with `sk-ant-admin...`) for fetching organization
+     * usage and cost statistics. When set, the dashboard shows a "Usage" button that
+     * opens a dialog with token consumption and cost breakdowns by model.
+     * Get it from Claude Console → Settings → Admin Keys.
+     */
+    anthropicAdminApiKey?: string;
 }
 
 export interface RepositoryConfig {
@@ -134,7 +141,8 @@ const ServerSchema = z
         metaCpus: z.number().positive().default(0.4),
         sandboxCpus: z.number().positive().default(0.4),
         startingTimeoutSeconds: z.number().int().min(30).default(300),
-        webhookSecret: z.string().min(1).optional()
+        webhookSecret: z.string().min(1).optional(),
+        anthropicAdminApiKey: z.string().min(1).optional()
     })
     .strict();
 
