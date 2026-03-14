@@ -145,7 +145,7 @@ export function createServer(
             });
             res.status(200).json({
                 taskId: task.id,
-                branch: task.branch,
+                branch: task.branch?.name ?? null,
                 status: task.data.status,
                 parentTaskId: task.data.parentTaskId ?? null,
                 chainId: task.data.chainId ?? null
@@ -177,7 +177,7 @@ export function createServer(
             )
             .map((task) => ({
                 taskId: task.id,
-                branch: task.branch,
+                branch: task.branch?.name ?? null,
                 prompt: task.data.prompt,
                 title: task.title ?? null,
                 parentTaskId: task.data.parentTaskId ?? null,
@@ -199,7 +199,7 @@ export function createServer(
             throw new NotFoundError("Task not found");
         res.json({
             taskId: task.id,
-            branch: task.branch,
+            branch: task.branch?.name ?? null,
             prompt: task.data.prompt,
             title: task.title ?? null,
             parentTaskId: task.data.parentTaskId ?? null,
@@ -237,7 +237,7 @@ export function createServer(
             );
             res.json({
                 taskId: cancelled.id,
-                branch: cancelled.branch,
+                branch: cancelled.branch?.name ?? null,
                 status: cancelled.data.status
             });
         })
@@ -255,7 +255,7 @@ export function createServer(
             const retried = taskManager.retryTask(projectId, taskId);
             res.json({
                 taskId: retried.id,
-                branch: retried.branch,
+                branch: retried.branch?.name ?? null,
                 status: retried.data.status
             });
         })

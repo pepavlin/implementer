@@ -203,7 +203,7 @@ describe("server", () => {
                 .expect(200);
 
             expect(res.body.taskId).toBe("abc123");
-            expect(res.body.branch).toBeUndefined();
+            expect(res.body.branch).toBeNull();
             expect(res.body.status).toBe("queued");
         });
 
@@ -727,7 +727,7 @@ describe("server", () => {
                 .post("/task/abc123/retry")
                 .expect(200);
             expect(res.body.taskId).toBe("abc123");
-            expect(res.body.branch.name).toBe("impl/test-branch-abc123");
+            expect(res.body.branch).toBe("impl/test-branch-abc123");
             expect(res.body.status).toBe("running");
         });
 
