@@ -193,6 +193,39 @@ export class TaskManager {
         });
     }
 
+    /**
+     * List tasks across ALL projects that are associated with the given repository URL.
+     * A task matches if:
+     * 1. Its project has the repo URL in its configured repositories, OR
+     * 2. The task was created with this repoUrl (dynamic task)
+     */
+    listTasksByRepoUrl(repoUrl: string): Task[] {
+        const normalized = repoUrl.replace(/\.git$/, "").toLowerCase();
+
+        // Find all project IDs that have this repo in their config
+        const matchingProjectIds = new Set<ProjectId>();
+        for (const [projectId, project] of Object.entries(this.config.projects)) {
+            const hasRepo = project.data.repositories.some((repo) => {
+                const repoNorm = repo.url.replace(/\.git$/, "").toLowerCase();
+                return repoNorm === normalized;
+            });
+            if (hasRepo) {
+                matchingProjectIds.add(projectId as ProjectId);
+            }
+        }
+
+        return Array.from(this.tasks.values()).filter((task) => {
+            // Match by project's configured repositories
+            if (matchingProjectIds.has(task.data.projectId)) return true;
+            // Match by task's dynamic repoUrl
+            if (task.data.repoUrl) {
+                const taskRepoNorm = task.data.repoUrl.replace(/\.git$/, "").toLowerCase();
+                return taskRepoNorm === normalized;
+            }
+            return false;
+        });
+    }
+
     /** Returns all tasks across all projects, sorted by createdAt descending. */
     listAllTasks(): Task[] {
         return Array.from(this.tasks.values()).sort(

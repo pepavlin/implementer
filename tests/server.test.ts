@@ -92,6 +92,7 @@ function makeMockTaskManager(overrides: Partial<TaskManager> = {}) {
         resume: vi.fn(),
         setTaskPriority: vi.fn(),
         markTaskRead: vi.fn(),
+        listTasksByRepoUrl: vi.fn().mockReturnValue([]),
         ...overrides
     } as unknown as TaskManager;
 }
@@ -463,6 +464,58 @@ describe("server", () => {
                 expect.any(String),
                 { chainId: "rootABC" }
             );
+        });
+
+        it("uses listTasksByRepoUrl when repoUrl query is provided", async () => {
+            const task = makeMockTask({
+                status: "completed",
+                completedAt: "2025-01-01T01:00:00.000Z",
+                repoUrl: "https://github.com/org/repo"
+            });
+            const listTasksByRepoUrl = vi.fn().mockReturnValue([task]);
+            const listTasks = vi.fn().mockReturnValue([]);
+            const tm = makeMockTaskManager({ listTasksByRepoUrl, listTasks });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app)
+                .get("/tasks?repoUrl=https://github.com/org/repo")
+                .expect(200);
+
+            expect(listTasksByRepoUrl).toHaveBeenCalledWith("https://github.com/org/repo");
+            expect(listTasks).not.toHaveBeenCalled();
+            expect(res.body.tasks).toHaveLength(1);
+            expect(res.body.tasks[0].taskId).toBe("abc123");
+        });
+
+        it("combines repoUrl with status filter", async () => {
+            const running = makeMockTask({ taskId: "t1", status: "running" });
+            const completed = makeMockTask({
+                taskId: "t2",
+                status: "completed",
+                completedAt: "2025-01-01T01:00:00.000Z"
+            });
+            const listTasksByRepoUrl = vi.fn().mockReturnValue([running, completed]);
+            const tm = makeMockTaskManager({ listTasksByRepoUrl });
+            const app = createServer(tm, makeConfig());
+
+            const res = await request(app)
+                .get("/tasks?repoUrl=https://github.com/org/repo&status=running")
+                .expect(200);
+
+            expect(res.body.tasks).toHaveLength(1);
+            expect(res.body.tasks[0].taskId).toBe("t1");
+        });
+
+        it("uses listTasks when repoUrl is not provided", async () => {
+            const listTasks = vi.fn().mockReturnValue([]);
+            const listTasksByRepoUrl = vi.fn().mockReturnValue([]);
+            const tm = makeMockTaskManager({ listTasks, listTasksByRepoUrl });
+            const app = createServer(tm, makeConfig());
+
+            await request(app).get("/tasks").expect(200);
+
+            expect(listTasks).toHaveBeenCalled();
+            expect(listTasksByRepoUrl).not.toHaveBeenCalled();
         });
     });
 

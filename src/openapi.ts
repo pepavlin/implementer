@@ -250,6 +250,16 @@ export const openApiSpec = {
                         description:
                             "Filter tasks by chain ID (root task ID). Returns only tasks belonging to the specified chain.",
                         schema: { type: "string" }
+                    },
+                    {
+                        name: "repoUrl",
+                        in: "query",
+                        required: false,
+                        description:
+                            "Filter tasks by repository URL. Returns tasks from all projects that have this repo configured, " +
+                            "plus any dynamic tasks created with this repoUrl. Overrides project-scoped filtering.",
+                        schema: { type: "string" },
+                        example: "https://github.com/org/repo"
                     }
                 ],
                 responses: {

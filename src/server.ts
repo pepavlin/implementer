@@ -51,7 +51,8 @@ const TaskStatusEnum = z.enum(TASK_STATUSES);
 
 const TaskListQuerySchema = z.object({
     status: z.union([TaskStatusEnum, z.array(TaskStatusEnum)]).optional(),
-    chainId: z.string().optional()
+    chainId: z.string().optional(),
+    repoUrl: z.string().optional()
 });
 
 const MAX_LOG_SIZE = 1024 * 1024; // 1MB
@@ -166,8 +167,11 @@ export function createServer(
               )
             : null;
         const chainId = parsed.data.chainId as ChainId | undefined;
-        const tasks = taskManager
-            .listTasks(getProjectId(res), chainId ? { chainId } : undefined)
+        const repoUrl = parsed.data.repoUrl;
+        const baseTasks = repoUrl
+            ? taskManager.listTasksByRepoUrl(repoUrl)
+            : taskManager.listTasks(getProjectId(res), chainId ? { chainId } : undefined);
+        const tasks = baseTasks
             .filter(
                 (task) => !statusFilter || statusFilter.has(task.data.status)
             )

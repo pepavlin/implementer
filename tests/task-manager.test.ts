@@ -2302,4 +2302,137 @@ describe("TaskManager - waiting_for_pipeline chain blocking", () => {
     // pullRequests are preserved — the PR still exists and is valid
     expect(result.data.pullRequests).toHaveLength(1);
   });
+
+  describe("listTasksByRepoUrl", () => {
+    it("returns tasks from projects with matching configured repo", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const store = new TaskStore(makeConfig().server.workspaceDir);
+      store.save(makePersistedTask({
+        taskId: "t-repo1",
+        status: "completed",
+        completedAt: new Date().toISOString()
+      }));
+
+      const tm = new TaskManager(makeConfig());
+      await tm.init();
+
+      // The default config has repo url "https://github.com/test/repo.git"
+      const tasks = tm.listTasksByRepoUrl("https://github.com/test/repo.git");
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].id).toBe("t-repo1");
+    });
+
+    it("normalizes .git suffix when matching", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const store = new TaskStore(makeConfig().server.workspaceDir);
+      store.save(makePersistedTask({
+        taskId: "t-repo2",
+        status: "completed",
+        completedAt: new Date().toISOString()
+      }));
+
+      const tm = new TaskManager(makeConfig());
+      await tm.init();
+
+      // Query without .git suffix should still match
+      const tasks = tm.listTasksByRepoUrl("https://github.com/test/repo");
+      expect(tasks).toHaveLength(1);
+    });
+
+    it("matches case-insensitively", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const store = new TaskStore(makeConfig().server.workspaceDir);
+      store.save(makePersistedTask({
+        taskId: "t-repo3",
+        status: "completed",
+        completedAt: new Date().toISOString()
+      }));
+
+      const tm = new TaskManager(makeConfig());
+      await tm.init();
+
+      const tasks = tm.listTasksByRepoUrl("https://GitHub.com/Test/Repo.git");
+      expect(tasks).toHaveLength(1);
+    });
+
+    it("returns tasks with matching dynamic repoUrl", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig({
+        projects: {
+          "template-project": {
+            repositories: [],
+            claudeCode: { command: "claude" },
+          },
+        },
+      });
+      const store = new TaskStore(config.server.workspaceDir);
+      store.save(makePersistedTask({
+        taskId: "t-dynamic",
+        projectId: "template-project",
+        status: "completed",
+        completedAt: new Date().toISOString(),
+        repoUrl: "https://github.com/org/dynamic-repo.git",
+      }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      const tasks = tm.listTasksByRepoUrl("https://github.com/org/dynamic-repo");
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].id).toBe("t-dynamic");
+    });
+
+    it("returns empty array when no repos match", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const store = new TaskStore(makeConfig().server.workspaceDir);
+      store.save(makePersistedTask({
+        taskId: "t-nomatch",
+        status: "completed",
+        completedAt: new Date().toISOString()
+      }));
+
+      const tm = new TaskManager(makeConfig());
+      await tm.init();
+
+      const tasks = tm.listTasksByRepoUrl("https://github.com/other/repo");
+      expect(tasks).toHaveLength(0);
+    });
+
+    it("returns tasks from multiple projects with the same repo", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const config = makeConfig({
+        projects: {
+          "project-a": {
+            repositories: [{ name: "shared", url: "https://github.com/org/shared.git", defaultBranch: "main" }],
+            claudeCode: { command: "claude" },
+          },
+          "project-b": {
+            repositories: [{ name: "shared", url: "https://github.com/org/shared.git", defaultBranch: "main" }],
+            claudeCode: { command: "claude" },
+          },
+        },
+      });
+      const store = new TaskStore(config.server.workspaceDir);
+      store.save(makePersistedTask({
+        taskId: "t-a",
+        projectId: "project-a",
+        status: "completed",
+        completedAt: new Date().toISOString()
+      }));
+      store.save(makePersistedTask({
+        taskId: "t-b",
+        projectId: "project-b",
+        status: "completed",
+        completedAt: new Date().toISOString()
+      }));
+
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      const tasks = tm.listTasksByRepoUrl("https://github.com/org/shared");
+      expect(tasks).toHaveLength(2);
+      const ids = tasks.map((t: any) => t.id).sort();
+      expect(ids).toEqual(["t-a", "t-b"]);
+    });
+  });
 });
