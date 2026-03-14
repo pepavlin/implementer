@@ -158,6 +158,7 @@ export class Task {
         // Ensure final state is persisted (doRun's finally/catch might have saved too,
         // but we need to guarantee cancelled status is on disk)
         this.tickUpdate();
+        this.sendCallback();
     }
 
     isActive(): boolean {
@@ -228,6 +229,7 @@ export class Task {
             this.data.completedAt = new Date().toISOString();
         }
         this.tickUpdate();
+        this.sendCallback();
     }
 
     /**
@@ -258,6 +260,7 @@ export class Task {
         }
         console.log(`[${this.id}] Pipeline checks passed — task completed.`);
         this.tickUpdate();
+        this.sendCallback();
     }
 
     /**
@@ -272,6 +275,7 @@ export class Task {
         }
         console.log(`[${this.id}] Pipeline check failed — task failed: ${error}`);
         this.tickUpdate();
+        this.sendCallback();
     }
     /**
      * Mark the task as failed. If errorRetry is configured and attempts remain,
@@ -297,6 +301,10 @@ export class Task {
         }
         this.dequeue();
         this.tickUpdate();
+        // Only send callback on terminal failure, not when retrying
+        if (this.data.status === "failed") {
+            this.sendCallback();
+        }
     }
 
     canBeStarted(): boolean {
@@ -454,6 +462,46 @@ export class Task {
                 console.error(`[${this.id}] Run failed:`, msg);
             }
         }
+    }
+
+    /**
+     * Send an HTTP POST to the task's callbackUrl (if configured) with the current task state.
+     * Fire-and-forget — errors are logged but do not affect the task.
+     */
+    private sendCallback(): void {
+        const url = this.data.callbackUrl;
+        if (!url) return;
+
+        const payload = {
+            taskId: this.id,
+            status: this.data.status,
+            branch: this.branch?.name ?? null,
+            title: this.title ?? null,
+            prompt: this.data.prompt,
+            error: this.data.error ?? null,
+            pullRequests: this.data.pullRequests ?? null,
+            completedAt: this.data.completedAt ?? null,
+        };
+
+        fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(10_000),
+        })
+            .then((res) => {
+                if (!res.ok) {
+                    console.warn(
+                        `[${this.id}] Callback to ${url} returned ${res.status}`
+                    );
+                }
+            })
+            .catch((err) => {
+                console.error(
+                    `[${this.id}] Callback to ${url} failed:`,
+                    err instanceof Error ? err.message : String(err)
+                );
+            });
     }
 
     tickUpdate() {
