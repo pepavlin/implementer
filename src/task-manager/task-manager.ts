@@ -346,7 +346,9 @@ export class TaskManager {
             const fixTask = this.createNewTask(task.data.projectId, {
                 prompt: fixPrompt,
                 continueTaskId: tipId,
-                priority: task.data.priority
+                priority: task.data.priority,
+                repoUrl: task.data.repoUrl,
+                githubToken: task.data.githubToken
             });
             // Track how many pipeline retries have been used (based on the
             // failing task's counter, not the tip's, to honour retryCount correctly).

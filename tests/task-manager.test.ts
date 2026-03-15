@@ -2093,6 +2093,39 @@ describe("TaskManager - handlePipelineFailure", () => {
     expect(fixTask?.data.pipelineRetryAttempt).toBe(1);
   });
 
+  it("forwards githubToken from failing task to pipeline-fix task", async () => {
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
+    const { Executor } = await import("../src/executor.js");
+    const config = makePipelineConfig(2);
+    const store = new TaskStore(TMP);
+    store.save(makePersistedTask({
+      taskId: "pipe-token-task",
+      status: "waiting_for_pipeline",
+      completedAt: null,
+      pipelineRetryAttempt: 0,
+      branch: "fix-token-test",
+      pullRequests: [{ url: "https://github.com/test/repo/pull/99", state: "open", createdAt: new Date().toISOString() }],
+      githubToken: "ghp_dynamic_token_123",
+    }));
+
+    const tm = new TaskManager(config);
+    vi.spyOn(Executor.prototype, "generateTaskMetadata").mockReturnValue(new Promise(() => {}));
+    const project = tm.config.projects[PROJECT_ID as any];
+    project.initialize();
+    vi.spyOn(project, "initialize").mockImplementation(() => {});
+    vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+    await tm.init();
+
+    tm.handlePipelineFailure("pipe-token-task", "Pipeline check failed: ci");
+
+    const fixTask = tm.listAllTasks().find(
+      (t) => t.id !== ("pipe-token-task" as any) && t.data.parentTaskId === "pipe-token-task"
+    );
+    expect(fixTask).toBeDefined();
+    expect(fixTask?.data.githubToken).toBe("ghp_dynamic_token_123");
+  });
+
   it("creates fix task from chain tip when failing task has descendants (post-manual-retry)", async () => {
     // Reproduces the bug where a user manually retries a parent task after it had a
     // pipeline failure (which created a child fix task). When the parent again fails
