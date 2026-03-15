@@ -437,6 +437,16 @@ export class TaskManager {
             parentTaskId = tipId;
             chainId = referenceTask.data.chainId;
             inheritedBranch = tipTask.branch.name;
+
+            // Inherit dynamic repo fields from the chain tip when not
+            // explicitly provided in the request, so continuation tasks
+            // keep working with the same repository and credentials.
+            if (!repoUrl && tipTask.data.repoUrl) {
+                repoUrl = tipTask.data.repoUrl;
+            }
+            if (!githubToken && tipTask.data.githubToken) {
+                githubToken = tipTask.data.githubToken;
+            }
         }
 
         const task = new Task(

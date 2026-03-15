@@ -11,6 +11,7 @@ services:
             - "${PORT:-3000}:${PORT:-3000}"
         volumes:
             - /var/run/docker.sock:/var/run/docker.sock
+            - ./config.yaml:/app/config.yaml
             - workspace:/app/workspace
         environment:
             - WORKSPACE_VOLUME=${INSTANCE_NAME:-implementer}_workspace

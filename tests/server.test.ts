@@ -1863,4 +1863,120 @@ describe("server", () => {
             expect(res.text).toContain("var(--text)");
         });
     });
+
+    describe("GET /dashboard/api/config", () => {
+        it("returns 401 when not authenticated", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            await request(app).get("/dashboard/api/config").expect(401);
+        });
+
+        it("returns config file content as text/yaml", async () => {
+            const { writeFileSync, mkdirSync, rmSync } = await import("node:fs");
+            const tmpDir = "/tmp/server-config-test-read";
+            rmSync(tmpDir, { recursive: true, force: true });
+            mkdirSync(tmpDir, { recursive: true });
+            const configContent = "server:\n  workspaceDir: ./workspace\nprojects: {}\n";
+            const configPath = `${tmpDir}/config.yaml`;
+            writeFileSync(configPath, configContent);
+            const config = { ...makeConfigWithAdmin(), configPath } as Config;
+            const app = createServer(makeMockTaskManager(), config);
+            const cookie = await getAdminCookie(app);
+            const res = await request(app)
+                .get("/dashboard/api/config")
+                .set("Cookie", cookie)
+                .expect(200);
+            expect(res.headers["content-type"]).toContain("text/yaml");
+            expect(res.text).toBe(configContent);
+            rmSync(tmpDir, { recursive: true, force: true });
+        });
+    });
+
+    describe("PUT /dashboard/api/config", () => {
+        it("returns 401 when not authenticated", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            await request(app)
+                .put("/dashboard/api/config")
+                .set("Content-Type", "text/yaml")
+                .send("server:\n  workspaceDir: ./workspace\n")
+                .expect(401);
+        });
+
+        it("rejects invalid YAML syntax", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app)
+                .put("/dashboard/api/config")
+                .set("Content-Type", "text/yaml")
+                .set("Cookie", cookie)
+                .send("server:\n  workspaceDir: [invalid")
+                .expect(400);
+            expect(res.body.error).toContain("Invalid YAML syntax");
+        });
+
+        it("rejects config that fails schema validation", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app)
+                .put("/dashboard/api/config")
+                .set("Content-Type", "text/yaml")
+                .set("Cookie", cookie)
+                .send("foo: bar\n")
+                .expect(400);
+            expect(res.body.error).toContain("Config validation failed");
+        });
+
+        it("saves valid config and returns ok", async () => {
+            const { writeFileSync, readFileSync, mkdirSync, rmSync } = await import("node:fs");
+            const tmpDir = "/tmp/server-config-test-write";
+            rmSync(tmpDir, { recursive: true, force: true });
+            mkdirSync(tmpDir, { recursive: true });
+            const configPath = `${tmpDir}/config.yaml`;
+            writeFileSync(configPath, "");
+            const config = { ...makeConfigWithAdmin(), configPath } as Config;
+            const app = createServer(makeMockTaskManager(), config);
+            const cookie = await getAdminCookie(app);
+            const validYaml = [
+                "server:",
+                "  workspaceDir: ./workspace",
+                "projects:",
+                "  myproject:",
+                "    repositories:",
+                "      - name: repo",
+                "        url: https://github.com/org/repo.git",
+                "        defaultBranch: main",
+                "    claudeCode:",
+                "      command: claude",
+                ""
+            ].join("\n");
+            const res = await request(app)
+                .put("/dashboard/api/config")
+                .set("Content-Type", "text/yaml")
+                .set("Cookie", cookie)
+                .send(validYaml)
+                .expect(200);
+            expect(res.body.ok).toBe(true);
+            const written = readFileSync(configPath, "utf-8");
+            expect(written).toBe(validYaml);
+            rmSync(tmpDir, { recursive: true, force: true });
+        });
+    });
+
+    describe("POST /dashboard/api/restart", () => {
+        it("returns 401 when not authenticated", async () => {
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            await request(app).post("/dashboard/api/restart").expect(401);
+        });
+
+        it("returns ok when authenticated", async () => {
+            const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+            const app = createServer(makeMockTaskManager(), makeConfigWithAdmin());
+            const cookie = await getAdminCookie(app);
+            const res = await request(app)
+                .post("/dashboard/api/restart")
+                .set("Cookie", cookie)
+                .expect(200);
+            expect(res.body.ok).toBe(true);
+            vi.restoreAllMocks();
+        });
+    });
 });

@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 import type express from "express";
+import yaml from "js-yaml";
 import {
     TaskManager,
     TaskActiveError
 } from "./task-manager/task-manager.js";
 import { extractLastAssistantMessage } from "./executor.js";
 import type { Config } from "./config/config.js";
+import { ConfigSchema } from "./config/config-types.js";
 import type { ProjectId, TaskId } from "./types.js";
 import { fetchSubscriptionUsage } from "./subscription-api.js";
 
@@ -783,6 +786,7 @@ export function dashboardHtml(hasPassword: boolean): string {
     <div class="header-actions" style="display:flex;align-items:center;gap:12px">
       <button class="btn-new" onclick="openNewTask()">+ New Task</button>
       <button class="btn-pause" id="pause-btn" onclick="togglePause()" title="Pause/resume queue processing">&#x23F8; Pause</button>
+      <button class="theme-btn" id="settings-btn" onclick="openSettings()" title="Settings">&#x2699;</button>
       <button class="theme-btn" id="usage-btn" onclick="openUsageDialog()" title="Subscription Limits">&#x1F4CA;</button>
       <button class="theme-btn" id="voice-btn" onclick="toggleVoiceMode()" title="Voice Mode">&#x1F3A4;</button>
       <button class="theme-btn" id="fullscreen-btn" onclick="toggleFullscreen()" title="Enter fullscreen">&#x26F6;</button>
@@ -863,6 +867,26 @@ export function dashboardHtml(hasPassword: boolean): string {
       </div>
       <div class="modal-bd" id="sub-container">
         <div class="sub-loading">Loading subscription data&hellip;</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settings-overlay" class="overlay" style="display:none" onclick="if(event.target===this)closeSettings()">
+    <div class="modal" style="max-width:800px">
+      <div class="modal-hd">
+        <span class="modal-ttl">Settings &mdash; config.yaml</span>
+        <button class="modal-x" onclick="closeSettings()">&times;</button>
+      </div>
+      <div class="modal-bd" style="padding:12px 20px">
+        <div id="settings-error" style="display:none;background:var(--b-fail-bg);color:var(--b-fail-fg);padding:10px 14px;border-radius:8px;margin-bottom:10px;font-size:.82rem;white-space:pre-wrap"></div>
+        <div id="settings-success" style="display:none;background:var(--b-done-bg);color:var(--b-done-fg);padding:10px 14px;border-radius:8px;margin-bottom:10px;font-size:.82rem"></div>
+        <textarea id="settings-editor" spellcheck="false" style="width:100%;height:60vh;font-family:ui-monospace,'SF Mono','Cascadia Code',monospace;font-size:.82rem;line-height:1.5;background:var(--bg-code);color:var(--text-code);border:1px solid var(--border2);border-radius:8px;padding:12px;resize:vertical;tab-size:2;white-space:pre;overflow-wrap:normal;overflow-x:auto"></textarea>
+      </div>
+      <div class="modal-ft">
+        <button class="btn btn-sec" onclick="closeSettings()">Cancel</button>
+        <button class="btn btn-pri" id="settings-save" onclick="saveConfig(false)">Save</button>
+        <button class="btn" id="settings-restart" onclick="saveConfig(true)" style="background:#f59e0b;color:#000;font-weight:600">Save &amp; Restart</button>
       </div>
     </div>
   </div>
@@ -1752,6 +1776,63 @@ export function dashboardHtml(hasPassword: boolean): string {
       h+='</div>';
       return h;
     }
+    /* ── Settings dialog ─────────────────────────────────────────────── */
+    function openSettings(){
+      document.getElementById('settings-overlay').style.display='';
+      document.getElementById('settings-error').style.display='none';
+      document.getElementById('settings-success').style.display='none';
+      document.getElementById('settings-editor').value='Loading\u2026';
+      document.getElementById('settings-save').disabled=true;
+      document.getElementById('settings-restart').disabled=true;
+      fetch('/dashboard/api/config').then(function(r){
+        if(!r.ok)throw new Error('Failed to load config (HTTP '+r.status+')');
+        return r.text();
+      }).then(function(txt){
+        document.getElementById('settings-editor').value=txt;
+        document.getElementById('settings-save').disabled=false;
+        document.getElementById('settings-restart').disabled=false;
+      }).catch(function(err){
+        document.getElementById('settings-editor').value='';
+        document.getElementById('settings-error').textContent=err.message;
+        document.getElementById('settings-error').style.display='';
+      });
+    }
+    function closeSettings(){
+      document.getElementById('settings-overlay').style.display='none';
+    }
+    function saveConfig(restart){
+      var errEl=document.getElementById('settings-error');
+      var okEl=document.getElementById('settings-success');
+      errEl.style.display='none';
+      okEl.style.display='none';
+      var body=document.getElementById('settings-editor').value;
+      document.getElementById('settings-save').disabled=true;
+      document.getElementById('settings-restart').disabled=true;
+      fetch('/dashboard/api/config',{method:'PUT',headers:{'Content-Type':'text/yaml'},body:body})
+        .then(function(r){return r.json().then(function(d){return{ok:r.ok,data:d}});})
+        .then(function(res){
+          document.getElementById('settings-save').disabled=false;
+          document.getElementById('settings-restart').disabled=false;
+          if(!res.ok){
+            errEl.textContent=res.data.error||'Validation failed';
+            errEl.style.display='';
+            return;
+          }
+          if(restart){
+            okEl.textContent='Config saved. Restarting server\u2026';
+            okEl.style.display='';
+            fetch('/dashboard/api/restart',{method:'POST'}).catch(function(){});
+          }else{
+            okEl.textContent='Config saved successfully. Changes will take effect after restart.';
+            okEl.style.display='';
+          }
+        }).catch(function(err){
+          document.getElementById('settings-save').disabled=false;
+          document.getElementById('settings-restart').disabled=false;
+          errEl.textContent=err.message;
+          errEl.style.display='';
+        });
+    }
     ${VOICE_MODE_JS}
     ${THEME_TOGGLE_JS}
   </script>
@@ -2308,5 +2389,101 @@ export function registerDashboardRoutes(
                 r.reason instanceof Error ? r.reason.message : "Unknown error"
             );
         res.json({ succeeded, failed: errors.length, errors });
+    });
+
+    // GET /dashboard/api/config — read config.yaml as raw text
+    app.get("/dashboard/api/config", (req, res) => {
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        try {
+            const content = readFileSync(config.configPath, "utf-8");
+            res.setHeader("Content-Type", "text/yaml; charset=utf-8");
+            res.send(content);
+        } catch (err) {
+            res.status(500).json({
+                error: `Failed to read config: ${err instanceof Error ? err.message : String(err)}`
+            });
+        }
+    });
+
+    // PUT /dashboard/api/config — validate and write config.yaml
+    app.put("/dashboard/api/config", (req, res) => {
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+
+        // Read raw body as text (Content-Type: text/yaml)
+        let rawYaml: string;
+        if (typeof req.body === "string") {
+            rawYaml = req.body;
+        } else if (Buffer.isBuffer(req.body)) {
+            rawYaml = req.body.toString("utf-8");
+        } else {
+            res.status(400).json({ error: "Expected raw YAML text in request body" });
+            return;
+        }
+
+        // Validate YAML syntax
+        let parsed: unknown;
+        try {
+            parsed = yaml.load(rawYaml);
+        } catch (yamlErr) {
+            res.status(400).json({
+                error: `Invalid YAML syntax: ${yamlErr instanceof Error ? yamlErr.message : String(yamlErr)}`
+            });
+            return;
+        }
+
+        // Validate against config schema
+        try {
+            ConfigSchema.parse(parsed);
+        } catch (zodErr: any) {
+            const issues = zodErr.issues
+                ? zodErr.issues.map((i: any) => `${i.path.join(".")}: ${i.message}`).join("\n")
+                : String(zodErr);
+            res.status(400).json({ error: `Config validation failed:\n${issues}` });
+            return;
+        }
+
+        // Write to disk
+        try {
+            writeFileSync(config.configPath, rawYaml, "utf-8");
+        } catch (err) {
+            res.status(500).json({
+                error: `Failed to write config: ${err instanceof Error ? err.message : String(err)}`
+            });
+            return;
+        }
+
+        res.json({ ok: true });
+    });
+
+    // POST /dashboard/api/restart — graceful process restart
+    app.post("/dashboard/api/restart", (req, res) => {
+        if (!adminPassword) {
+            res.status(404).send("Not Found");
+            return;
+        }
+        if (!isDashboardAuthenticated(req, adminPassword)) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        res.json({ ok: true, message: "Restarting..." });
+        // Delay exit slightly so the response is sent
+        setTimeout(() => {
+            console.log("[dashboard] Restart requested via admin dashboard — exiting process.");
+            process.exit(0);
+        }, 500);
     });
 }

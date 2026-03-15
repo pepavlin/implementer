@@ -85,6 +85,7 @@ export function createServer(
         })
     );
     app.use(express.urlencoded({ extended: false }));
+    app.use(express.text({ type: "text/yaml" }));
 
     // 1. Server swagger ui
     app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
