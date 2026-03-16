@@ -881,7 +881,13 @@ export function dashboardHtml(hasPassword: boolean): string {
       <div class="modal-bd" style="padding:12px 20px">
         <div id="settings-error" style="display:none;background:var(--b-fail-bg);color:var(--b-fail-fg);padding:10px 14px;border-radius:8px;margin-bottom:10px;font-size:.82rem;white-space:pre-wrap"></div>
         <div id="settings-success" style="display:none;background:var(--b-done-bg);color:var(--b-done-fg);padding:10px 14px;border-radius:8px;margin-bottom:10px;font-size:.82rem"></div>
-        <textarea id="settings-editor" spellcheck="false" style="width:100%;height:60vh;font-family:ui-monospace,'SF Mono','Cascadia Code',monospace;font-size:.82rem;line-height:1.5;background:var(--bg-code);color:var(--text-code);border:1px solid var(--border2);border-radius:8px;padding:12px;resize:vertical;tab-size:2;white-space:pre;overflow-wrap:normal;overflow-x:auto"></textarea>
+        <div class="cfg-editor-wrap">
+          <div class="cfg-line-nums" id="settings-line-nums"></div>
+          <div class="cfg-editor-inner">
+            <pre class="cfg-highlight" id="settings-highlight" aria-hidden="true"></pre>
+            <textarea id="settings-editor" class="cfg-textarea" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+          </div>
+        </div>
       </div>
       <div class="modal-ft">
         <button class="btn btn-sec" onclick="closeSettings()">Cancel</button>
@@ -1833,6 +1839,114 @@ export function dashboardHtml(hasPassword: boolean): string {
           errEl.style.display='';
         });
     }
+
+    /* ── Config editor: Tab support, line numbers, syntax highlighting ── */
+    (function(){
+      var ta=document.getElementById('settings-editor');
+      var lnEl=document.getElementById('settings-line-nums');
+      var hlEl=document.getElementById('settings-highlight');
+      var wrap=ta.parentNode;
+
+      /* Tab / Shift+Tab */
+      ta.addEventListener('keydown',function(e){
+        if(e.key==='Tab'){
+          e.preventDefault();
+          var start=ta.selectionStart,end=ta.selectionEnd,val=ta.value;
+          if(!e.shiftKey){
+            /* insert 2 spaces */
+            ta.value=val.substring(0,start)+'  '+val.substring(end);
+            ta.selectionStart=ta.selectionEnd=start+2;
+          }else{
+            /* unindent: remove up to 2 leading spaces on current line */
+            var lineStart=val.lastIndexOf('\\n',start-1)+1;
+            var removed=0;
+            if(val[lineStart]===' '){removed++;if(val[lineStart+1]===' ')removed++;}
+            if(removed){
+              ta.value=val.substring(0,lineStart)+val.substring(lineStart+removed);
+              ta.selectionStart=Math.max(lineStart,start-removed);
+              ta.selectionEnd=Math.max(lineStart,end-removed);
+            }
+          }
+          ta.dispatchEvent(new Event('input'));
+        }
+      });
+
+      /* Sync scroll between textarea and highlight/line-nums */
+      ta.addEventListener('scroll',function(){
+        hlEl.style.transform='translate(-'+ta.scrollLeft+'px,-'+ta.scrollTop+'px)';
+        lnEl.scrollTop=ta.scrollTop;
+      });
+
+      /* Update line numbers */
+      function updateLineNums(text){
+        var count=(text.match(/\\n/g)||[]).length+1;
+        var h='';
+        for(var i=1;i<=count;i++) h+='<span>'+i+'</span>';
+        lnEl.innerHTML=h;
+      }
+
+      /* Simple YAML syntax highlighting */
+      function highlightYaml(text){
+        /* Escape HTML */
+        var s=text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        /* Process line by line for correctness */
+        var lines=s.split('\\n');
+        for(var i=0;i<lines.length;i++){
+          var line=lines[i];
+          /* Comments */
+          if(/^\\s*#/.test(line)){lines[i]='<span class="cfg-hl-comment">'+line+'</span>';continue;}
+          /* Key: value lines */
+          var m=line.match(/^(\\s*)(- )?(\\s*)([^:#\\s][^:]*?)(:\\s*)(.*)?$/);
+          if(m){
+            var pre=m[1]||'';
+            var dash=m[2]?'<span class="cfg-hl-dash">'+m[2]+'</span>':'';
+            var sp=m[3]||'';
+            var key='<span class="cfg-hl-key">'+m[4]+'</span>';
+            var colon=m[5];
+            var val=m[6]||'';
+            /* Colorize value */
+            val=colorVal(val);
+            lines[i]=pre+dash+sp+key+colon+val;
+            continue;
+          }
+          /* List items without key */
+          var m2=line.match(/^(\\s*)(- )(.*)?$/);
+          if(m2){
+            var val2=m2[3]||'';
+            val2=colorVal(val2);
+            lines[i]=m2[1]+'<span class="cfg-hl-dash">'+m2[2]+'</span>'+val2;
+            continue;
+          }
+        }
+        return lines.join('\\n')+'\\n';
+      }
+      function colorVal(v){
+        if(!v)return v;
+        /* Inline comment */
+        var ic=v.match(/^(.*?)(\\s+#.*)$/);
+        var comment='';
+        if(ic){v=ic[1];comment='<span class="cfg-hl-comment">'+ic[2]+'</span>';}
+        if(/^(true|false|yes|no|on|off)$/i.test(v)) return '<span class="cfg-hl-bool">'+v+'</span>'+comment;
+        if(/^(null|~)$/i.test(v)) return '<span class="cfg-hl-null">'+v+'</span>'+comment;
+        if(/^-?[0-9]+(\\.[0-9]+)?$/.test(v)) return '<span class="cfg-hl-number">'+v+'</span>'+comment;
+        if(/^["']/.test(v)) return '<span class="cfg-hl-string">'+v+'</span>'+comment;
+        return v+comment;
+      }
+
+      /* Update highlight + line nums on input */
+      ta.addEventListener('input',function(){
+        hlEl.innerHTML=highlightYaml(ta.value);
+        updateLineNums(ta.value);
+      });
+
+      /* Observe value changes (e.g. when config is loaded) */
+      var origDesc=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value');
+      Object.defineProperty(ta,'value',{
+        get:function(){return origDesc.get.call(this);},
+        set:function(v){origDesc.set.call(this,v);hlEl.innerHTML=highlightYaml(v);updateLineNums(v);}
+      });
+    })();
+
     ${VOICE_MODE_JS}
     ${THEME_TOGGLE_JS}
   </script>
