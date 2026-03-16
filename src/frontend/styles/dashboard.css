@@ -284,6 +284,31 @@ select.form-inp option{background:var(--bg-card)}
 .voice-flash{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--voice-bg);border:2px solid var(--voice-border);color:var(--voice-fg);padding:16px 28px;border-radius:12px;font-size:1rem;font-weight:700;z-index:9999;pointer-events:none;animation:voice-flash-in .2s ease-out}
 .voice-flash.fade{animation:voice-flash-out .4s ease-in forwards}
 
+/* ── Config editor ─────────────────────────────────────────────────────────── */
+.cfg-editor-wrap{display:flex;height:60vh;border:1px solid var(--border2);border-radius:8px;overflow:hidden;background:var(--bg-code)}
+.cfg-line-nums{padding:12px 0;min-width:44px;text-align:right;font-family:ui-monospace,'SF Mono','Cascadia Code',monospace;font-size:.82rem;line-height:1.5;color:var(--text4);background:var(--bg-head);border-right:1px solid var(--border2);user-select:none;overflow:hidden;box-sizing:border-box}
+.cfg-line-nums span{display:block;padding:0 10px 0 8px}
+.cfg-editor-inner{position:relative;flex:1;overflow:auto}
+.cfg-highlight,.cfg-textarea{font-family:ui-monospace,'SF Mono','Cascadia Code',monospace;font-size:.82rem;line-height:1.5;padding:12px;margin:0;border:none;white-space:pre;overflow-wrap:normal;tab-size:2;-moz-tab-size:2;word-break:normal}
+.cfg-highlight{position:absolute;inset:0;pointer-events:none;color:var(--text-code);overflow:hidden}
+.cfg-textarea{position:relative;width:100%;height:100%;background:transparent;color:transparent;caret-color:var(--text-code);outline:none;resize:none;z-index:1;-webkit-text-fill-color:transparent}
+.cfg-textarea::selection{background:rgba(59,130,246,.3);-webkit-text-fill-color:transparent}
+/* YAML syntax tokens */
+.cfg-hl-comment{color:#6a737d}
+.cfg-hl-key{color:#79c0ff}
+.cfg-hl-string{color:#a5d6ff}
+.cfg-hl-number{color:#d2a8ff}
+.cfg-hl-bool{color:#ff7b72}
+.cfg-hl-null{color:#ff7b72;font-style:italic}
+.cfg-hl-dash{color:#8b949e}
+[data-theme=light] .cfg-hl-comment{color:#6a737d}
+[data-theme=light] .cfg-hl-key{color:#0550ae}
+[data-theme=light] .cfg-hl-string{color:#0a3069}
+[data-theme=light] .cfg-hl-number{color:#8250df}
+[data-theme=light] .cfg-hl-bool{color:#cf222e}
+[data-theme=light] .cfg-hl-null{color:#cf222e}
+[data-theme=light] .cfg-hl-dash{color:#57606a}
+
 /* ── Responsive ─────────────────────────────────────────────────────────────── */
 .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 @media(max-width:767px){
