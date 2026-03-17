@@ -31,6 +31,17 @@ export async function executeTask(task: Task): Promise<void> {
     const isExistingBranch =
         task.data.parentTaskId !== undefined || task.data.attempt > 1;
 
+    // Warn early if GitHub token is missing for HTTPS repos — remote git
+    // operations (fetch, push, PR creation) will fail without it.
+    const hasHttpsRepos = repos.some((r) => r.url.startsWith("https://"));
+    if (hasHttpsRepos && !githubToken) {
+        console.warn(
+            `[${task.id}] WARNING: No GitHub token configured but repositories use HTTPS URLs. ` +
+            `Remote git operations (fetch, push, PR creation) will likely fail. ` +
+            `Set auth.githubToken in the project config or pass githubToken in the task request.`
+        );
+    }
+
     try {
         // Early exit if cancelled before execution started
         if (task.cancelled) {
@@ -60,14 +71,22 @@ export async function executeTask(task: Task): Promise<void> {
         }
 
         // Step 2: Push branch to remote immediately so it's visible in GitHub.
-        console.log(`[${task.id}] Pushing branch to remote...`);
-        await manager.gitManager.pushBranchAll(
-            workspace.dir,
-            repos,
-            branchName,
-            false,
-            githubToken
-        );
+        // Non-fatal: if push fails (e.g. no GitHub token), we still proceed with
+        // execution — the branch will be pushed after Claude finishes.
+        try {
+            console.log(`[${task.id}] Pushing branch to remote...`);
+            await manager.gitManager.pushBranchAll(
+                workspace.dir,
+                repos,
+                branchName,
+                false,
+                githubToken
+            );
+        } catch (pushErr) {
+            console.warn(
+                `[${task.id}] Early branch push failed (non-fatal): ${pushErr instanceof Error ? pushErr.message : String(pushErr)}`
+            );
+        }
 
         // Rechown after branch creation (new refs are owned by root)
         await chownRecursive(workspace.dir);
@@ -161,16 +180,29 @@ export async function executeTask(task: Task): Promise<void> {
         );
 
         // Step 8: Rebase on latest default branch to avoid conflicts in PR
+        // Track whether rebase actually rewrote history (determines force-push need)
+        let rebaseRewroteHistory = false;
         if (hasCommits) {
             console.log(`[${task.id}] Rebasing on latest default branch...`);
-            const { conflicted } = await manager.gitManager.rebaseOnDefaultAll(
+            const { rebased, conflicted, fetchFailed } = await manager.gitManager.rebaseOnDefaultAll(
                 workspace.dir,
                 repos,
                 branchName,
                 githubToken
             );
 
+            rebaseRewroteHistory = rebased.length > 0;
+
+            if (fetchFailed.length > 0) {
+                console.warn(
+                    `[${task.id}] Could not fetch origin for rebase in: ${fetchFailed.join(", ")}. ` +
+                    `Skipping rebase — commits will be pushed as-is. ` +
+                    `Check that a valid GitHub token is configured.`
+                );
+            }
+
             if (conflicted.length > 0) {
+                rebaseRewroteHistory = true;
                 // Rechown after fetch/rebase so sandbox container (UID 1000) can write git objects
                 await chownRecursive(workspace.dir);
 
@@ -196,13 +228,14 @@ export async function executeTask(task: Task): Promise<void> {
 
         if (result.exitCode === 0) {
             if (hasCommits) {
-                // Success with commits: force-push (rebase rewrites history) and create ready PR
+                // Success with commits: push and create ready PR.
+                // Use force-push only when rebase rewrote history.
                 console.log(`[${task.id}] Pushing branches...`);
                 await manager.gitManager.pushBranchAll(
                     workspace.dir,
                     repos,
                     branchName,
-                    true,
+                    rebaseRewroteHistory,
                     githubToken
                 );
 
@@ -284,7 +317,7 @@ export async function executeTask(task: Task): Promise<void> {
                     workspace.dir,
                     repos,
                     branchName,
-                    true,
+                    rebaseRewroteHistory,
                     githubToken
                 );
 
@@ -348,7 +381,8 @@ export async function executeTask(task: Task): Promise<void> {
             );
         } else {
             if (hasCommits) {
-                // Failure with commits: force-push partial work and create draft PR
+                // Failure with commits: push partial work and create draft PR.
+                // Use force-push only when rebase rewrote history.
                 console.log(
                     `[${task.id}] Failed but has commits — pushing partial work...`
                 );
@@ -356,7 +390,7 @@ export async function executeTask(task: Task): Promise<void> {
                     workspace.dir,
                     repos,
                     branchName,
-                    true,
+                    rebaseRewroteHistory,
                     githubToken
                 );
 

@@ -388,6 +388,7 @@ describe("GitManager", () => {
 
       expect(result.rebased).toEqual([]);
       expect(result.conflicted).toEqual([]);
+      expect(result.fetchFailed).toEqual([]);
     });
 
     it("rebases cleanly when no conflicts", async () => {
@@ -416,6 +417,7 @@ describe("GitManager", () => {
 
       expect(result.rebased).toEqual(["my-repo"]);
       expect(result.conflicted).toEqual([]);
+      expect(result.fetchFailed).toEqual([]);
 
       // Verify the rebase actually happened — upstream.txt should be in the tree
       const files = await shell("ls", repoDir);
@@ -449,12 +451,45 @@ describe("GitManager", () => {
       expect(result.rebased).toEqual([]);
       expect(result.conflicted).toHaveLength(1);
       expect(result.conflicted[0].name).toBe("my-repo");
+      expect(result.fetchFailed).toEqual([]);
 
       // Verify rebase was aborted — repo should be in clean state on the branch
       const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
       expect(branch).toBe("impl/feature");
       const status = await shell("git status --porcelain", repoDir);
       expect(status).toBe("");
+    });
+
+    it("returns fetchFailed when origin is unreachable and does not throw", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Create feature branch
+      await shell("git checkout -b impl/feature", repoDir);
+      await shell("echo feature > feature.txt && git add . && git commit -m 'feat'", repoDir);
+
+      // Break the remote by pointing origin to a non-existent URL
+      await shell("git remote set-url origin https://github.com/nonexistent-org/nonexistent-repo.git", repoDir);
+
+      const repos = [{ name: "my-repo", url: "https://github.com/nonexistent-org/nonexistent-repo.git", defaultBranch: "main" }];
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      // Should NOT throw — instead returns the repo in fetchFailed
+      const result = await gm.rebaseOnDefaultAll(workDir, repos, "impl/feature");
+
+      expect(result.rebased).toEqual([]);
+      expect(result.conflicted).toEqual([]);
+      expect(result.fetchFailed).toEqual(["my-repo"]);
+
+      // Verify the repo is still in clean state (not corrupted by failed fetch)
+      const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
+      expect(branch).toBe("impl/feature");
+
+      consoleSpy.mockRestore();
     });
   });
 
