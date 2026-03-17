@@ -1269,7 +1269,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         return '<tr class="'+rowClass+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'" data-idx="'+idx+'">'
           +'<td class="td-cb" onclick="event.stopPropagation()"><input type="checkbox" class="task-cb" data-id="'+esc(t.taskId)+'" '+(isChecked?'checked':'')+' onchange="toggleTaskSelection(this.dataset.id,this.checked)" onclick="event.stopPropagation()"></td>'
           +'<td>'+badge(t.status,t.completedAt,!t.readAt)+'</td>'
-          +'<td>'+(t.repoUrl?'':'<span class="proj-tag">'+esc(t.projectId)+'</span>')+'</td>'
+          +'<td>'+(t.repoUrl?'<span class="proj-tag">'+esc(t.repoUrl.replace(/\\.git$/,"").split("/").slice(-2).join("/"))+'</span>':'<span class="proj-tag">'+esc(t.projectId)+'</span>')+'</td>'
           +'<td class="td-taskid"><span class="mono">'+esc(t.taskId)+'</span></td>'
           +'<td>'+(t.title?'<div class="ttitle">'+prioStar+esc(t.title)+prioBadge+chainBadge+'</div>':'')+'<div class="tprompt">'+prioStar+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+(t.title?'':prioBadge+chainBadge)+'</div>'+progressHtml+'</td>'
           +'<td class="td-dur mono">'+dur(t.durationSeconds)+'</td>'
