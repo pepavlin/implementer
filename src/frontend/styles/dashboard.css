@@ -286,13 +286,15 @@ select.form-inp option{background:var(--bg-card)}
 
 /* ── Config editor ─────────────────────────────────────────────────────────── */
 .cfg-editor-wrap{display:flex;height:60vh;border:1px solid var(--border2);border-radius:8px;overflow:hidden;background:var(--bg-code)}
-.cfg-line-nums{padding:12px 0;min-width:44px;text-align:right;font-family:ui-monospace,'SF Mono','Cascadia Code',monospace;font-size:.82rem;line-height:1.5;color:var(--text4);background:var(--bg-head);border-right:1px solid var(--border2);user-select:none;overflow:hidden;box-sizing:border-box}
-.cfg-line-nums span{display:block;padding:0 10px 0 8px}
-.cfg-editor-inner{position:relative;flex:1;overflow:auto}
-.cfg-highlight,.cfg-textarea{font-family:ui-monospace,'SF Mono','Cascadia Code',monospace;font-size:.82rem;line-height:1.5;padding:12px;margin:0;border:none;white-space:pre;overflow-wrap:normal;tab-size:2;-moz-tab-size:2;word-break:normal}
-.cfg-highlight{position:absolute;inset:0;pointer-events:none;color:var(--text-code);overflow:hidden}
-.cfg-textarea{position:relative;width:100%;height:100%;background:transparent;color:transparent;caret-color:var(--text-code);outline:none;resize:none;z-index:1;-webkit-text-fill-color:transparent}
+.cfg-line-nums{padding:12px 0;min-width:48px;text-align:right;font-family:ui-monospace,'SF Mono','Cascadia Code',monospace;font-size:.82rem;line-height:1.5;color:var(--text4);background:var(--bg-head);border-right:1px solid var(--border2);user-select:none;overflow:hidden;box-sizing:border-box}
+.cfg-line-nums span{display:block;padding:0 12px 0 8px}
+.cfg-editor-inner{flex:1;overflow:auto;position:relative}
+.cfg-editor-content{position:relative;min-height:100%;min-width:fit-content}
+.cfg-highlight,.cfg-textarea{font-family:ui-monospace,'SF Mono','Cascadia Code',monospace;font-size:.82rem;line-height:1.5;padding:12px 14px;margin:0;border:none;white-space:pre;overflow-wrap:normal;tab-size:2;-moz-tab-size:2;word-break:normal;box-sizing:border-box}
+.cfg-highlight{pointer-events:none;color:var(--text-code);min-height:100%}
+.cfg-textarea{position:absolute;inset:0;width:100%;height:100%;background:transparent;color:transparent;caret-color:var(--text);outline:none;resize:none;z-index:1;-webkit-text-fill-color:transparent}
 .cfg-textarea::selection{background:rgba(59,130,246,.3);-webkit-text-fill-color:transparent}
+.cfg-textarea:focus{box-shadow:none}
 /* YAML syntax tokens */
 .cfg-hl-comment{color:#6a737d}
 .cfg-hl-key{color:#79c0ff}

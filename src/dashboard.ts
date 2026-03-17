@@ -883,9 +883,11 @@ export function dashboardHtml(hasPassword: boolean): string {
         <div id="settings-success" style="display:none;background:var(--b-done-bg);color:var(--b-done-fg);padding:10px 14px;border-radius:8px;margin-bottom:10px;font-size:.82rem"></div>
         <div class="cfg-editor-wrap">
           <div class="cfg-line-nums" id="settings-line-nums"></div>
-          <div class="cfg-editor-inner">
-            <pre class="cfg-highlight" id="settings-highlight" aria-hidden="true"></pre>
-            <textarea id="settings-editor" class="cfg-textarea" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+          <div class="cfg-editor-inner" id="settings-editor-inner">
+            <div class="cfg-editor-content">
+              <pre class="cfg-highlight" id="settings-highlight" aria-hidden="true"></pre>
+              <textarea id="settings-editor" class="cfg-textarea" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+            </div>
           </div>
         </div>
       </div>
@@ -1840,41 +1842,92 @@ export function dashboardHtml(hasPassword: boolean): string {
         });
     }
 
-    /* ── Config editor: Tab support, line numbers, syntax highlighting ── */
+    /* ── Config editor: Tab/Enter support, line numbers, syntax highlighting ── */
     (function(){
       var ta=document.getElementById('settings-editor');
       var lnEl=document.getElementById('settings-line-nums');
       var hlEl=document.getElementById('settings-highlight');
-      var wrap=ta.parentNode;
+      var scrollBox=document.getElementById('settings-editor-inner');
 
-      /* Tab / Shift+Tab */
+      /* Tab / Shift+Tab / Enter with auto-indent */
       ta.addEventListener('keydown',function(e){
         if(e.key==='Tab'){
           e.preventDefault();
           var start=ta.selectionStart,end=ta.selectionEnd,val=ta.value;
-          if(!e.shiftKey){
-            /* insert 2 spaces */
+          if(start!==end&&e.shiftKey){
+            /* Multi-line unindent */
+            var blockStart=val.lastIndexOf('\\n',start-1)+1;
+            var block=val.substring(blockStart,end);
+            var lines=block.split('\\n');
+            var removed=0;
+            for(var li=0;li<lines.length;li++){
+              var r=0;
+              if(lines[li][0]===' '){r++;if(lines[li][1]===' ')r++;}
+              if(r){lines[li]=lines[li].substring(r);removed+=r;}
+            }
+            if(removed){
+              var newBlock=lines.join('\\n');
+              ta.value=val.substring(0,blockStart)+newBlock+val.substring(end);
+              var firstLineRemoved=0;
+              var fl=block.split('\\n')[0];
+              if(fl[0]===' '){firstLineRemoved++;if(fl[1]===' ')firstLineRemoved++;}
+              ta.selectionStart=Math.max(blockStart,start-firstLineRemoved);
+              ta.selectionEnd=blockStart+newBlock.length;
+            }
+          }else if(start!==end&&!e.shiftKey){
+            /* Multi-line indent */
+            var blockStart2=val.lastIndexOf('\\n',start-1)+1;
+            var block2=val.substring(blockStart2,end);
+            var newBlock2=block2.split('\\n').map(function(l){return '  '+l;}).join('\\n');
+            ta.value=val.substring(0,blockStart2)+newBlock2+val.substring(end);
+            ta.selectionStart=start+2;
+            ta.selectionEnd=blockStart2+newBlock2.length;
+          }else if(!e.shiftKey){
+            /* Single cursor: insert 2 spaces */
             ta.value=val.substring(0,start)+'  '+val.substring(end);
             ta.selectionStart=ta.selectionEnd=start+2;
           }else{
-            /* unindent: remove up to 2 leading spaces on current line */
+            /* Single cursor shift+tab: unindent current line */
             var lineStart=val.lastIndexOf('\\n',start-1)+1;
-            var removed=0;
-            if(val[lineStart]===' '){removed++;if(val[lineStart+1]===' ')removed++;}
-            if(removed){
-              ta.value=val.substring(0,lineStart)+val.substring(lineStart+removed);
-              ta.selectionStart=Math.max(lineStart,start-removed);
-              ta.selectionEnd=Math.max(lineStart,end-removed);
+            var rem=0;
+            if(val[lineStart]===' '){rem++;if(val[lineStart+1]===' ')rem++;}
+            if(rem){
+              ta.value=val.substring(0,lineStart)+val.substring(lineStart+rem);
+              ta.selectionStart=ta.selectionEnd=Math.max(lineStart,start-rem);
             }
           }
           ta.dispatchEvent(new Event('input'));
         }
+        /* Enter: auto-indent to match current line */
+        if(e.key==='Enter'){
+          e.preventDefault();
+          var start2=ta.selectionStart,val2=ta.value;
+          var lineStart2=val2.lastIndexOf('\\n',start2-1)+1;
+          var currentLine=val2.substring(lineStart2,start2);
+          var indentMatch=currentLine.match(/^(\\s*)/);
+          var indent=indentMatch?indentMatch[1]:'';
+          /* If line ends with ':', add extra indent */
+          var trimmed=val2.substring(lineStart2,start2).trimEnd();
+          if(trimmed.endsWith(':'))indent+='  ';
+          var insert='\\n'+indent;
+          ta.value=val2.substring(0,start2)+insert+val2.substring(ta.selectionEnd);
+          ta.selectionStart=ta.selectionEnd=start2+insert.length;
+          ta.dispatchEvent(new Event('input'));
+          /* Ensure cursor is visible after enter */
+          var lineHeight=parseFloat(getComputedStyle(ta).lineHeight)||20;
+          var cursorLine=(val2.substring(0,start2).match(/\\n/g)||[]).length+1;
+          var cursorY=cursorLine*lineHeight;
+          if(cursorY>scrollBox.scrollTop+scrollBox.clientHeight-lineHeight*2){
+            scrollBox.scrollTop=cursorY-scrollBox.clientHeight+lineHeight*3;
+          }
+        }
       });
 
-      /* Sync scroll between textarea and highlight/line-nums */
-      ta.addEventListener('scroll',function(){
-        hlEl.style.transform='translate(-'+ta.scrollLeft+'px,-'+ta.scrollTop+'px)';
-        lnEl.scrollTop=ta.scrollTop;
+      /* Sync scroll: the scrollBox (.cfg-editor-inner) is the scroll container.
+         The textarea is absolutely positioned inside .cfg-editor-content.
+         We sync line numbers from scrollBox scroll events. */
+      scrollBox.addEventListener('scroll',function(){
+        lnEl.scrollTop=scrollBox.scrollTop;
       });
 
       /* Update line numbers */
@@ -1887,12 +1940,12 @@ export function dashboardHtml(hasPassword: boolean): string {
 
       /* Simple YAML syntax highlighting */
       function highlightYaml(text){
-        /* Escape HTML */
         var s=text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        /* Process line by line for correctness */
         var lines=s.split('\\n');
         for(var i=0;i<lines.length;i++){
           var line=lines[i];
+          /* Empty lines */
+          if(!line.trim()){continue;}
           /* Comments */
           if(/^\\s*#/.test(line)){lines[i]='<span class="cfg-hl-comment">'+line+'</span>';continue;}
           /* Key: value lines */
@@ -1904,7 +1957,6 @@ export function dashboardHtml(hasPassword: boolean): string {
             var key='<span class="cfg-hl-key">'+m[4]+'</span>';
             var colon=m[5];
             var val=m[6]||'';
-            /* Colorize value */
             val=colorVal(val);
             lines[i]=pre+dash+sp+key+colon+val;
             continue;
@@ -1922,7 +1974,6 @@ export function dashboardHtml(hasPassword: boolean): string {
       }
       function colorVal(v){
         if(!v)return v;
-        /* Inline comment */
         var ic=v.match(/^(.*?)(\\s+#.*)$/);
         var comment='';
         if(ic){v=ic[1];comment='<span class="cfg-hl-comment">'+ic[2]+'</span>';}
@@ -1939,7 +1990,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         updateLineNums(ta.value);
       });
 
-      /* Observe value changes (e.g. when config is loaded) */
+      /* Observe value changes (e.g. when config is loaded via JS) */
       var origDesc=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value');
       Object.defineProperty(ta,'value',{
         get:function(){return origDesc.get.call(this);},
