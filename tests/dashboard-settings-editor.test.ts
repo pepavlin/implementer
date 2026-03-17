@@ -57,23 +57,36 @@ describe("Dashboard settings editor", () => {
         expect(res.text).toContain('id="settings-editor"');
     });
 
-    it("renders editor wrapper container", async () => {
+    it("renders editor wrapper with content div for scroll sync", async () => {
         const app = createApp();
         const res = await request(app)
             .get("/dashboard")
             .set("Cookie", AUTH_COOKIE);
         expect(res.text).toContain('class="cfg-editor-wrap"');
-        expect(res.text).toContain('class="cfg-editor-inner"');
+        expect(res.text).toContain('id="settings-editor-inner"');
+        expect(res.text).toContain('class="cfg-editor-content"');
     });
 
-    it("includes Tab key handler script", async () => {
+    it("includes Tab key handler with multi-line indent/unindent", async () => {
         const app = createApp();
         const res = await request(app)
             .get("/dashboard")
             .set("Cookie", AUTH_COOKIE);
-        // Tab key handling
         expect(res.text).toContain("e.key==='Tab'");
         expect(res.text).toContain("e.preventDefault()");
+        // Multi-line indent support
+        expect(res.text).toContain("Multi-line indent");
+        expect(res.text).toContain("Multi-line unindent");
+    });
+
+    it("includes Enter key auto-indent handler", async () => {
+        const app = createApp();
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+        expect(res.text).toContain("e.key==='Enter'");
+        // Auto-indent after colon
+        expect(res.text).toContain("endsWith(':')");
     });
 
     it("includes YAML syntax highlighting function", async () => {
@@ -92,5 +105,16 @@ describe("Dashboard settings editor", () => {
             .get("/dashboard")
             .set("Cookie", AUTH_COOKIE);
         expect(res.text).toContain("updateLineNums");
+    });
+
+    it("uses scroll container for line number sync instead of transform", async () => {
+        const app = createApp();
+        const res = await request(app)
+            .get("/dashboard")
+            .set("Cookie", AUTH_COOKIE);
+        // Should use scrollBox-based sync, not transform hack
+        expect(res.text).toContain("settings-editor-inner");
+        expect(res.text).toContain("scrollBox.scrollTop");
+        expect(res.text).not.toContain("hlEl.style.transform");
     });
 });
