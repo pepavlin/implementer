@@ -104,7 +104,8 @@ export function buildDashboardData(
                 state: pr.state ?? null
             })) ?? null,
         readAt: task.data.readAt ?? null,
-        priority: task.data.priority ?? "normal"
+        priority: task.data.priority ?? "normal",
+        repoUrl: task.data.repoUrl ?? null
     }));
 
     // Count unique PRs by URL and state (deduplicate across tasks sharing the same PR)
@@ -1268,7 +1269,7 @@ export function dashboardHtml(hasPassword: boolean): string {
         return '<tr class="'+rowClass+'" data-id="'+esc(t.taskId)+'" data-proj="'+esc(t.projectId)+'" data-idx="'+idx+'">'
           +'<td class="td-cb" onclick="event.stopPropagation()"><input type="checkbox" class="task-cb" data-id="'+esc(t.taskId)+'" '+(isChecked?'checked':'')+' onchange="toggleTaskSelection(this.dataset.id,this.checked)" onclick="event.stopPropagation()"></td>'
           +'<td>'+badge(t.status,t.completedAt,!t.readAt)+'</td>'
-          +'<td><span class="proj-tag">'+esc(t.projectId)+'</span></td>'
+          +'<td>'+(t.repoUrl?'':'<span class="proj-tag">'+esc(t.projectId)+'</span>')+'</td>'
           +'<td class="td-taskid"><span class="mono">'+esc(t.taskId)+'</span></td>'
           +'<td>'+(t.title?'<div class="ttitle">'+prioStar+esc(t.title)+prioBadge+chainBadge+'</div>':'')+'<div class="tprompt">'+prioStar+esc(t.prompt.length>90?t.prompt.slice(0,90)+'\u2026':t.prompt)+(t.title?'':prioBadge+chainBadge)+'</div>'+progressHtml+'</td>'
           +'<td class="td-dur mono">'+dur(t.durationSeconds)+'</td>'
@@ -1433,7 +1434,11 @@ export function dashboardHtml(hasPassword: boolean): string {
           if(t.title)html+='<div class="det-row"><div class="det-lbl">Title</div><div class="det-val">'+esc(t.title)+'</div></div>';
           var prioLabel=(t.priority==='normal'||!t.priority)?'<span class="muted" style="font-size:.82rem">Normal</span>':priorityBadge(t.priority);
           html+='<div class="det-row"><div class="det-lbl">Priority</div><div class="det-val">'+prioLabel+'</div></div>';
-          html+='<div class="det-row"><div class="det-lbl">Project</div><div class="det-val">'+esc(t.projectId)+'</div></div>';
+          if(t.repoUrl){
+            html+='<div class="det-row"><div class="det-lbl">Repo URL</div><div class="det-val"><a href="'+esc(t.repoUrl)+'" target="_blank" rel="noopener" class="pr-link">'+esc(t.repoUrl)+'</a></div></div>';
+          }else{
+            html+='<div class="det-row"><div class="det-lbl">Project</div><div class="det-val">'+esc(t.projectId)+'</div></div>';
+          }
           if(t.branch)html+='<div class="det-row"><div class="det-lbl">Branch</div><div class="det-val mono">'+esc(t.branch)+'</div></div>';
           if(t.chainId)html+='<div class="det-row"><div class="det-lbl">Chain</div><div class="det-val mono">'+esc(t.chainId)+'</div></div>';
           if(t.parentTaskId)html+='<div class="det-row"><div class="det-lbl">Parent Task</div><div class="det-val mono">'+esc(t.parentTaskId)+'</div></div>';
@@ -2113,6 +2118,7 @@ export function registerDashboardRoutes(
         res.json({
             taskId: task.id,
             projectId: task.data.projectId,
+            repoUrl: task.data.repoUrl ?? null,
             branch: task.branch?.name ?? null,
             prompt: task.data.prompt,
             title: task.title ?? null,
