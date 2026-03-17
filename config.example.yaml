@@ -16,6 +16,7 @@ server:
 
 # Global defaults merged into every project's claudeCode (optional).
 # systemPrompt is concatenated (global + project); mcpServers are shallow-merged (project overrides global).
+# timeoutSeconds sets the default task timeout for all projects (project-level overrides this).
 # defaults:
 #     systemPrompt: |
 #         Global instructions applied to all projects.
@@ -23,6 +24,10 @@ server:
 #         playwright:
 #             command: npx
 #             args: ["@playwright/mcp@latest", "--headless"]
+#     # Maximum wall-clock seconds a single executor run may take (applied to all projects).
+#     # Individual projects can override this in their own claudeCode.timeoutSeconds.
+#     # Defaults to 3600 (1 hour) when neither defaults nor project specifies a value. Minimum: 60.
+#     timeoutSeconds: 3600
 
 projects:
     demo-webapp:

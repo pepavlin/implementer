@@ -61,6 +61,14 @@ export class Config {
             this.applyDefaults(validated.projects, validated.defaults);
         }
 
+        // Apply hardcoded fallback for timeoutSeconds (3600s) when neither
+        // project-level nor global defaults specify a value
+        for (const project of Object.values(validated.projects)) {
+            if (project.claudeCode.timeoutSeconds == null) {
+                project.claudeCode.timeoutSeconds = 3600;
+            }
+        }
+
         return validated;
     }
 
@@ -83,6 +91,14 @@ export class Config {
                     ...defaults.mcpServers,
                     ...project.claudeCode.mcpServers
                 };
+            }
+
+            // timeoutSeconds: project-level takes precedence over global default
+            if (
+                project.claudeCode.timeoutSeconds == null &&
+                defaults.timeoutSeconds != null
+            ) {
+                project.claudeCode.timeoutSeconds = defaults.timeoutSeconds;
             }
         }
     }
