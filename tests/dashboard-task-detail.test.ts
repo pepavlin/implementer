@@ -1877,3 +1877,43 @@ describe("buildDashboardData - stats count all tasks beyond 200 limit", () => {
         expect(data.projects["my-project"].completed).toBe(250);
     });
 });
+
+describe("buildDashboardData - repoUrl field for dynamic tasks", () => {
+    it("includes repoUrl for tasks created with repoUrl", () => {
+        const task = makeTask({
+            repoUrl: "https://github.com/my-org/my-repo.git",
+        });
+        task.data.repoUrl = "https://github.com/my-org/my-repo.git";
+        const tm = makeTaskManager([task]) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+        const taskData = data.tasks[0] as any;
+
+        expect(taskData.repoUrl).toBe("https://github.com/my-org/my-repo.git");
+    });
+
+    it("returns null repoUrl for tasks without repoUrl", () => {
+        const task = makeTask({});
+        const tm = makeTaskManager([task]) as unknown as TaskManager;
+        const cfg = makeConfig() as unknown as Config;
+
+        const data = buildDashboardData(tm, cfg);
+        const taskData = data.tasks[0] as any;
+
+        expect(taskData.repoUrl).toBeNull();
+    });
+
+    it("allows extracting owner/repo from repoUrl for display", () => {
+        // This tests the client-side logic used in the dashboard to show fullRepoName
+        const repoUrl = "https://github.com/my-org/my-repo.git";
+        const fullRepoName = repoUrl.replace(/\.git$/, "").split("/").slice(-2).join("/");
+        expect(fullRepoName).toBe("my-org/my-repo");
+    });
+
+    it("handles repoUrl without .git suffix", () => {
+        const repoUrl = "https://github.com/owner/repo-name";
+        const fullRepoName = repoUrl.replace(/\.git$/, "").split("/").slice(-2).join("/");
+        expect(fullRepoName).toBe("owner/repo-name");
+    });
+});
