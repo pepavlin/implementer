@@ -32,6 +32,7 @@ server:
 #         playwright:
 #             command: npx
 #             args: ["@playwright/mcp@latest", "--headless"]
+#     timeoutSeconds: 3600  # global task timeout (default: 3600, min: 60)
 
 projects:
     demo-webapp:
@@ -52,7 +53,7 @@ projects:
         #     - docker-compose.yml
 ```
 
-`defaults` fields are merged into each project's `claudeCode`: `systemPrompt` is concatenated (global first, then project), `mcpServers` are shallow-merged (project keys override global).
+`defaults` fields are merged into each project's `claudeCode`: `systemPrompt` is concatenated (global first, then project), `mcpServers` are shallow-merged (project keys override global), and `timeoutSeconds` is used as the global task timeout default (project-level `claudeCode.timeoutSeconds` overrides it; falls back to 3600 when neither is set).
 
 You can define multiple projects and multiple repositories per project.
 

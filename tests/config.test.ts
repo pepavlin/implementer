@@ -655,6 +655,104 @@ projects:
         expect(cc.mcpServers?.["global-tool"].command).toBe("global");
     });
 
+    it("applies defaults.timeoutSeconds to projects without their own", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+defaults:
+  timeoutSeconds: 1800
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.projects["my-project"].data.claudeCode.timeoutSeconds).toBe(1800);
+    });
+
+    it("project-level timeoutSeconds overrides defaults.timeoutSeconds", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+defaults:
+  timeoutSeconds: 1800
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+    claudeCode:
+      timeoutSeconds: 600
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.projects["my-project"].data.claudeCode.timeoutSeconds).toBe(600);
+    });
+
+    it("falls back to 3600 when neither defaults nor project sets timeoutSeconds", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+defaults:
+  systemPrompt: "Global."
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.projects["my-project"].data.claudeCode.timeoutSeconds).toBe(3600);
+    });
+
+    it("applies defaults.timeoutSeconds to all projects", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+defaults:
+  timeoutSeconds: 900
+projects:
+  project-a:
+    repositories:
+      - name: repo-a
+        url: https://github.com/test/repo-a.git
+  project-b:
+    repositories:
+      - name: repo-b
+        url: https://github.com/test/repo-b.git
+    claudeCode:
+      timeoutSeconds: 120
+`
+        );
+
+        const config = Config.load(path);
+        expect(config.projects["project-a"].data.claudeCode.timeoutSeconds).toBe(900);
+        expect(config.projects["project-b"].data.claudeCode.timeoutSeconds).toBe(120);
+    });
+
+    it("rejects defaults.timeoutSeconds below 60", () => {
+        const path = writeYaml(
+            "config.yaml",
+            `
+defaults:
+  timeoutSeconds: 30
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+`
+        );
+
+        expect(() => Config.load(path)).toThrow();
+    });
+
     it("applies defaults to all projects", () => {
         const path = writeYaml(
             "config.yaml",

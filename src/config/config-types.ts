@@ -98,6 +98,9 @@ export interface HandlePipelinesConfig {
 export interface DefaultsConfig {
     systemPrompt?: string;
     mcpServers?: Record<string, McpServerConfig>;
+    /** Global default for claudeCode.timeoutSeconds. Applied to all projects that don't set their own.
+     *  Defaults to 3600 (1 hour) when neither defaults nor project specifies a value. Minimum 60 seconds. */
+    timeoutSeconds?: number;
 }
 
 export interface ProjectConfig {
@@ -164,7 +167,7 @@ const ClaudeCodeSchema = z
         systemPrompt: z.string().optional(),
         mcpServers: z.record(McpServerSchema).optional(),
         maxOutputTokens: z.number().int().min(1).optional(),
-        timeoutSeconds: z.number().int().min(60).default(3600)
+        timeoutSeconds: z.number().int().min(60).optional()
     })
     .strict();
 
@@ -197,7 +200,8 @@ const HandlePipelinesSchema = z
 const DefaultsSchema = z
     .object({
         systemPrompt: z.string().optional(),
-        mcpServers: z.record(McpServerSchema).optional()
+        mcpServers: z.record(McpServerSchema).optional(),
+        timeoutSeconds: z.number().int().min(60).optional()
     })
     .strict();
 
