@@ -14,6 +14,6 @@ AI Code Task Execution Service built with TypeScript/Node.js.
 - `src/server.ts` - Express routes (POST /task, GET /task/status, GET /task/log)
 - `src/config.ts` - Config loading & validation from config.yaml
 - `src/task-manager.ts` - Task state machine, locking, orchestration
-- `src/git-manager.ts` - Git clone, fetch, branch, checkout operations
+- `src/git-manager.ts` - Git clone, fetch, branch, checkout operations (verifies origin URL on workspace reuse)
 - `src/executor.ts` - Claude Code CLI subprocess management
 - `src/types.ts` - TypeScript interfaces

@@ -208,6 +208,10 @@ export class Task {
         this.data.completedAt = null;
         this.data.error = undefined;
         this.data.attempt++;
+        // IMPORTANT: repoUrl and githubToken are intentionally preserved so that
+        // dynamic tasks (submitted with a custom repository and token) continue
+        // to use the original credentials after retry. Without this, retried
+        // tasks from private repos / different accounts would fail to authenticate.
         console.log(`[${this.id}] Manual retry requested`);
         this.unshift();
     }

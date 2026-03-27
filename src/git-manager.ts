@@ -56,6 +56,28 @@ export class GitManager {
       const repoDir = this.getRepoDir(baseDir, repo.name);
 
       if (existsSync(join(repoDir, ".git"))) {
+        // Verify the origin remote URL matches the expected repo URL.
+        // When workspaces are reused across different dynamic tasks (each with
+        // its own repoUrl), the origin may point to a completely different
+        // repository. Without this check, fetch/push/PR operations would
+        // silently target the wrong repo — breaking retries and continuations
+        // for tasks that use a custom githubToken + repoUrl.
+        try {
+          const currentOrigin = await git(["remote", "get-url", "origin"], repoDir);
+          const normalizeUrl = (u: string) => u.replace(/\.git$/, "").toLowerCase();
+          if (normalizeUrl(currentOrigin) !== normalizeUrl(repo.url)) {
+            console.log(
+              `[git-manager] Origin URL mismatch in ${repo.name} (have: ${currentOrigin}, want: ${repo.url}) — re-cloning`
+            );
+            rmSync(repoDir, { recursive: true, force: true });
+            mkdirSync(repoDir, { recursive: true });
+            await git(["clone", repo.url, repoDir], baseDir, githubToken);
+            continue;
+          }
+        } catch {
+          // If we can't read the remote, fall through to the fetch attempt
+        }
+
         try {
           await git(["fetch", "origin"], repoDir, githubToken);
         } catch (err) {

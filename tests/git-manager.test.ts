@@ -112,6 +112,70 @@ describe("GitManager", () => {
       const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
       expect(branch).toBe("main");
     });
+
+    it("re-clones when origin URL does not match (workspace reused by different dynamic task)", async () => {
+      const bareDir1 = join(TMP, "bare-repo-1");
+      const bareDir2 = join(TMP, "bare-repo-2");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      // Set up two separate bare repos (simulating two different GitHub repos with the same name)
+      await createBareRepo(bareDir1);
+      await createBareRepo(bareDir2);
+
+      // Push initial commits to both
+      const tmpClone1 = join(TMP, "tmp-init-1");
+      mkdirSync(tmpClone1, { recursive: true });
+      await shell(`git clone ${bareDir1} .`, tmpClone1);
+      await shell('git config user.email "test@test.com"', tmpClone1);
+      await shell('git config user.name "Test"', tmpClone1);
+      await shell("echo repo1 > file.txt && git add . && git commit -m 'init repo1' && git push origin main", tmpClone1);
+
+      const tmpClone2 = join(TMP, "tmp-init-2");
+      mkdirSync(tmpClone2, { recursive: true });
+      await shell(`git clone ${bareDir2} .`, tmpClone2);
+      await shell('git config user.email "test@test.com"', tmpClone2);
+      await shell('git config user.name "Test"', tmpClone2);
+      await shell("echo repo2 > file.txt && git add . && git commit -m 'init repo2' && git push origin main", tmpClone2);
+
+      // First task clones repo 1 into workspace
+      const repos1 = [{ name: "my-repo", url: bareDir1, defaultBranch: "main" }];
+      await gm.ensureAllRepos(workDir, repos1);
+
+      // Verify it cloned repo 1
+      const content1 = await shell("cat file.txt", repoDir);
+      expect(content1).toBe("repo1");
+
+      // Second task (retry with different repoUrl) uses the same workspace directory
+      const repos2 = [{ name: "my-repo", url: bareDir2, defaultBranch: "main" }];
+      await gm.ensureAllRepos(workDir, repos2);
+
+      // Must have re-cloned to repo 2 (not kept repo 1's origin)
+      const content2 = await shell("cat file.txt", repoDir);
+      expect(content2).toBe("repo2");
+
+      // Verify origin points to the new repo
+      const origin = await shell("git remote get-url origin", repoDir);
+      expect(origin).toBe(bareDir2);
+    });
+
+    it("re-clones when origin URL differs by .git suffix", async () => {
+      const bareDir = join(TMP, "bare-repo");
+      const workDir = join(TMP, "workspace");
+      const repoDir = join(workDir, "my-repo");
+
+      await createBareRepo(bareDir);
+      await createClonedRepo(bareDir, repoDir);
+
+      // Existing clone has origin = bareDir (without .git suffix).
+      // If task provides URL with .git suffix, they should be treated as the same URL.
+      const repos = [{ name: "my-repo", url: bareDir + ".git", defaultBranch: "main" }];
+      // Should NOT re-clone — URLs normalize to the same value
+      await gm.ensureAllRepos(workDir, repos);
+
+      const branch = await shell("git rev-parse --abbrev-ref HEAD", repoDir);
+      expect(branch).toBe("main");
+    });
   });
 
   describe("prepareNewBranchAll", () => {
