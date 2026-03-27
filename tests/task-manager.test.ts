@@ -2126,6 +2126,112 @@ describe("TaskManager - handlePipelineFailure", () => {
     expect(fixTask?.data.githubToken).toBe("ghp_dynamic_token_123");
   });
 
+  it("forwards project-level auth.githubToken to pipeline-fix task when task has no task-level token", async () => {
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
+    const { Executor } = await import("../src/executor.js");
+    // Pipeline config with project-level auth.githubToken
+    const config = makeConfig({
+      projects: {
+        [PROJECT_ID]: {
+          maxConcurrentTasks: 4,
+          repositories: [
+            { name: "my-repo", url: "https://github.com/test/repo.git", defaultBranch: "main" },
+          ],
+          claudeCode: { command: "claude" },
+          auth: { githubToken: "ghp_project_auth_token" },
+          handlePipelines: { pipelines: ["ci"], retryCount: 2 },
+        },
+      },
+    });
+    const store = new TaskStore(TMP);
+
+    // Task with project-level token resolved at creation time
+    store.save(makePersistedTask({
+      taskId: "pipe-proj-token",
+      status: "waiting_for_pipeline",
+      completedAt: null,
+      pipelineRetryAttempt: 0,
+      branch: "impl/proj-token-test",
+      pullRequests: [{ url: "https://github.com/test/repo/pull/55", state: "open", createdAt: new Date().toISOString() }],
+      githubToken: "ghp_project_auth_token",
+    }));
+
+    const tm = new TaskManager(config);
+    vi.spyOn(Executor.prototype, "generateTaskMetadata").mockReturnValue(new Promise(() => {}));
+    const project = tm.config.projects[PROJECT_ID as any];
+    project.initialize();
+    vi.spyOn(project, "initialize").mockImplementation(() => {});
+    vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+    await tm.init();
+
+    tm.handlePipelineFailure("pipe-proj-token", "Pipeline check failed: ci");
+
+    const fixTask = tm.listAllTasks().find(
+      (t) => t.id !== ("pipe-proj-token" as any) && t.data.parentTaskId === "pipe-proj-token"
+    );
+    expect(fixTask).toBeDefined();
+    // Fix task must receive the project-level token
+    expect(fixTask?.data.githubToken).toBe("ghp_project_auth_token");
+    expect(fixTask?.getGithubToken()).toBe("ghp_project_auth_token");
+  });
+
+  it("pipeline-fix task resolves project auth.githubToken even when original task data has no token (legacy)", async () => {
+    // Tests backward compatibility: a task persisted BEFORE the fix
+    // (with data.githubToken undefined) should still get the correct
+    // token via getGithubToken() fallback + createNewTask resolution.
+    const { TaskManager } = await import("../src/task-manager/task-manager.js");
+    const { Executor } = await import("../src/executor.js");
+    const config = makeConfig({
+      projects: {
+        [PROJECT_ID]: {
+          maxConcurrentTasks: 4,
+          repositories: [
+            { name: "my-repo", url: "https://github.com/test/repo.git", defaultBranch: "main" },
+          ],
+          claudeCode: { command: "claude" },
+          auth: { githubToken: "ghp_legacy_fallback" },
+          handlePipelines: { pipelines: ["ci"], retryCount: 2 },
+        },
+      },
+    });
+    const store = new TaskStore(TMP);
+
+    // Simulate a legacy task with NO githubToken in data (persisted before the fix)
+    store.save(makePersistedTask({
+      taskId: "pipe-legacy-task",
+      status: "waiting_for_pipeline",
+      completedAt: null,
+      pipelineRetryAttempt: 0,
+      branch: "impl/legacy-test",
+      pullRequests: [{ url: "https://github.com/test/repo/pull/77", state: "open", createdAt: new Date().toISOString() }],
+      // githubToken intentionally NOT set — simulates legacy persisted task
+    }));
+
+    const tm = new TaskManager(config);
+    vi.spyOn(Executor.prototype, "generateTaskMetadata").mockReturnValue(new Promise(() => {}));
+    const project = tm.config.projects[PROJECT_ID as any];
+    project.initialize();
+    vi.spyOn(project, "initialize").mockImplementation(() => {});
+    vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+    await tm.init();
+
+    // getGithubToken() should still fall back to project auth
+    const legacyTask = tm.getTask("pipe-legacy-task" as any);
+    expect(legacyTask?.getGithubToken()).toBe("ghp_legacy_fallback");
+
+    tm.handlePipelineFailure("pipe-legacy-task", "Pipeline check failed: ci");
+
+    const fixTask = tm.listAllTasks().find(
+      (t) => t.id !== ("pipe-legacy-task" as any) && t.data.parentTaskId === "pipe-legacy-task"
+    );
+    expect(fixTask).toBeDefined();
+    // Fix task gets the project token via getGithubToken() → createNewTask resolution
+    expect(fixTask?.data.githubToken).toBe("ghp_legacy_fallback");
+    expect(fixTask?.getGithubToken()).toBe("ghp_legacy_fallback");
+  });
+
   it("creates fix task from chain tip when failing task has descendants (post-manual-retry)", async () => {
     // Reproduces the bug where a user manually retries a parent task after it had a
     // pipeline failure (which created a child fix task). When the parent again fails
