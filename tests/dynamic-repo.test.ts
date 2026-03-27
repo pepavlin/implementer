@@ -428,6 +428,152 @@ describe("Dynamic repository support", () => {
     });
   });
 
+  describe("retry preserves dynamic repo credentials", () => {
+    it("preserves githubToken and repoUrl after manual retry", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeDefaultConfig();
+      const store = new TaskStore(TMP);
+
+      // Create a completed dynamic task with a custom githubToken
+      store.save(
+        makePersistedTask({
+          taskId: "retry-token-task",
+          status: "failed",
+          completedAt: "2025-01-01T01:00:00.000Z",
+          branch: "impl/retry-test",
+          chainId: "chain-retry",
+          repoUrl: "https://github.com/other-account/private-repo.git",
+          githubToken: "ghp_custom_token_from_user",
+          attempt: 1,
+        })
+      );
+
+      const tm = new TaskManager(config);
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({
+        slug: "test",
+        title: "Test",
+        estimatedDurationSeconds: 600,
+      });
+
+      const project = tm.config.projects[DEFAULT_PROJECT_ID as any];
+      project.initialize();
+      vi.spyOn(project, "initialize").mockImplementation(() => {});
+      vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+      await tm.init();
+
+      // Retry the task
+      const retried = tm.retryTask(DEFAULT_PROJECT_ID as any, "retry-token-task" as any);
+
+      // Token and repoUrl must be preserved after retry
+      expect(retried.data.githubToken).toBe("ghp_custom_token_from_user");
+      expect(retried.data.repoUrl).toBe("https://github.com/other-account/private-repo.git");
+      expect(retried.getGithubToken()).toBe("ghp_custom_token_from_user");
+      expect(retried.isDynamic).toBe(true);
+      expect(retried.data.status).toBe("queued");
+      expect(retried.data.attempt).toBe(2);
+    });
+
+    it("preserves githubToken after automatic errorRetry", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeDefaultConfig({
+        errorRetry: { maxAttempts: 3, delaySeconds: 0 },
+      });
+      const store = new TaskStore(TMP);
+
+      // Create a retrying dynamic task (auto-retry from errorRetry)
+      store.save(
+        makePersistedTask({
+          taskId: "auto-retry-task",
+          status: "retrying",
+          completedAt: null,
+          branch: "impl/auto-retry-test",
+          chainId: "chain-auto-retry",
+          repoUrl: "https://github.com/other-account/private-repo.git",
+          githubToken: "ghp_auto_retry_token",
+          attempt: 1,
+          nextRetryAt: new Date(Date.now() - 1000).toISOString(), // already elapsed
+        })
+      );
+
+      const tm = new TaskManager(config);
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({
+        slug: "test",
+        title: "Test",
+        estimatedDurationSeconds: 600,
+      });
+
+      const project = tm.config.projects[DEFAULT_PROJECT_ID as any];
+      project.initialize();
+      vi.spyOn(project, "initialize").mockImplementation(() => {});
+      vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+      await tm.init();
+
+      // The dequeueAvailableTasks() in init() should have promoted the retrying task
+      const task = tm.getTask("auto-retry-task" as any);
+      expect(task).toBeDefined();
+      // Token and repoUrl must still be present
+      expect(task!.data.githubToken).toBe("ghp_auto_retry_token");
+      expect(task!.data.repoUrl).toBe("https://github.com/other-account/private-repo.git");
+      expect(task!.getGithubToken()).toBe("ghp_auto_retry_token");
+    });
+
+    it("preserves githubToken in persisted JSON after retry", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeDefaultConfig();
+      const store = new TaskStore(TMP);
+
+      store.save(
+        makePersistedTask({
+          taskId: "persist-retry-task",
+          status: "failed",
+          completedAt: "2025-01-01T01:00:00.000Z",
+          branch: "impl/persist-retry",
+          chainId: "chain-persist-retry",
+          repoUrl: "https://github.com/org/repo.git",
+          githubToken: "ghp_persist_test",
+          attempt: 1,
+        })
+      );
+
+      const tm = new TaskManager(config);
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({
+        slug: "test",
+        title: "Test",
+        estimatedDurationSeconds: 600,
+      });
+
+      const project = tm.config.projects[DEFAULT_PROJECT_ID as any];
+      project.initialize();
+      vi.spyOn(project, "initialize").mockImplementation(() => {});
+      vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+      await tm.init();
+
+      // Retry the task
+      tm.retryTask(DEFAULT_PROJECT_ID as any, "persist-retry-task" as any);
+
+      // Simulate restart — verify token is persisted to disk
+      const config2 = makeDefaultConfig();
+      const tm2 = new TaskManager(config2);
+      const project2 = tm2.config.projects[DEFAULT_PROJECT_ID as any];
+      project2.initialize();
+      vi.spyOn(project2, "initialize").mockImplementation(() => {});
+      vi.spyOn(project2.pool, "hasFreeSlot").mockReturnValue(false);
+
+      await tm2.init();
+
+      const restored = tm2.getTask("persist-retry-task" as any);
+      expect(restored).toBeDefined();
+      expect(restored!.data.githubToken).toBe("ghp_persist_test");
+      expect(restored!.data.repoUrl).toBe("https://github.com/org/repo.git");
+    });
+  });
+
   describe("config schema allows empty repositories", () => {
     it("accepts a project with empty repositories array", async () => {
       const { ConfigSchema } = await import("../src/config/config-types.js");
