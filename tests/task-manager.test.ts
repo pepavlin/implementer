@@ -2574,4 +2574,46 @@ describe("TaskManager - waiting_for_pipeline chain blocking", () => {
       expect(ids).toEqual(["t-a", "t-b"]);
     });
   });
+
+  describe("orphaned project tasks", () => {
+    it("skips tasks whose project no longer exists in config", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const store = new TaskStore(makeConfig().server.workspaceDir);
+
+      // Save a task for the existing project and one for a removed project
+      store.save(makePersistedTask({ taskId: "valid-1", projectId: PROJECT_ID, status: "completed" }));
+      store.save(makePersistedTask({ taskId: "orphan-1", projectId: "removed-project", status: "completed" }));
+
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const config = makeConfig(); // only has PROJECT_ID
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      expect(tm.tasks.size).toBe(1);
+      expect(tm.tasks.has("valid-1" as any)).toBe(true);
+      expect(tm.tasks.has("orphan-1" as any)).toBe(false);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("orphan-1")
+      );
+    });
+
+    it("starts successfully when all persisted tasks belong to removed projects", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const store = new TaskStore(makeConfig().server.workspaceDir);
+
+      store.save(makePersistedTask({ taskId: "orphan-a", projectId: "gone-project", status: "queued" }));
+      store.save(makePersistedTask({ taskId: "orphan-b", projectId: "also-gone", status: "running" }));
+
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const config = makeConfig(); // only has PROJECT_ID, not "gone-project" or "also-gone"
+      const tm = new TaskManager(config);
+      await tm.init();
+
+      expect(tm.tasks.size).toBe(0);
+      expect(tm.queue).toHaveLength(0);
+    });
+  });
 });

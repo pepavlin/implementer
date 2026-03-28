@@ -65,14 +65,23 @@ export class TaskManager {
         // all tasks are in the queue before priority sorting happens.
         this._initializing = true;
         const persisted = this.store.loadAll();
+        let skipped = 0;
         for (const pt of persisted) {
+            if (!this.config.projects[pt.projectId]) {
+                console.warn(
+                    `[task-manager] Skipping task ${pt.taskId} — project "${pt.projectId}" no longer exists in config`
+                );
+                skipped++;
+                continue;
+            }
             const task = new Task(pt, this);
             this.tasks.set(pt.taskId, task);
             task.initialize();
         }
         this._initializing = false;
         console.log(
-            `[task-manager] Loaded ${persisted.length} persisted task(s) from disk`
+            `[task-manager] Loaded ${persisted.length - skipped} persisted task(s) from disk` +
+                (skipped > 0 ? ` (${skipped} skipped — orphaned project)` : "")
         );
 
         // Try to start any queued tasks (capacity may be available after resumption)
