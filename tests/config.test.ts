@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { Config } from "../src/config/config.js";
+import { Config, resolveEnvVars } from "../src/config/config.js";
 
 const TMP = join(import.meta.dirname, "..", "tmp", "config-test");
 
@@ -941,5 +941,189 @@ projects:
 
         const config = Config.load(path);
         expect(config.server.webhookSecret).toBe("global-secret-123");
+    });
+});
+
+describe("resolveEnvVars", () => {
+    it("resolves a single ${VAR} to its env value", () => {
+        process.env.TEST_RESOLVE_TOKEN = "ghp_abc123";
+        try {
+            expect(resolveEnvVars("${TEST_RESOLVE_TOKEN}")).toBe("ghp_abc123");
+        } finally {
+            delete process.env.TEST_RESOLVE_TOKEN;
+        }
+    });
+
+    it("returns undefined for a single ${VAR} when env var is unset", () => {
+        delete process.env.TEST_RESOLVE_MISSING;
+        expect(resolveEnvVars("${TEST_RESOLVE_MISSING}")).toBeUndefined();
+    });
+
+    it("resolves partial interpolation in strings", () => {
+        process.env.TEST_RESOLVE_HOST = "example.com";
+        try {
+            expect(resolveEnvVars("https://${TEST_RESOLVE_HOST}/api")).toBe(
+                "https://example.com/api"
+            );
+        } finally {
+            delete process.env.TEST_RESOLVE_HOST;
+        }
+    });
+
+    it("replaces unset vars with empty string in partial interpolation", () => {
+        delete process.env.TEST_RESOLVE_MISSING;
+        expect(resolveEnvVars("prefix-${TEST_RESOLVE_MISSING}-suffix")).toBe(
+            "prefix--suffix"
+        );
+    });
+
+    it("resolves multiple ${VAR} references in one string", () => {
+        process.env.TEST_RESOLVE_A = "hello";
+        process.env.TEST_RESOLVE_B = "world";
+        try {
+            expect(resolveEnvVars("${TEST_RESOLVE_A} ${TEST_RESOLVE_B}")).toBe(
+                "hello world"
+            );
+        } finally {
+            delete process.env.TEST_RESOLVE_A;
+            delete process.env.TEST_RESOLVE_B;
+        }
+    });
+
+    it("leaves plain strings unchanged", () => {
+        expect(resolveEnvVars("just a string")).toBe("just a string");
+    });
+
+    it("passes through non-string primitives", () => {
+        expect(resolveEnvVars(42)).toBe(42);
+        expect(resolveEnvVars(true)).toBe(true);
+        expect(resolveEnvVars(null)).toBeNull();
+    });
+
+    it("recursively resolves objects", () => {
+        process.env.TEST_RESOLVE_KEY = "secret";
+        try {
+            const result = resolveEnvVars({
+                auth: { token: "${TEST_RESOLVE_KEY}" },
+                name: "static"
+            }) as any;
+            expect(result.auth.token).toBe("secret");
+            expect(result.name).toBe("static");
+        } finally {
+            delete process.env.TEST_RESOLVE_KEY;
+        }
+    });
+
+    it("omits object keys whose value resolves to undefined", () => {
+        delete process.env.TEST_RESOLVE_MISSING;
+        const result = resolveEnvVars({
+            present: "value",
+            absent: "${TEST_RESOLVE_MISSING}"
+        }) as any;
+        expect(result.present).toBe("value");
+        expect("absent" in result).toBe(false);
+    });
+
+    it("resolves arrays", () => {
+        process.env.TEST_RESOLVE_ITEM = "resolved";
+        try {
+            const result = resolveEnvVars(["${TEST_RESOLVE_ITEM}", "static"]) as any;
+            expect(result).toEqual(["resolved", "static"]);
+        } finally {
+            delete process.env.TEST_RESOLVE_ITEM;
+        }
+    });
+});
+
+describe("Config.load with env var substitution", () => {
+    it("resolves ${VAR} in auth.githubToken", () => {
+        process.env.TEST_GH_TOKEN = "ghp_test_token_123";
+        try {
+            const path = writeYaml(
+                "config.yaml",
+                `
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+    auth:
+      githubToken: \${TEST_GH_TOKEN}
+`
+            );
+
+            const config = Config.load(path);
+            expect(config.projects["my-project"].data.auth?.githubToken).toBe(
+                "ghp_test_token_123"
+            );
+        } finally {
+            delete process.env.TEST_GH_TOKEN;
+        }
+    });
+
+    it("omits auth.githubToken when env var is unset", () => {
+        delete process.env.TEST_GH_TOKEN_MISSING;
+        const path = writeYaml(
+            "config.yaml",
+            `
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+    auth:
+      githubToken: \${TEST_GH_TOKEN_MISSING}
+`
+        );
+
+        const config = Config.load(path);
+        // githubToken should be absent (undefined), not the literal "${...}"
+        expect(config.projects["my-project"].data.auth?.githubToken).toBeUndefined();
+    });
+
+    it("resolves ${VAR} in server.adminPassword", () => {
+        process.env.TEST_ADMIN_PW = "s3cret";
+        try {
+            const path = writeYaml(
+                "config.yaml",
+                `
+server:
+  adminPassword: \${TEST_ADMIN_PW}
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+`
+            );
+
+            const config = Config.load(path);
+            expect(config.server.adminPassword).toBe("s3cret");
+        } finally {
+            delete process.env.TEST_ADMIN_PW;
+        }
+    });
+
+    it("resolves ${VAR} in server.webhookSecret", () => {
+        process.env.TEST_WEBHOOK = "whsec_abc";
+        try {
+            const path = writeYaml(
+                "config.yaml",
+                `
+server:
+  webhookSecret: \${TEST_WEBHOOK}
+projects:
+  my-project:
+    repositories:
+      - name: repo
+        url: https://github.com/test/repo.git
+`
+            );
+
+            const config = Config.load(path);
+            expect(config.server.webhookSecret).toBe("whsec_abc");
+        } finally {
+            delete process.env.TEST_WEBHOOK;
+        }
     });
 });
