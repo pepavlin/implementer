@@ -21,6 +21,18 @@ When creating a task via `POST /task`:
 
 The project must have no preconfigured repositories (`repositories: []`). If the project has repos configured, using `repoUrl` will return a 400 error.
 
+## GitHub Token Resolution
+
+The effective `githubToken` for a task is resolved at creation time using this priority chain:
+
+1. **Request-level token** — `githubToken` passed in the API request body (highest priority)
+2. **Chain-inherited token** — inherited from the chain tip when continuing a task chain
+3. **Project-level token** — `auth.githubToken` from the project config (fallback)
+
+The resolved token is stored on `task.data.githubToken` at creation time. This ensures the token is always explicitly available for retries, pipeline-fix tasks, PR polling, and persistence — without requiring each consumer to duplicate fallback logic.
+
+For backward compatibility, `task.getGithubToken()` still falls back to the project's `auth.githubToken` if the task data has no token (e.g. tasks persisted before this resolution was added).
+
 ## Credential Lifecycle
 
 The `githubToken` is stored on the task data (`task.data.githubToken`) and persisted to disk. It is used throughout the entire task lifecycle:
@@ -28,10 +40,10 @@ The `githubToken` is stored on the task data (`task.data.githubToken`) and persi
 1. **Workspace acquisition** — `pool.acquire()` passes the token to `ensureAllRepos()` and `resetToDefaultAll()` for git clone/fetch operations
 2. **Branch operations** — checkout, push, rebase all use the token via per-command git header injection (`http.extraHeader`)
 3. **PR creation** — the `gh` CLI receives the token via `GH_TOKEN` environment variable
-4. **PR polling** — the PR poller uses the task's token for checking PR state and pipeline checks
+4. **PR polling** — the PR poller uses the task's resolved token for checking PR state and pipeline checks
 5. **Retry** — both manual retry (`task.retry()`) and automatic errorRetry preserve the token
-6. **Chain continuation** — child tasks inherit `repoUrl` and `githubToken` from the chain tip
-7. **Pipeline fix tasks** — automatic pipeline-fix tasks forward the token from the failing task
+6. **Chain continuation** — child tasks inherit `repoUrl` and `githubToken` from the chain tip, falling back to project auth
+7. **Pipeline fix tasks** — automatic pipeline-fix tasks use `task.getGithubToken()` to pass the resolved token
 
 ## Workspace Reuse and Origin Verification
 

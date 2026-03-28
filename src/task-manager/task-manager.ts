@@ -252,7 +252,7 @@ export class TaskManager {
             pullRequests: task.data.pullRequests,
             status: task.data.status,
             pipelineWaitingSince: task.data.pipelineWaitingSince,
-            githubToken: task.data.githubToken
+            githubToken: task.getGithubToken()
         }));
     }
 
@@ -348,7 +348,7 @@ export class TaskManager {
                 continueTaskId: tipId,
                 priority: task.data.priority,
                 repoUrl: task.data.repoUrl,
-                githubToken: task.data.githubToken
+                githubToken: task.getGithubToken()
             });
             // Track how many pipeline retries have been used (based on the
             // failing task's counter, not the tip's, to honour retryCount correctly).
@@ -447,6 +447,15 @@ export class TaskManager {
             if (!githubToken && tipTask.data.githubToken) {
                 githubToken = tipTask.data.githubToken;
             }
+        }
+
+        // Fall back to the project-level auth.githubToken when no task-level
+        // or chain-inherited token is available. This ensures the resolved
+        // token is stored on the task data — making it available for retries,
+        // pipeline-fix continuations, and PR polling without requiring each
+        // consumer to duplicate fallback logic.
+        if (!githubToken && project.data.auth?.githubToken) {
+            githubToken = project.data.auth.githubToken;
         }
 
         const task = new Task(

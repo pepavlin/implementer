@@ -610,6 +610,248 @@ describe("Dynamic repository support", () => {
     });
   });
 
+  describe("project-level auth.githubToken resolution", () => {
+    it("resolves project auth.githubToken at task creation when no request token provided", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeDefaultConfig({
+        auth: { githubToken: "ghp_project_level_token" },
+      });
+      const tm = new TaskManager(config);
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({
+        slug: "test-slug",
+        title: "Test Task",
+        estimatedDurationSeconds: 300,
+      });
+      const project = tm.config.projects[DEFAULT_PROJECT_ID as any];
+      project.initialize();
+      vi.spyOn(project, "initialize").mockImplementation(() => {});
+      vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+      const task = tm.createNewTask(DEFAULT_PROJECT_ID as any, {
+        prompt: "Fix the bug",
+        repoUrl: "https://github.com/test/repo.git",
+      });
+
+      // Token should be resolved from project auth and stored on task data
+      expect(task.data.githubToken).toBe("ghp_project_level_token");
+      expect(task.getGithubToken()).toBe("ghp_project_level_token");
+    });
+
+    it("request-level githubToken overrides project auth.githubToken", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeDefaultConfig({
+        auth: { githubToken: "ghp_project_level_token" },
+      });
+      const tm = new TaskManager(config);
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({
+        slug: "test-slug",
+        title: "Test Task",
+        estimatedDurationSeconds: 300,
+      });
+      const project = tm.config.projects[DEFAULT_PROJECT_ID as any];
+      project.initialize();
+      vi.spyOn(project, "initialize").mockImplementation(() => {});
+      vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+      const task = tm.createNewTask(DEFAULT_PROJECT_ID as any, {
+        prompt: "Fix the bug",
+        repoUrl: "https://github.com/test/repo.git",
+        githubToken: "ghp_request_override_token",
+      });
+
+      // Request-level token should take precedence
+      expect(task.data.githubToken).toBe("ghp_request_override_token");
+      expect(task.getGithubToken()).toBe("ghp_request_override_token");
+    });
+
+    it("preserves project-resolved githubToken after manual retry", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeDefaultConfig({
+        auth: { githubToken: "ghp_project_level_token" },
+      });
+      const store = new TaskStore(TMP);
+
+      // Create a failed task whose githubToken was resolved from project auth
+      store.save(
+        makePersistedTask({
+          taskId: "project-token-retry",
+          status: "failed",
+          completedAt: "2025-01-01T01:00:00.000Z",
+          branch: "impl/retry-project-token",
+          chainId: "chain-pt-retry",
+          repoUrl: "https://github.com/org/repo.git",
+          githubToken: "ghp_project_level_token",
+          attempt: 1,
+        })
+      );
+
+      const tm = new TaskManager(config);
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({
+        slug: "test",
+        title: "Test",
+        estimatedDurationSeconds: 600,
+      });
+
+      const project = tm.config.projects[DEFAULT_PROJECT_ID as any];
+      project.initialize();
+      vi.spyOn(project, "initialize").mockImplementation(() => {});
+      vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+      await tm.init();
+
+      const retried = tm.retryTask(DEFAULT_PROJECT_ID as any, "project-token-retry" as any);
+
+      expect(retried.data.githubToken).toBe("ghp_project_level_token");
+      expect(retried.getGithubToken()).toBe("ghp_project_level_token");
+      expect(retried.data.status).toBe("queued");
+      expect(retried.data.attempt).toBe(2);
+    });
+
+    it("chain continuation inherits resolved project token from parent", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeDefaultConfig({
+        auth: { githubToken: "ghp_project_level_token" },
+      });
+      const store = new TaskStore(TMP);
+
+      // Parent task whose token was resolved from project auth
+      store.save(
+        makePersistedTask({
+          taskId: "parent-project-token",
+          status: "completed",
+          branch: "impl/feature-pt",
+          chainId: "chain-pt",
+          repoUrl: "https://github.com/org/repo.git",
+          githubToken: "ghp_project_level_token",
+        })
+      );
+
+      const tm = new TaskManager(config);
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({
+        slug: "test",
+        title: "Test",
+        estimatedDurationSeconds: 600,
+      });
+
+      const project = tm.config.projects[DEFAULT_PROJECT_ID as any];
+      project.initialize();
+      vi.spyOn(project, "initialize").mockImplementation(() => {});
+      vi.spyOn(project.pool, "acquire").mockRejectedValue(new Error("no capacity"));
+
+      await tm.init();
+
+      const child = tm.createNewTask(DEFAULT_PROJECT_ID as any, {
+        prompt: "Continue work",
+        continueTaskId: "parent-project-token" as any,
+      });
+
+      // Child should inherit parent's resolved token
+      expect(child.data.githubToken).toBe("ghp_project_level_token");
+      expect(child.getGithubToken()).toBe("ghp_project_level_token");
+    });
+
+    it("preserves resolved project token across persistence and restart", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+      const config = makeDefaultConfig({
+        auth: { githubToken: "ghp_project_level_token" },
+      });
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({
+        slug: "test-slug",
+        title: "Test Task",
+        estimatedDurationSeconds: 300,
+      });
+
+      const tm1 = new TaskManager(config);
+      const project1 = tm1.config.projects[DEFAULT_PROJECT_ID as any];
+      project1.initialize();
+      vi.spyOn(project1, "initialize").mockImplementation(() => {});
+      vi.spyOn(project1.pool, "hasFreeSlot").mockReturnValue(false);
+
+      const task = tm1.createNewTask(DEFAULT_PROJECT_ID as any, {
+        prompt: "Dynamic task with project token",
+        repoUrl: "https://github.com/test/repo.git",
+      });
+
+      expect(task.data.githubToken).toBe("ghp_project_level_token");
+
+      // Simulate restart
+      const config2 = makeDefaultConfig({
+        auth: { githubToken: "ghp_project_level_token" },
+      });
+      const tm2 = new TaskManager(config2);
+      const project2 = tm2.config.projects[DEFAULT_PROJECT_ID as any];
+      project2.initialize();
+      vi.spyOn(project2, "initialize").mockImplementation(() => {});
+      vi.spyOn(project2.pool, "hasFreeSlot").mockReturnValue(false);
+
+      await tm2.init();
+
+      const restored = tm2.getTask(task.id);
+      expect(restored).toBeDefined();
+      expect(restored!.data.githubToken).toBe("ghp_project_level_token");
+      expect(restored!.getGithubToken()).toBe("ghp_project_level_token");
+    });
+
+    it("project with preconfigured repos resolves auth.githubToken at task creation", async () => {
+      const { TaskManager } = await import("../src/task-manager/task-manager.js");
+      const { Executor } = await import("../src/executor.js");
+
+      const serverConfig = {
+        workspaceDir: TMP,
+        maxConcurrentTasks: 3,
+        metaCpus: 0.4,
+        sandboxCpus: 0.4,
+      };
+
+      const config = {
+        server: serverConfig,
+        projects: {} as Record<string, Project>,
+        configPath: join(TMP, "config.yaml"),
+      } as Config;
+
+      config.projects["myproject" as any] = new Project(
+        {
+          repositories: [
+            { name: "my-repo", url: "https://github.com/org/my-repo.git", defaultBranch: "main" },
+          ],
+          claudeCode: { command: "claude" },
+          apiKey: "myproject-key",
+          auth: { githubToken: "ghp_preconfigured_token" },
+        } as ProjectConfig,
+        "myproject" as any,
+        config
+      );
+
+      const tm = new TaskManager(config);
+
+      vi.spyOn(Executor.prototype, "generateTaskMetadata").mockResolvedValue({
+        slug: "test-slug",
+        title: "Test",
+        estimatedDurationSeconds: 300,
+      });
+      const project = tm.config.projects["myproject" as any];
+      project.initialize();
+      vi.spyOn(project, "initialize").mockImplementation(() => {});
+      vi.spyOn(project.pool, "hasFreeSlot").mockReturnValue(false);
+
+      const task = tm.createNewTask("myproject" as any, {
+        prompt: "Fix the bug",
+      });
+
+      // Token should be resolved from project auth even for preconfigured repos
+      expect(task.data.githubToken).toBe("ghp_preconfigured_token");
+      expect(task.getGithubToken()).toBe("ghp_preconfigured_token");
+    });
+  });
+
   describe("persistence", () => {
     it("persists and restores dynamic repo fields across restart", async () => {
       const { TaskManager } = await import("../src/task-manager/task-manager.js");
