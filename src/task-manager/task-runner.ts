@@ -111,7 +111,8 @@ export async function executeTask(task: Task): Promise<void> {
             fullPrompt,
             volumeMount,
             workdir,
-            task.id
+            task.id,
+            githubToken
         );
 
         task.data.output = result.output;
@@ -138,7 +139,7 @@ export async function executeTask(task: Task): Promise<void> {
                 `[${task.id}] Uncommitted changes detected, asking Claude to commit...`
             );
             const commitPrompt = `You have uncommitted changes in the workspace. Stage all changes with "git add" and commit them with a clear conventional commit message. Do NOT push.`;
-            await executor.run(commitPrompt, volumeMount, workdir, task.id);
+            await executor.run(commitPrompt, volumeMount, workdir, task.id, githubToken);
         }
 
         // Step 6: Revert any changes to protected paths before creating the PR.
@@ -184,7 +185,7 @@ export async function executeTask(task: Task): Promise<void> {
                     `[${task.id}] Rebase conflicts in ${conflicted.map((r) => r.name).join(", ")} — asking Claude to resolve...`
                 );
                 const rebasePrompt = `Some repositories need rebasing with conflict resolution:\n${repoInstructions}\nResolve every conflict by keeping the intent of your changes while incorporating the upstream updates. Do NOT push.`;
-                await executor.run(rebasePrompt, volumeMount, workdir, task.id);
+                await executor.run(rebasePrompt, volumeMount, workdir, task.id, githubToken);
             }
         }
 

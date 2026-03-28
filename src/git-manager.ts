@@ -16,7 +16,8 @@ function git(args: string[], cwd: string, githubToken?: string): Promise<string>
           ...args,
         ]
       : args;
-    execFile("git", fullArgs, { cwd, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+    const env = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
+    execFile("git", fullArgs, { cwd, env, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(`git ${args.join(" ")} failed: ${stderr || error.message}`));
       } else {

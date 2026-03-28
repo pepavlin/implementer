@@ -29,3 +29,5 @@ The effective `githubToken` for a task is resolved at creation time in `createNe
 3. Project-level `auth.githubToken` from config (fallback)
 
 The resolved token is stored on `task.data.githubToken`. For backward compatibility, `task.getGithubToken()` still falls back to project auth.
+
+The token is passed into the sandbox Docker container as `GITHUB_TOKEN` env var via `executor.run()`, where the Dockerfile's credential helper (`git-credential-env`) reads it at runtime for git operations performed by Claude inside the container.

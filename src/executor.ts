@@ -268,7 +268,7 @@ Task: ${prompt}`,
    * and the returned exit code will be non-zero, causing the task to be marked as failed
    * and triggering the configured retry logic.
    */
-  async run(prompt: string, volumeMount: string, workdir = "/workspace", taskId?: string): Promise<ExecutorResult> {
+  async run(prompt: string, volumeMount: string, workdir = "/workspace", taskId?: string, githubToken?: string): Promise<ExecutorResult> {
     this.output = "";
 
     const creds = await this.tokenManager.getCredentials();
@@ -300,6 +300,9 @@ Task: ${prompt}`,
       "-v", volumeMount,
       "-w", workdir,
       "-e", `${creds.envName}=${creds.value}`,
+      ...(githubToken
+        ? ["-e", `GITHUB_TOKEN=${githubToken}`]
+        : []),
       ...(this.config.maxOutputTokens
         ? ["-e", `CLAUDE_CODE_MAX_OUTPUT_TOKENS=${this.config.maxOutputTokens}`]
         : []),
