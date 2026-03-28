@@ -11,6 +11,47 @@ import { NotFoundError, UnauthorizedError } from "../errors";
 import { ProjectId } from "../types";
 import { Project } from "./project";
 
+const ENV_VAR_PATTERN = /\$\{([^}]+)\}/g;
+
+/**
+ * Recursively resolve ${ENV_VAR} references in a parsed YAML object.
+ * - If a string is exactly "${VAR}" and the env var is unset, returns undefined
+ *   (so optional fields are treated as absent rather than empty).
+ * - If a string contains ${VAR} as part of a larger value, unset vars resolve to "".
+ */
+export function resolveEnvVars(value: unknown): unknown {
+    if (typeof value === "string") {
+        // Check if the entire string is a single ${VAR} reference
+        const singleMatch = /^\$\{([^}]+)\}$/.exec(value);
+        if (singleMatch) {
+            const envVal = process.env[singleMatch[1]];
+            return envVal !== undefined ? envVal : undefined;
+        }
+        // Partial interpolation: replace each ${VAR}, unset vars become ""
+        if (ENV_VAR_PATTERN.test(value)) {
+            return value.replace(ENV_VAR_PATTERN, (_, varName) =>
+                process.env[varName] ?? ""
+            );
+        }
+        return value;
+    }
+    if (Array.isArray(value)) {
+        return value.map(resolveEnvVars);
+    }
+    if (value !== null && typeof value === "object") {
+        const result: Record<string, unknown> = {};
+        for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+            const resolved = resolveEnvVars(val);
+            // Omit keys whose value resolved to undefined (unset env var)
+            if (resolved !== undefined) {
+                result[key] = resolved;
+            }
+        }
+        return result;
+    }
+    return value;
+}
+
 export class Config {
     server: ServerConfig & {
         maxConcurrentTasks: number;
@@ -47,7 +88,8 @@ export class Config {
         const resolvedPath = resolve(this.configPath ?? "config.yaml");
         const raw = readFileSync(resolvedPath, "utf-8");
         const parsed = yaml.load(raw);
-        const validated = ConfigSchema.parse(parsed);
+        const resolved = resolveEnvVars(parsed);
+        const validated = ConfigSchema.parse(resolved);
 
         // Resolve workspaceDir to absolute path relative to config file location
         validated.server.workspaceDir = resolve(
@@ -162,6 +204,7 @@ export function validateConfigFile(configPath: string): {
     const resolvedPath = resolve(configPath);
     const raw = readFileSync(resolvedPath, "utf-8");
     const parsed = yaml.load(raw);
-    const validated = ConfigSchema.parse(parsed);
+    const resolved = resolveEnvVars(parsed);
+    const validated = ConfigSchema.parse(resolved);
     return { server: validated.server, projects: validated.projects };
 }
