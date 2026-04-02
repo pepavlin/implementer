@@ -109,6 +109,19 @@ Tasks carry two distinct timestamp fields for tracking when work began:
 
 If estimation fails (Docker error, non-numeric response), the system defaults to **600 seconds**.
 
+## Git Authentication & Error Resilience
+
+Tasks that use HTTPS repository URLs require a valid GitHub token for remote git operations (fetch, push, PR creation). The token can be configured via:
+- `auth.githubToken` in the project config (recommended)
+- `githubToken` field in the task request payload (for dynamic repos)
+
+**Early warning:** If HTTPS repos are detected without a GitHub token, a warning is logged at the start of task execution. This helps identify misconfiguration before the task runs.
+
+**Resilient post-execution flow:** After Claude finishes its work, the system performs several git operations (rebase, push, PR creation). These operations are designed to be resilient:
+- **Rebase fetch failure:** If `git fetch origin` fails during the rebase step (e.g., invalid/missing token), the rebase is skipped for that repo and the system continues with push and PR creation. The commits are pushed as-is without rebasing.
+- **Early branch push:** The initial push after branch creation (before Claude runs) is non-fatal — if it fails, execution continues.
+- **Force push:** `--force-with-lease` is only used when rebase actually rewrote history. If rebase was skipped (e.g., due to fetch failure), a regular push is used instead.
+
 ## Known Limitations
 
 - `timeoutSeconds` governs each individual `executor.run()` call. A single task execution may involve multiple `run()` calls (main run + commit fix + rebase conflict resolution). Each call has its own timer.

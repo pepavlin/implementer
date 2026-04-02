@@ -265,9 +265,10 @@ export class GitManager {
     repos: RepositoryConfig[],
     branchName: string,
     githubToken?: string,
-  ): Promise<{ rebased: string[]; conflicted: RepositoryConfig[] }> {
+  ): Promise<{ rebased: string[]; conflicted: RepositoryConfig[]; fetchFailed: string[] }> {
     const rebased: string[] = [];
     const conflicted: RepositoryConfig[] = [];
+    const fetchFailed: string[] = [];
 
     for (const repo of repos) {
       const repoDir = this.getRepoDir(baseDir, repo.name);
@@ -279,7 +280,17 @@ export class GitManager {
         continue;
       }
 
-      await git(["fetch", "origin"], repoDir, githubToken);
+      try {
+        await git(["fetch", "origin"], repoDir, githubToken);
+      } catch (err) {
+        // Fetch failed (e.g. missing/invalid GitHub token) — skip rebase for this repo
+        // but don't block the rest of the post-execution flow (push, PR creation).
+        console.warn(
+          `[git-manager] Fetch failed in ${repo.name}, skipping rebase: ${err instanceof Error ? err.message : String(err)}`
+        );
+        fetchFailed.push(repo.name);
+        continue;
+      }
 
       try {
         await git(["rebase", `origin/${repo.defaultBranch}`], repoDir);
@@ -295,7 +306,7 @@ export class GitManager {
       }
     }
 
-    return { rebased, conflicted };
+    return { rebased, conflicted, fetchFailed };
   }
 
   /**
